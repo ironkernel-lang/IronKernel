@@ -1,0 +1,153 @@
+; Tests for IronKernel.Amb.
+;
+; `ik test` loads src/ then this file, and counts the file as failing if
+; evaluating it raises. Failures are tallied so that every check runs, then the
+; last form references an unbound name to fail the run and point at the tally.
+
+(define failures (make-vector 1 0))
+
+(defn (check name ok)
+  (if ok
+    (printf "  ok    {0}\n" name)
+    (begin
+      (printf "  FAIL  {0}\n" name)
+      (vector-set! failures 0 (+ (vector-ref failures 0) 1)))))
+
+(defn (list-equal? xs ys)
+  (if (null? xs)
+    (null? ys)
+    (if (null? ys) #f
+      (if (eq? (car xs) (car ys)) (list-equal? (cdr xs) (cdr ys)) #f))))
+
+; --- choice points ----------------------------------------------------------
+
+(check "amb enumerates a list"
+  (list-equal? (collect (emit (amb (list 1 2 3)))) (list 1 2 3)))
+
+(check "amb over () fails"
+  (null? (collect (emit (amb ())))))
+
+(check "nested amb takes the cross product"
+  (eq? 4 (length (collect (let ((a (amb (list 1 2))))
+                            (let ((b (amb (list 10 20))))
+                              (emit (cons a b))))))))
+
+(check "amb-range enumerates a half-open interval"
+  (list-equal? (collect (emit (amb-range 2 5))) (list 2 3 4)))
+
+(check "require prunes a branch"
+  (list-equal? (collect (let ((a (amb-range 0 10)))
+                          (require (< a 3))
+                          (emit a)))
+               (list 0 1 2)))
+
+(check "fail abandons a branch"
+  (list-equal? (collect (let ((a (amb (list 1 2 3))))
+                          (if (eq? a 2) (fail) #inert)
+                          (emit a)))
+               (list 1 3)))
+
+; --- strategies -------------------------------------------------------------
+
+(check "count-of tallies solutions"
+  (eq? 4 (count-of (emit (amb-range 0 4)))))
+
+(check "first-of returns the first solution"
+  (eq? 6 (first-of (let ((a (amb (list 5 6 7))))
+                     (require (> a 5))
+                     (emit a)))))
+
+(check "first-of returns () when there is none"
+  (null? (first-of (let ((a (amb (list 1 2)))) (fail) (emit a)))))
+
+(check "search accepts a custom handler"
+  (let ((total (make-vector 1 0)))
+    (search (lambda (s) (vector-set! total 0 (+ (vector-ref total 0) s)))
+      (emit (amb-range 1 5)))
+    (eq? 10 (vector-ref total 0))))
+
+(check "emit outside a strategy is a no-op"
+  (begin (emit 'ignored) #t))
+
+(check "strategies nest"
+  (list-equal? (collect (let ((a (amb-range 0 3)))
+                          (emit (count-of (emit (amb-range 0 a))))))
+               (list 0 1 2)))
+
+; --- bracketed choice -------------------------------------------------------
+
+(define st (make-vector 1 0))
+
+(defn (bump v) (vector-set! st 0 (+ (vector-ref st 0) v)))
+(defn (drop v) (vector-set! st 0 (- (vector-ref st 0) v)))
+
+(check "amb-bracket exposes state to the continuation"
+  (list-equal? (collect (let ((x (amb-bracket (list 1 2 3)
+                                              (lambda (v) #t) bump drop)))
+                          (emit (vector-ref st 0))))
+               (list 1 2 3)))
+
+(check "amb-bracket restores state afterwards"
+  (zero? (vector-ref st 0)))
+
+(check "amb-bracket honours its guard"
+  (list-equal? (collect (let ((x (amb-bracket (list 1 2 3 4)
+                                              (lambda (v) (< v 3)) bump drop)))
+                          (emit x)))
+               (list 1 2)))
+
+(check "amb-bracket-range brackets nested choices"
+  (let ((seen (collect (let ((a (amb-bracket-range 1 4
+                                  (lambda (v) #t) bump drop)))
+                         (let ((b (amb-bracket-range 1 4
+                                    (lambda (v) (> v a)) bump drop)))
+                           (emit (vector-ref st 0)))))))
+    ; a+b over 1<=a<b<=3: 1+2, 1+3, 2+3
+    (if (list-equal? seen (list 3 4 5)) (zero? (vector-ref st 0)) #f)))
+
+; --- integration: n-queens --------------------------------------------------
+;
+; Constant width 1 in the sense of Examples/constant-width-amb.ikr: one queen
+; per row, no two sharing a column or a diagonal.
+
+(defn (queens n)
+  (let ((col (make-vector n 0))
+        (d1 (make-vector (- (* 2 n) 1) 0))
+        (d2 (make-vector (- (* 2 n) 1) 0))
+        (acc (make-vector 1 ())))
+    (letrec
+      ((i1 (lambda (x y) (+ x y)))
+       (i2 (lambda (x y) (- (+ n (- x y)) 1)))
+       (free? (lambda (x y)
+                (if (zero? (vector-ref col y))
+                  (if (zero? (vector-ref d1 (i1 x y)))
+                    (zero? (vector-ref d2 (i2 x y)))
+                    #f)
+                  #f)))
+       (mark! (lambda (x y d)
+                (vector-set! col y (+ (vector-ref col y) d))
+                (vector-set! d1 (i1 x y) (+ (vector-ref d1 (i1 x y)) d))
+                (vector-set! d2 (i2 x y) (+ (vector-ref d2 (i2 x y)) d))))
+       (enter! (lambda (x) (lambda (y)
+                 (mark! x y 1)
+                 (vector-set! acc 0 (cons y (vector-ref acc 0))))))
+       (leave! (lambda (x) (lambda (y)
+                 (mark! x y -1)
+                 (vector-set! acc 0 (cdr (vector-ref acc 0))))))
+       (go (lambda (x)
+             (if (eq? x n)
+               (emit (vector-ref acc 0))
+               (let ((y (amb-bracket-range 0 n
+                          (lambda (c) (free? x c))
+                          (enter! x)
+                          (leave! x))))
+                 (go (+ x 1)))))))
+      (go 0))))
+
+(check "6-queens has 4 solutions"  (eq? 4  (count-of (queens 6))))
+(check "5-queens has 10 solutions" (eq? 10 (count-of (queens 5))))
+(check "queens leaves no state behind"
+  (eq? 6 (length (first-of (queens 6)))))
+
+(printf "\n{0} failure(s)\n" (vector-ref failures 0))
+(if (zero? (vector-ref failures 0)) #inert (amb-tests-failed))
