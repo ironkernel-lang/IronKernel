@@ -1,0 +1,434 @@
+; Figures of constant width, second take: nondeterminism and algebra
+; ==================================================================
+;
+; `constant-width.ikr` transcribes the backtracking search from
+;
+;   https://ademar.name/blog/2009/04/finding-figures-of-constant-wi.html
+;
+; faithfully, continuation-passing style and all. This file attacks the same
+; problem -- see that file, or the Hernandez-Robert paper it cites, for what a
+; figure of constant width is -- from two directions that suit IronKernel
+; rather than F#.
+;
+; 1. Backtracking is not a program shape here, it is a library.
+;
+;    `shift`/`reset` in IronKernel are multi-shot and re-delimiting, which is
+;    exactly what a nondeterministic `amb` needs: a choice point invokes the
+;    captured continuation once per alternative. So the solver is written in
+;    *direct style* -- `(let ((c (pick-column x lo hi))) ...)` reads as "let c
+;    be a column", and the enumeration, the undo of the board state, and the
+;    pruning all happen inside `pick-column`. There is not one explicit
+;    continuation argument in the search.
+;
+;    The other half of that split is that the *strategy* becomes a value. The
+;    solver only ever calls `emit`; two operatives decide what that means:
+;    `collect` gathers every solution, `first-of` escapes with the first one
+;    through `call/cc`. Same solver, different searches, chosen at the call
+;    site. Adding a "first 10" or a randomized strategy is a handler, not a
+;    rewrite.
+;
+;    A consequence worth stating: this solver enumerates figures of *exactly*
+;    type (n,k,w), disconnected ones included. The original algorithm grows a
+;    figure outward from a seed square and so can only ever find connected
+;    figures -- it explicitly cannot solve the n-queens problem, which is the
+;    w=1 case. This one can, and `(figures 8 8 1)` returning 92 is the check.
+;
+; 2. For width 3 and up, do not search at all -- build.
+;
+;    The paper's Lemma 1 says that composing an *extended* constant width
+;    figure with any constant width figure multiplies the widths, and that a
+;    figure decomposable into transversals stays decomposable. That is a
+;    constructive recipe, and it is far cheaper than search: the original
+;    program needed about 31 days to exhaust width 3 on an 11x11 board, whereas
+;    composing the paper's Figure 3 with its Figure 2 and deleting a transversal
+;    produces a width 3 figure in milliseconds. Widths 4 and 8 come out of the
+;    same handful of lines, and peeling the width 8 one twice reaches width 6 --
+;    which the paper reports its authors never managed to find by search.
+;
+;    `transversal` is itself written against the `amb` layer from part 1, so
+;    the same three-line nondeterminism library drives both halves of the file.
+;
+; Run it:
+;
+;   dotnet run --project IronKernel -- Examples/constant-width-amb.ikr
+;
+; Takes about half a minute, nearly all of it in the 8-queens enumeration --
+; the constructive half of the file runs in milliseconds. Requires the default
+; `unrestricted` profile (it prints to the host console).
+;
+; Everything printed is checked by `fig-type`, which shares no code with the
+; searcher or the builders. The searcher's counts also agree with an
+; independent exhaustive row-by-row search: 92 and 4 for 8- and 6-queens, and
+; 1, 5, 2, 24, 30 figures of type (4,4,2), (5,4,2), (6,6,2), (7,6,2), (8,8,2).
+
+; ---------------------------------------------------------------------------
+; 1. Nondeterminism as a library
+; ---------------------------------------------------------------------------
+
+(defn (reverse xs)
+  (letrec ((loop (lambda (l acc)
+                   (if (null? l) acc (loop (cdr l) (cons (car l) acc))))))
+    (loop xs ())))
+
+; The solution sink. Nondeterministic code calls `emit`; what that does is
+; whatever the enclosing strategy installed.
+(define sink (make-vector 1 (lambda (s) #inert)))
+(defn (emit s) ((vector-ref sink 0) s))
+
+; Abandon this branch: capture the continuation up to the delimiter and drop
+; it, so control returns to the most recent choice point.
+(defn (fail) (shift (lambda (k) #inert)))
+
+; Yield each element of xs in turn. `k` is multi-shot and re-delimits, so the
+; whole remaining computation runs once per alternative.
+(defn (amb xs) (shift (lambda (k) (for-each xs k))))
+
+; Strategy 1: run body, return the list of everything it emitted.
+(define collect
+  (vau body env
+    (let ((acc (make-vector 1 ())) (saved (vector-ref sink 0)))
+      (vector-set! sink 0
+        (lambda (s) (vector-set! acc 0 (cons s (vector-ref acc 0)))))
+      (reset (eval env (cons sequence body)))
+      (vector-set! sink 0 saved)
+      (reverse (vector-ref acc 0)))))
+
+; Strategy 2: stop at the first emission and escape with it, or () if there is
+; none. The whole search tree below the first hit is never explored.
+(define first-of
+  (vau body env
+    (let ((saved (vector-ref sink 0)))
+      (let ((r (call/cc (lambda (return)
+                          (vector-set! sink 0 (lambda (s) (return s)))
+                          (reset (eval env (cons sequence body)))
+                          ()))))
+        (vector-set! sink 0 saved)
+        r))))
+
+; ---------------------------------------------------------------------------
+; 2. The solver: emit every figure of exactly type (n, k, w)
+;
+; Rows are decided in order. Each row is either skipped or given exactly w
+; columns, and a row's squares are chosen left to right. Every line carries a
+; count of squares placed on it so far; a line is legal at the end when that
+; count is 0 or w, and legal in the middle when the shortfall still fits in the
+; rows below.
+; ---------------------------------------------------------------------------
+
+(defn (figures n k w)
+  (define col (make-vector n 0))
+  (define pd  (make-vector (- (* 2 n) 1) 0))
+  (define nd  (make-vector (- (* 2 n) 1) 0))
+  (define fig (make-vector 1 ()))
+
+  (defn (pdx x y) (+ x y))
+  (defn (ndx x y) (- (+ n (- x y)) 1))
+
+  (defn (free? x y)
+    (if (< (vector-ref col y) w)
+      (if (< (vector-ref pd (pdx x y)) w)
+        (< (vector-ref nd (ndx x y)) w)
+        #f)
+      #f))
+
+  (defn (bump! x y d)
+    (vector-set! col y (+ (vector-ref col y) d))
+    (vector-set! pd (pdx x y) (+ (vector-ref pd (pdx x y)) d))
+    (vector-set! nd (ndx x y) (+ (vector-ref nd (ndx x y)) d)))
+
+  (defn (place! x y)
+    (bump! x y 1)
+    (vector-set! fig 0 (cons (cons x y) (vector-ref fig 0))))
+
+  (defn (unplace! x y)
+    (bump! x y -1)
+    (vector-set! fig 0 (cdr (vector-ref fig 0))))
+
+  ; The one choice point of the search. Each legal column in [lo,hi) is placed,
+  ; offered to the continuation, and taken back once that continuation has run
+  ; to exhaustion -- so the board is always consistent with the caller's view,
+  ; and the caller never sees a continuation at all.
+  (defn (pick-column x lo hi)
+    (shift (lambda (k)
+      (letrec ((loop (lambda (c)
+                       (if (< c hi)
+                         (begin
+                           (if (free? x c)
+                             (begin (place! x c) (k c) (unplace! x c))
+                             #inert)
+                           (loop (+ c 1)))
+                         #inert))))
+        (loop lo)))))
+
+  ; `need` more squares in row x, all in columns >= y. Reads as a loop; is a
+  ; tree.
+  (defn (fill-row x y need)
+    (if (zero? need)
+      #inert
+      (let ((c (pick-column x y (+ (- n need) 1))))
+        (fill-row x (+ c 1) (- need 1)))))
+
+  ; How many cells of diagonal `d` lie in rows x..n-1. Both diagonal families
+  ; are indexed so that this one formula serves for each.
+  (defn (cells-from d x)
+    (let ((lo (if (> x (- d (- n 1))) x (- d (- n 1))))
+          (hi (if (< (- n 1) d) (- n 1) d)))
+      (if (< hi lo) 0 (+ (- hi lo) 1))))
+
+  ; A line is still viable if it is untouched, already full, or short by no
+  ; more than the cells it has left. At x = n this is the 0-or-w test.
+  (defn (line-ok? used avail)
+    (if (zero? used) #t (if (eq? used w) #t (<= (- w used) avail))))
+
+  (define ndiags (- (* 2 n) 1))
+
+  (defn (feasible? x)
+    (let ((rowsleft (- n x)))
+      (letrec
+        ((cols (lambda (c)
+                 (if (eq? c n) #t
+                   (if (line-ok? (vector-ref col c) rowsleft)
+                     (cols (+ c 1)) #f))))
+         ; both diagonal families share an index, so one `cells-from` serves
+         ; the pair
+         (diags (lambda (d)
+                  (if (eq? d ndiags) #t
+                    (let ((a (cells-from d x)))
+                      (if (line-ok? (vector-ref pd d) a)
+                        (if (line-ok? (vector-ref nd d) a)
+                          (diags (+ d 1)) #f)
+                        #f))))))
+        (if (cols 0) (diags 0) #f))))
+
+  (defn (solve x placed)
+    (if (eq? x n)
+      ; every row decided: the figure must have k filled rows and no line may
+      ; be left part-way
+      (if (eq? placed k)
+        (if (feasible? n) (emit (vector-ref fig 0)) (fail))
+        (fail))
+      (begin
+        (if (< (- n x) (- k placed)) (fail) #inert)   ; too few rows left
+        (if (feasible? x) #inert (fail))
+        (if (amb (list #t #f))
+          (begin (if (< placed k) #inert (fail))
+                 (fill-row x 0 w)
+                 (solve (+ x 1) (+ placed 1)))
+          (solve (+ x 1) placed)))))
+
+  (solve 0 0))
+
+; ---------------------------------------------------------------------------
+; 3. Figures as an abstract type, and the constant width test
+; ---------------------------------------------------------------------------
+
+(provide! (figure figure? fig-n fig-squares)
+  (define (enc figure? dec) (make-encapsulation-type))
+  (define figure (lambda (n squares) (enc (list n squares))))
+  (define fig-n (lambda (f) (car (dec f))))
+  (define fig-squares (lambda (f) (cadr (dec f)))))
+
+(defn (tally! v i) (vector-set! v i (+ (vector-ref v i) 1)))
+
+; (n k w) when f has constant width, () otherwise. Everything this file builds
+; is checked with this, and it shares no code with the builders.
+(defn (fig-type f)
+  (let* ((n (fig-n f)) (s (fig-squares f)) (m (- (* 2 n) 1))
+         (rw (make-vector n 0)) (cl (make-vector n 0))
+         (pd (make-vector m 0)) (nd (make-vector m 0)))
+    (for-each s (lambda (p)
+      (tally! rw (car p))
+      (tally! cl (cdr p))
+      (tally! pd (+ (car p) (cdr p)))
+      (tally! nd (- (+ n (- (car p) (cdr p))) 1))))
+    ; fold the four families together: every non-zero count must agree
+    (letrec ((scan (lambda (v i len w)
+                     (if (eq? i len) w
+                       (let ((c (vector-ref v i)))
+                         (if (zero? c) (scan v (+ i 1) len w)
+                           (if (zero? w) (scan v (+ i 1) len c)
+                             (if (eq? c w) (scan v (+ i 1) len w) -1))))))))
+      (let* ((w1 (scan rw 0 n 0)) (w2 (scan cl 0 n w1))
+             (w3 (scan pd 0 m w2)) (w (scan nd 0 m w3)))
+        (if (< w 1) () (list n (/ (length s) w) w))))))
+
+; `/` truncates toward zero, so fold the negative case back by hand.
+(defn (modulo a m) (let ((r (- a (* m (/ a m))))) (if (< r 0) (+ r m) r)))
+
+; Extended constant width: the diagonals wrap around the board, so the lines
+; are i+j and i-j taken mod n. Lemma 1 needs this of its left operand.
+(defn (extended? f)
+  (let* ((n (fig-n f)) (s (fig-squares f))
+         (p (make-vector n 0)) (q (make-vector n 0)))
+    (for-each s (lambda (sq)
+      (tally! p (modulo (+ (car sq) (cdr sq)) n))
+      (tally! q (modulo (- (car sq) (cdr sq)) n))))
+    (let ((t (fig-type f)))
+      (if (null? t) #f
+        (let ((w (car (cddr t))))
+          (letrec ((ok (lambda (v i)
+                         (if (eq? i n) #t
+                           (let ((c (vector-ref v i)))
+                             (if (zero? c) (ok v (+ i 1))
+                               (if (eq? c w) (ok v (+ i 1)) #f)))))))
+            (if (ok p 0) (ok q 0) #f)))))))
+
+; ---------------------------------------------------------------------------
+; 4. The algebra
+; ---------------------------------------------------------------------------
+
+; Lemma 1: drop a copy of f1 into every square of f2. If f1 has extended
+; constant width w1 and f2 constant width w2, the result has constant width
+; w1*w2 on a board (n1*n2) wide.
+(defn (compose f1 f2)
+  (let ((m (fig-n f1)) (acc (make-vector 1 ())))
+    (for-each (fig-squares f2) (lambda (q)
+      (for-each (fig-squares f1) (lambda (p)
+        (vector-set! acc 0
+          (cons (cons (+ (car p) (* m (car q))) (+ (cdr p) (* m (cdr q))))
+                (vector-ref acc 0)))))))
+    (figure (* m (fig-n f2)) (vector-ref acc 0))))
+
+(defn (same-square? p q) (if (eq? (car p) (car q)) (eq? (cdr p) (cdr q)) #f))
+
+(defn (member-of? p s)
+  (if (null? s) #f (if (same-square? p (car s)) #t (member-of? p (cdr s)))))
+
+; A transversal is a subset meeting every line of f exactly once. Because f has
+; constant width w and kw squares, it touches exactly k lines of each of the
+; four families, so a transversal is one square per filled row whose columns
+; and diagonals are all distinct -- a perfect matching, found here by the same
+; `amb` machinery as the figure search. Nondeterministic: wrap in `first-of`.
+(defn (transversal f)
+  (let* ((n (fig-n f)) (s (fig-squares f)) (m (- (* 2 n) 1))
+         (byrow (make-vector n ()))
+         (uc (make-vector n 0)) (up (make-vector m 0)) (un (make-vector m 0)))
+    (for-each s (lambda (p)
+      (vector-set! byrow (car p) (cons p (vector-ref byrow (car p))))))
+    (letrec
+      ((pdx (lambda (p) (+ (car p) (cdr p))))
+       (ndx (lambda (p) (- (+ n (- (car p) (cdr p))) 1)))
+       (avail? (lambda (p)
+                 (if (zero? (vector-ref uc (cdr p)))
+                   (if (zero? (vector-ref up (pdx p)))
+                     (zero? (vector-ref un (ndx p)))
+                     #f)
+                   #f)))
+       (mark! (lambda (p d)
+                (vector-set! uc (cdr p) (+ (vector-ref uc (cdr p)) d))
+                (vector-set! up (pdx p) (+ (vector-ref up (pdx p)) d))
+                (vector-set! un (ndx p) (+ (vector-ref un (ndx p)) d))))
+       (pick (lambda (cands)
+               (shift (lambda (k)
+                 (for-each cands (lambda (p)
+                   (if (avail? p)
+                     (begin (mark! p 1) (k p) (mark! p -1))
+                     #inert)))))))
+       (go (lambda (r acc)
+             (if (eq? r n)
+               (emit (reverse acc))
+               (if (null? (vector-ref byrow r))
+                 (go (+ r 1) acc)
+                 (let ((p (pick (vector-ref byrow r))))
+                   (go (+ r 1) (cons p acc))))))))
+      (go 0 ()))))
+
+; Deleting a transversal from a figure of constant width w leaves one of
+; constant width w-1.
+(defn (fig-remove f t)
+  (let ((acc (make-vector 1 ())))
+    (for-each (fig-squares f) (lambda (p)
+      (if (member-of? p t)
+        #inert
+        (vector-set! acc 0 (cons p (vector-ref acc 0))))))
+    (figure (fig-n f) (vector-ref acc 0))))
+
+(defn (peel f)
+  (let ((t (first-of (transversal f))))
+    (if (null? t) () (fig-remove f t))))
+
+; ---------------------------------------------------------------------------
+; 5. Reporting
+; ---------------------------------------------------------------------------
+
+(defn (describe name f)
+  (let ((t (fig-type f)))
+    (if (null? t)
+      (printf "  {0}: NOT of constant width\n" name)
+      (printf "  {0}: {1} squares on {2}x{2}, type ({2},{3},{4}){5}\n"
+              name (length (fig-squares f)) (car t) (cadr t) (car (cddr t))
+              (if (extended? f) ", extended" "")))))
+
+(defn (draw f)
+  (let ((n (fig-n f)) (s (fig-squares f)))
+    (letrec ((loop (lambda (x y)
+                     (if (eq? x n) #inert
+                       (if (eq? y n)
+                         (begin (print "\n") (loop (+ x 1) 0))
+                         (begin
+                           (print (if (member-of? (cons x y) s) "Q" "."))
+                           (loop x (+ y 1))))))))
+      (loop 0 0))))
+
+(defn (draw-squares n s) (draw (figure n s)))
+
+; ---------------------------------------------------------------------------
+; 6. Demonstration
+; ---------------------------------------------------------------------------
+
+(print "searching -- one solver, two strategies\n\n")
+
+(printf "  (8,8,1) queens        : {0} solutions\n"
+        (length (collect (figures 8 8 1))))
+(printf "  (6,6,1) queens        : {0} solutions\n"
+        (length (collect (figures 6 6 1))))
+(printf "  (4,4,2)               : {0} figure(s)\n"
+        (length (collect (figures 4 4 2))))
+(printf "  (5,4,2)               : {0} figure(s)\n"
+        (length (collect (figures 5 4 2))))
+(printf "  (6,6,2), all          : {0} figure(s)\n"
+        (length (collect (figures 6 6 2))))
+(printf "  (6,6,2), first only   : {0} squares\n"
+        (length (first-of (figures 6 6 2))))
+(print "\n")
+(draw-squares 5 (car (collect (figures 5 4 2))))
+
+(print "\nbuilding -- Lemma 1 and transversal deletion\n\n")
+
+; The paper's Figure 2 and Figure 3, the two smallest width 2 figures. Both
+; come straight out of the search above; Figure 3 is the one with the wrapping
+; diagonals, which is what makes the composition below legal.
+(define fig2 (figure 4 '((0 & 1) (0 & 2) (1 & 0) (1 & 3)
+                         (2 & 0) (2 & 3) (3 & 1) (3 & 2))))
+(define fig3 (figure 5 '((0 & 1) (0 & 3) (1 & 0) (1 & 4)
+                         (3 & 0) (3 & 4) (4 & 1) (4 & 3))))
+
+(describe "Figure 2" fig2)
+(describe "Figure 3" fig3)
+
+(define w4 (compose fig3 fig2))
+(define w3 (peel w4))
+(define w2 (peel w3))
+(define w1 (peel w2))
+
+(describe "fig3 . fig2" w4)
+(describe "  peeled once" w3)
+(describe "  peeled twice" w2)
+(describe "  peeled thrice" w1)
+
+(print "\n  constant width 3 on a 20x20 board (the paper's Figure 6):\n\n")
+(draw w3)
+
+; One more composition doubles the width again, and peeling that reaches the
+; widths in between. The paper reports that its authors never found a figure of
+; width 6 with a computer search; this one is built and checked in under a
+; second.
+(define w8 (compose fig3 w4))
+(define w7 (peel w8))
+(define w6 (peel w7))
+
+(print "\n")
+(describe "fig3 . (fig3 . fig2)" w8)
+(describe "  peeled once" w7)
+(describe "  peeled twice" w6)
+(print "\n")

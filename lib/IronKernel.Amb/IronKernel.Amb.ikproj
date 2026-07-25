@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <PackageId>IronKernel.Amb</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>IronKernel</Authors>
+    <Description>Nondeterministic search for IronKernel: amb, require, and pluggable search strategies built on multi-shot delimited continuations.</Description>
+    <PackageTags>ironkernel</PackageTags>
+    <IronKernelMain>src/amb.ikr</IronKernelMain>
+    <IronKernelProfile>unrestricted</IronKernelProfile>
+  </PropertyGroup>
+  <ItemGroup>
+    <IronKernelSource Include="src/**/*.ikr" />
+    <IronKernelTest Include="test/**/*.ikr" />
+  </ItemGroup>
+</Project>

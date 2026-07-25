@@ -107,6 +107,15 @@ Public packages use NuGet.org initially. See
 [`ADR 0001`](docs/adr/0001-source-project-and-package-conventions.md) for the
 extension and ecosystem decision.
 
+### Libraries in this repository
+
+[`lib/`](lib/) holds first-party IronKernel packages, each an ordinary
+`.ikproj` built with `ik test` / `ik pack`.
+
+| Package | Provides |
+|---|---|
+| [`IronKernel.Amb`](lib/IronKernel.Amb/) | Nondeterministic search: `amb`, `require`, bracketed choice, and pluggable search strategies over multi-shot delimited continuations |
+
 ## REPL
 
 ```bash

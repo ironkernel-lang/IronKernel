@@ -26,6 +26,8 @@ dotnet run --project IronKernel -- run hello.ikc
 | `contracts.ikr` | Operative/applicative contracts and guarded folding | Prints validated results |
 | `coroutines.ikr` | Cooperative scheduling experiment | Historical example; not yet covered by the compatibility suite |
 | `zipper.ikr` | Delimited continuations | Functional zipper traversal |
+| `constant-width.ikr` | Mutable vectors, CPS backtracking, `args` | Enumerates constant-width chessboard figures; takes `n k w` |
+| `constant-width-amb.ikr` | `shift`/`reset` as an `amb` layer, `vau` search strategies, encapsulation types | Same problem, direct style; also solves n-queens and builds width 3/4/8 figures |
 | `sqrt.ikr` | Operative-based numeric procedure | Defines `sqrt`; intentionally produces no output |
 | `yingyang.ikr` | Classic yin-yang continuation loop | Intentionally non-terminating; do not use it to test packaging |
 
