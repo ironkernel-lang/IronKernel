@@ -18,6 +18,18 @@ module StaticCompiler =
 
     let private quote (value: string) = Text.Json.JsonSerializer.Serialize(value, stringLiteralOptions)
 
+    let private doubleLiteral (value: double) =
+        if Double.IsNaN value then "System.Double.NaN"
+        elif Double.IsPositiveInfinity value then "System.Double.PositiveInfinity"
+        elif Double.IsNegativeInfinity value then "System.Double.NegativeInfinity"
+        else
+            let literal = value.ToString("R", CultureInfo.InvariantCulture)
+            if literal.Contains('.') then literal
+            else
+                let exponentIndex = literal.IndexOfAny([|'E'; 'e'|])
+                if exponentIndex >= 0 then literal.Insert(exponentIndex, ".0")
+                else literal + ".0"
+
     let private sequenceOptions values =
         let mutable result = Some []
         for value in List.rev values do
@@ -50,8 +62,7 @@ module StaticCompiler =
         | Obj (:? float32 as value) ->
             Some("Obj(box " + value.ToString("R", CultureInfo.InvariantCulture) + "f)")
         | Obj (:? double as value) ->
-            let literal = value.ToString("R", CultureInfo.InvariantCulture)
-            Some("Obj(box " + (if literal.Contains('.') then literal else literal + ".0") + ")")
+            Some("Obj(box " + doubleLiteral value + ")")
         | Vector values ->
             values
             |> Array.map emitValue

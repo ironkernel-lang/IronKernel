@@ -143,6 +143,34 @@ let ``managed artifact runs without Kernel source or runtime compilation`` () =
         Directory.Delete(root, true)
 
 [<Fact>]
+let ``managed artifact preserves exponent-form double literals`` () =
+    let root = Path.Combine(Path.GetTempPath(), "ironkernel-managed-exponent-" + Guid.NewGuid().ToString("N"))
+    let script = Path.Combine(root, "exponent.ikr")
+    let output = Path.Combine(root, "publish")
+    Directory.CreateDirectory(root) |> ignore
+    try
+        File.WriteAllText(script, "1e20")
+        let artifact =
+            match compileFileToManagedArtifact Minimal script output with
+            | Choice1Of2 error -> failwith (showError error)
+            | Choice2Of2 path -> path
+
+        let startInfo = ProcessStartInfo("dotnet")
+        startInfo.UseShellExecute <- false
+        startInfo.RedirectStandardError <- true
+        startInfo.RedirectStandardOutput <- true
+        startInfo.ArgumentList.Add artifact
+        use child = Process.Start startInfo
+        let stdout = child.StandardOutput.ReadToEnd()
+        let stderr = child.StandardError.ReadToEnd()
+        child.WaitForExit()
+        Assert.Equal(0, child.ExitCode)
+        Assert.Equal("<obj 1E+20 : Double>", stdout.Trim())
+        Assert.Equal("", stderr.Trim())
+    finally
+        Directory.Delete(root, true)
+
+[<Fact>]
 let ``managed artifact supports definitions and lazy conditionals`` () =
     let root = Path.Combine(Path.GetTempPath(), "ironkernel-managed-control-flow-" + Guid.NewGuid().ToString("N"))
     let script = Path.Combine(root, "control-flow.ikr")
