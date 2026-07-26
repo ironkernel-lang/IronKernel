@@ -65,12 +65,29 @@
   ; swap it dynamically and put it back afterwards.
   (define sink (make-vector 1 (lambda (s) #inert)))
 
+  ; The non-local exit in first-of has to run every active amb-bracket cleanup
+  ; before it returns. Each bracket temporarily extends this escape chain.
+  (define escape (make-vector 1 (lambda (s) #inert)))
+
   (define with-sink
     (lambda (handler thunk)
       (let ((saved (vector-ref sink 0)))
         (vector-set! sink 0 handler)
         (reset (thunk))
         (vector-set! sink 0 saved))))
+
+  (define with-bracket
+    (lambda (x enter! leave! continuation)
+      (let ((saved (vector-ref escape 0)))
+        (enter! x)
+        (vector-set! escape 0
+          (lambda (solution)
+            (vector-set! escape 0 saved)
+            (leave! x)
+            (saved solution)))
+        (continuation x)
+        (vector-set! escape 0 saved)
+        (leave! x))))
 
   ; --- choice points ------------------------------------------------------
 
@@ -100,7 +117,7 @@
       (shift (lambda (k)
         (for-each xs (lambda (x)
           (if (ok? x)
-            (begin (enter! x) (k x) (leave! x))
+            (with-bracket x enter! leave! k)
             #inert)))))))
 
   ; amb-bracket over the integers in [lo, hi).
@@ -111,7 +128,7 @@
                          (if (< i hi)
                            (begin
                              (if (ok? i)
-                               (begin (enter! i) (k i) (leave! i))
+                               (with-bracket i enter! leave! k)
                                #inert)
                              (loop (+ i 1)))
                            #inert))))
@@ -153,11 +170,19 @@
   ; both paths.
   (define first-of
     (vau body env
-      (let ((saved (vector-ref sink 0)))
+      (let ((saved-sink (vector-ref sink 0))
+            (saved-escape (vector-ref escape 0)))
         (let ((found
                 (call/cc (lambda (return)
-                           (vector-set! sink 0 (lambda (s) (return s)))
+                           (vector-set! escape 0
+                             (lambda (solution)
+                               (vector-set! escape 0 saved-escape)
+                               (return solution)))
+                           (vector-set! sink 0
+                             (lambda (solution)
+                               ((vector-ref escape 0) solution)))
                            (reset (eval env (cons sequence body)))
                            ()))))
-          (vector-set! sink 0 saved)
+          (vector-set! sink 0 saved-sink)
+          (vector-set! escape 0 saved-escape)
           found)))))
