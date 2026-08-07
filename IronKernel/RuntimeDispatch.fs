@@ -4,6 +4,10 @@ namespace IronKernel
 module RuntimeDispatch =
 
     open System
+    open System.IO
+    open System.Runtime.CompilerServices
+    open System.Text.Json
+    open System.Threading
     open Ast
     open Errors
     open Eval
@@ -41,6 +45,23 @@ module RuntimeDispatch =
         let mutable cachedVersion = 0L
         let mutable cachedCombiner : LispVal = Nil
         let mutable eagerUnderlying : LispVal voption = ValueNone
+        let debugGate = obj ()
+        let mutable debugEntryCount = 0
+        let mutable debugRefillCount = 0
+        let mutable debugExitCount = 0
+
+        let objectId (value: obj) =
+            if isNull value then 0 else RuntimeHelpers.GetHashCode(value)
+
+        let debugLog hypothesisId location message (data: obj) =
+            let payload =
+                JsonSerializer.Serialize(
+                    {| hypothesisId = hypothesisId
+                       location = location
+                       message = message
+                       data = data
+                       timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() |})
+            lock debugGate (fun () -> File.AppendAllText("/opt/cursor/logs/debug.log", payload + "\n"))
 
         let classifyEager combiner =
             if not simpleOperands then ValueNone
@@ -56,15 +77,28 @@ module RuntimeDispatch =
                 | _ -> ValueNone
 
         let cacheValid env =
-            obj.ReferenceEquals(env, cachedEnv)
-            && cachedCell.state.version = cachedVersion
-            && (let mutable consistent = true
-                let mutable index = 0
-                while consistent && index < cachedPath.Length do
-                    let entry = cachedPath.[index]
-                    consistent <- entry.frame.bindings.Count = entry.bindingCount
-                    index <- index + 1
-                consistent)
+            let initialCachedEnv = cachedEnv
+            let envMatched = obj.ReferenceEquals(env, initialCachedEnv)
+            let valid =
+                envMatched
+                && cachedCell.state.version = cachedVersion
+                && (let mutable consistent = true
+                    let mutable index = 0
+                    while consistent && index < cachedPath.Length do
+                        let entry = cachedPath.[index]
+                        consistent <- entry.frame.bindings.Count = entry.bindingCount
+                        index <- index + 1
+                    consistent)
+            // #region agent log
+            if envMatched && not (obj.ReferenceEquals(initialCachedEnv, cachedEnv)) then
+                debugLog "D" "RuntimeDispatch.fs:cacheValid" "cache environment changed during validation"
+                    (box {| threadId = Environment.CurrentManagedThreadId
+                            invokeEnvId = objectId env
+                            initialCachedEnvId = objectId initialCachedEnv
+                            finalCachedEnvId = objectId cachedEnv
+                            valid = valid |})
+            // #endregion
+            valid
 
         let rec evaluateSimpleOperands env evaluated remaining =
             match remaining with
@@ -76,7 +110,22 @@ module RuntimeDispatch =
             | value :: rest -> evaluateSimpleOperands env (value :: evaluated) rest
 
         let dispatch env cont =
-            match eagerUnderlying with
+            let dispatchCachedEnv = cachedEnv
+            let dispatchCachedCell = cachedCell
+            let dispatchEager = eagerUnderlying
+            // #region agent log
+            if not (obj.ReferenceEquals(env, dispatchCachedEnv)) then
+                debugLog "B" "RuntimeDispatch.fs:dispatch" "dispatch cache belongs to another environment"
+                    (box {| threadId = Environment.CurrentManagedThreadId
+                            invokeEnvId = objectId env
+                            cachedEnvId = objectId dispatchCachedEnv
+                            cachedCellId = if isNull (box dispatchCachedCell) then -1L else dispatchCachedCell.id
+                            eagerId =
+                                match dispatchEager with
+                                | ValueSome underlying -> objectId underlying
+                                | ValueNone -> 0 |})
+            // #endregion
+            match dispatchEager with
             | ValueSome underlying ->
                 match evaluateSimpleOperands env [] operands with
                 | Choice1Of2 error -> throwError error
@@ -84,20 +133,64 @@ module RuntimeDispatch =
             | ValueNone -> operate env cont cachedCombiner operands
 
         member _.Invoke(env: LispVal, cont: LispVal) : ThrowsError<LispVal> =
-            if not (isNull cachedPath) && cacheValid env then
-                dispatch env cont
-            else
-                match SymbolTable.resolveBindingCellWithPath env name with
-                | ValueNone -> throwError (UnboundVar("Getting an unbound variable", name))
-                | ValueSome(cell, visitedPath) ->
-                    let state = cell.state
-                    cachedEnv <- env
-                    cachedPath <- visitedPath
-                    cachedCell <- cell
-                    cachedVersion <- state.version
-                    cachedCombiner <- state.value
-                    eagerUnderlying <- classifyEager state.value
+            // #region agent log
+            if Interlocked.Increment(&debugEntryCount) <= 16 then
+                debugLog "A" "RuntimeDispatch.fs:Invoke:entry" "named call-site invocation entered"
+                    (box {| threadId = Environment.CurrentManagedThreadId
+                            name = name
+                            invokeEnvId = objectId env
+                            cachedEnvId = objectId cachedEnv
+                            hasCachedPath = not (isNull cachedPath) |})
+            // #endregion
+            let result =
+                if not (isNull cachedPath) && cacheValid env then
                     dispatch env cont
+                else
+                    match SymbolTable.resolveBindingCellWithPath env name with
+                    | ValueNone -> throwError (UnboundVar("Getting an unbound variable", name))
+                    | ValueSome(cell, visitedPath) ->
+                        let state = cell.state
+                        // #region agent log
+                        if Interlocked.Increment(&debugRefillCount) <= 16 then
+                            debugLog "A" "RuntimeDispatch.fs:Invoke:resolved" "cache refill resolved invocation binding"
+                                (box {| threadId = Environment.CurrentManagedThreadId
+                                        invokeEnvId = objectId env
+                                        resolvedCellId = cell.id
+                                        resolvedValueId = objectId state.value
+                                        resolvedEagerId =
+                                            match classifyEager state.value with
+                                            | ValueSome underlying -> objectId underlying
+                                            | ValueNone -> 0
+                                        pathLength = visitedPath.Length |})
+                        // #endregion
+                        cachedEnv <- env
+                        cachedPath <- visitedPath
+                        cachedCell <- cell
+                        cachedVersion <- state.version
+                        cachedCombiner <- state.value
+                        eagerUnderlying <- classifyEager state.value
+                        // #region agent log
+                        if not (obj.ReferenceEquals(env, cachedEnv)) || not (obj.ReferenceEquals(cell, cachedCell)) then
+                            debugLog "B" "RuntimeDispatch.fs:Invoke:published" "cache refill was overwritten before dispatch"
+                                (box {| threadId = Environment.CurrentManagedThreadId
+                                        invokeEnvId = objectId env
+                                        resolvedCellId = cell.id
+                                        cachedEnvId = objectId cachedEnv
+                                        cachedCellId = if isNull (box cachedCell) then -1L else cachedCell.id |})
+                        // #endregion
+                        dispatch env cont
+            // #region agent log
+            if Interlocked.Increment(&debugExitCount) <= 16 then
+                debugLog "C" "RuntimeDispatch.fs:Invoke:exit" "named call-site invocation exited"
+                    (box {| threadId = Environment.CurrentManagedThreadId
+                            invokeEnvId = objectId env
+                            resultKind =
+                                match result with
+                                | Choice1Of2 _ -> "error"
+                                | Choice2Of2 (Obj (:? int)) -> "int"
+                                | Choice2Of2 _ -> "other" |})
+            // #endregion
+            result
 
     type GeneratedFunc = Func<LispVal, LispVal, ThrowsError<LispVal>>
 
