@@ -579,6 +579,38 @@ let ``inline cache preserves raw operands for operatives`` () =
     assertEqv (invokeSite compiled env) (Atom "whatever")
 
 [<Fact>]
+let ``inline cache dispatches per environment under concurrent invocation`` () =
+    // A host embedding the compiler can invoke one compiled form from several
+    // threads. Publishing the cache field by field let a caller validate its own
+    // environment and then dispatch a combiner another caller had just stored,
+    // silently returning the other environment's result. Long parent chains
+    // widen the resolution window the race needs.
+    let build result =
+        let root = freshEnv ()
+        ignore (evalIn root $"(define f (wrap (vau (x) _ {result})))")
+        let mutable env = root
+        for _ in 1..1000 do
+            env <- newEnv [env]
+        env
+
+    let envA = build 1
+    let envB = build 2
+    let compiled = compileLispValGuarded envA (parseOk "(f 0)")
+    let mismatches = ref 0
+
+    System.Threading.Tasks.Parallel.For(
+        0,
+        500_000,
+        System.Action<int>(fun index ->
+            let env, expected = if index % 2 = 0 then envA, 1 else envB, 2
+            match compiled.Invoke(env, newContinuation env) with
+            | Choice2Of2 (Obj (:? int as actual)) when actual = expected -> ()
+            | _ -> System.Threading.Interlocked.Increment(&mismatches.contents) |> ignore))
+    |> ignore
+
+    Assert.Equal(0, mismatches.Value)
+
+[<Fact>]
 let ``inline cache reports unbound operand variables`` () =
     let env = freshEnv ()
     let compiled = compileLispValGuarded env (parseOk "(+ missing 1)")
