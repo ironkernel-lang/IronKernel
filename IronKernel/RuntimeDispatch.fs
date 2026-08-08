@@ -4,6 +4,7 @@ namespace IronKernel
 module RuntimeDispatch =
 
     open System
+    open System.Threading
     open Ast
     open Errors
     open Eval
@@ -13,6 +14,25 @@ module RuntimeDispatch =
         match getVar env name with
         | Choice1Of2 error -> throwError error
         | Choice2Of2 combiner -> operate env cont combiner (Array.toList operands)
+
+    /// One call site's resolved binding, immutable once constructed so that it can
+    /// be published to other threads with a single reference write.
+    [<Sealed; AllowNullLiteral>]
+    type ResolvedCallSite
+        (
+            env: LispVal,
+            path: SymbolTable.VisitedFrame[],
+            cell: BindingCell,
+            version: int64,
+            combiner: LispVal,
+            eagerUnderlying: LispVal voption
+        ) =
+        member _.Env = env
+        member _.Path = path
+        member _.Cell = cell
+        member _.Version = version
+        member _.Combiner = combiner
+        member _.EagerUnderlying = eagerUnderlying
 
     /// Monomorphic inline cache for a compiled `(name operand ...)` call site.
     ///
@@ -35,12 +55,12 @@ module RuntimeDispatch =
                 | List (_ :: _) -> false
                 | _ -> true)
 
-        let mutable cachedEnv : LispVal = Nil
-        let mutable cachedPath : SymbolTable.VisitedFrame[] = null
-        let mutable cachedCell : BindingCell = Unchecked.defaultof<BindingCell>
-        let mutable cachedVersion = 0L
-        let mutable cachedCombiner : LispVal = Nil
-        let mutable eagerUnderlying : LispVal voption = ValueNone
+        /// The whole cache is one immutable snapshot behind a single reference so
+        /// that a refill can never be observed half-applied. Publishing the parts
+        /// separately let one caller validate its own environment and then
+        /// dispatch a combiner another caller had already stored, invoking the
+        /// wrong binding.
+        let mutable cache : ResolvedCallSite = null
 
         let classifyEager combiner =
             if not simpleOperands then ValueNone
@@ -55,13 +75,14 @@ module RuntimeDispatch =
                     | _ -> ValueNone
                 | _ -> ValueNone
 
-        let cacheValid env =
-            obj.ReferenceEquals(env, cachedEnv)
-            && cachedCell.state.version = cachedVersion
-            && (let mutable consistent = true
+        let cacheValid (resolved: ResolvedCallSite) env =
+            obj.ReferenceEquals(env, resolved.Env)
+            && resolved.Cell.state.version = resolved.Version
+            && (let path = resolved.Path
+                let mutable consistent = true
                 let mutable index = 0
-                while consistent && index < cachedPath.Length do
-                    let entry = cachedPath.[index]
+                while consistent && index < path.Length do
+                    let entry = path.[index]
                     consistent <- entry.frame.bindings.Count = entry.bindingCount
                     index <- index + 1
                 consistent)
@@ -75,29 +96,33 @@ module RuntimeDispatch =
                 | Choice1Of2 error -> Choice1Of2 error
             | value :: rest -> evaluateSimpleOperands env (value :: evaluated) rest
 
-        let dispatch env cont =
-            match eagerUnderlying with
+        let dispatch (resolved: ResolvedCallSite) env cont =
+            match resolved.EagerUnderlying with
             | ValueSome underlying ->
                 match evaluateSimpleOperands env [] operands with
                 | Choice1Of2 error -> throwError error
                 | Choice2Of2 args -> operate env cont underlying args
-            | ValueNone -> operate env cont cachedCombiner operands
+            | ValueNone -> operate env cont resolved.Combiner operands
 
         member _.Invoke(env: LispVal, cont: LispVal) : ThrowsError<LispVal> =
-            if not (isNull cachedPath) && cacheValid env then
-                dispatch env cont
+            let cached = Volatile.Read(&cache)
+            if not (isNull cached) && cacheValid cached env then
+                dispatch cached env cont
             else
                 match SymbolTable.resolveBindingCellWithPath env name with
                 | ValueNone -> throwError (UnboundVar("Getting an unbound variable", name))
                 | ValueSome(cell, visitedPath) ->
                     let state = cell.state
-                    cachedEnv <- env
-                    cachedPath <- visitedPath
-                    cachedCell <- cell
-                    cachedVersion <- state.version
-                    cachedCombiner <- state.value
-                    eagerUnderlying <- classifyEager state.value
-                    dispatch env cont
+                    let resolved =
+                        ResolvedCallSite(
+                            env,
+                            visitedPath,
+                            cell,
+                            state.version,
+                            state.value,
+                            classifyEager state.value)
+                    Volatile.Write(&cache, resolved)
+                    dispatch resolved env cont
 
     type GeneratedFunc = Func<LispVal, LispVal, ThrowsError<LispVal>>
 
