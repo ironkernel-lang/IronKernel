@@ -209,6 +209,32 @@ let private behaviouralChecks () : (string * string list) list = [
                 + " (b 11 (lambda () (call/cc (lambda (c) (return c))) (a)))))))"
                 + " (if (zero? (vector-ref flag 0))"
                 + " (begin (vector-set! flag 0 1) (k 0)) k)) 11)))" ]
+    // R-1RK 11.1.1. `b` binds an object in a fresh child of the given environment;
+    // `a` reads it from anywhere in that environment's descendants.
+    "11.1.1", [ "(let ((p (make-keyed-static-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (=? (eval (list a) (b 42 (get-current-environment))) 42)))"
+                // The binder returns an environment, and descendants inherit it.
+                "(let ((p (make-keyed-static-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (let ((e (b 42 (get-current-environment))))"
+                + " (and? (environment? e) (=? (eval (list a) (make-environment e)) 42)))))"
+                // The nearest such ancestor wins, and the outer one still reads.
+                "(let ((p (make-keyed-static-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (let ((e1 (b 1 (get-current-environment))))"
+                + " (and? (=? (eval (list a) (b 2 e1)) 2) (=? (eval (list a) e1) 1)))))"
+                // Static rather than dynamic: a procedure written inside the
+                // environment reads the object wherever it is called from.
+                "(let ((p (make-keyed-static-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (=? ((eval (list lambda (list) (list a))"
+                + " (b 42 (get-current-environment)))) 42)))"
+                // Each call makes a different variable, and the two coexist.
+                "(let ((p (make-keyed-static-variable)) (q (make-keyed-static-variable)))"
+                + " (let ((e ((car q) 99 ((car p) 42 (get-current-environment)))))"
+                + " (and? (=? (eval (list (car (cdr p))) e) 42)"
+                + " (=? (eval (list (car (cdr q))) e) 99))))" ]
     "9.1.4", [ "(eqv? (force (memoize 5)) 5)" ]
     "12.5.1", [ "(number? 1)"; "(number? 1.5)"; "(eqv? (number? 'a) #f)"; "(number?)"
                 "(integer? 3)"; "(integer? 3.0)"; "(eqv? (integer? 3.5) #f)"

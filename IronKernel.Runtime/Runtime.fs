@@ -1262,6 +1262,50 @@
                 List [binder; accessor] |> bounceContinue env cont
             | bad -> fail(NumArgs(0, bad))
 
+        /// R-1RK 11.1.1, the static counterpart of 10.1.1. Each call returns a fresh
+        /// `(binder accessor)` pair sharing a private key. The binder takes an object
+        /// and an environment and returns a fresh child of that environment; the
+        /// accessor, called with no operands anywhere in that child or its
+        /// descendants, returns the object. Where a keyed *dynamic* variable is scoped
+        /// by the extent of a call, this one is scoped by environment ancestry, so it
+        /// survives being closed over and read long after the binder returned.
+        ///
+        /// The key is an ordinary binding under a name no Kernel symbol can spell: it
+        /// contains spaces, which the reader cannot produce in an atom, and a fresh
+        /// GUID. Reusing the environment's own lookup is the point -- "the nearest
+        /// such ancestor" then means exactly what it means for every other variable,
+        /// including in an environment with several parents.
+        let make_keyed_static_variable env cont = function
+            | [] ->
+                let key = "keyed static variable " + string (Guid.NewGuid())
+                let primitive f =
+                    PrimitiveOperative { identity = None; invoke = f }
+                let binder =
+                    Applicative(
+                        primitive (fun e c -> function
+                            | [value; (Environment _ as target)] ->
+                                let child = newEnv [target]
+                                match defineVar child key value with
+                                | Choice1Of2 error -> fail error
+                                | Choice2Of2 _ -> bounceContinue e c child
+                            | [_; found] -> fail (TypeMismatch("environment", found))
+                            | bad -> fail (NumArgs(2, bad))))
+                let accessor =
+                    Applicative(
+                        // The environment here is the one the call appears in, which is
+                        // what makes the variable static: a combination is evaluated
+                        // where it is written, so an accessor call inside a procedure
+                        // body reads from that procedure's environment, not its caller's.
+                        primitive (fun e c -> function
+                            | [] ->
+                                match getVar' e key with
+                                | Some value -> bounceContinue e c value
+                                | None -> fail (Default "keyed static variable is unbound here")
+                            | bad -> fail (NumArgs(0, bad))))
+
+                List [binder; accessor] |> bounceContinue env cont
+            | bad -> fail(NumArgs(0, bad))
+
         let primitiveApplicatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [
                   ("eval", evaluate);
@@ -1341,6 +1385,7 @@
                   ("vector-set!", vector_set);
                   ("make-encapsulation-type", make_encapsulation_type);
                   ("make-keyed-dynamic-variable", make_keyed_dynamic_variable);
+                  ("make-keyed-static-variable", make_keyed_static_variable);
                   ("clr-opens", clr_opens);
                   ]
 
