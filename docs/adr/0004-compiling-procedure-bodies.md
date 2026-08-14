@@ -115,12 +115,38 @@ with 17% less allocation, and continuation-heavy paths are 4-6% slower. That doe
 not repay phase 1's cost, so the premise that phase 3 pays for phase 1 does not
 hold as stated.
 
-**Phase 4 — compile operand trees.** The remaining lever is teaching the compiler
-to descend into operands while preserving Kernel's operative/applicative
-distinction: operands may only be pre-compiled once the combiner in operator
-position is known to be applicative, which the binding guards and call-site cache
-already establish. This is a larger change than phases 1-3 and should be measured
-against the same body-heavy workload before being adopted.
+**Phase 4 — compile operand trees. Attempted and rejected.** Operands were
+compiled and dispatched once the call site resolved to an applicative, preserving
+the operative distinction. It was correct but 2.4x *slower* on the body-heavy
+workload, 55s against 23s, and the cost scaled with iteration count rather than
+being one-time compilation.
+
+Instrumenting the call-site cache during that run explains why, and invalidates
+the premise of phases 3 and 4 together: **0 hits against 150,393 misses**.
+`NamedCallSite.cacheValid` requires `obj.ReferenceEquals(env, resolved.Env)`, and
+every procedure call binds its parameters in a fresh frame, so a call site
+evaluated inside a procedure body never sees the same environment twice. Each
+compiled operand therefore pays full `resolveBindingCellWithPath`, a
+`ResolvedCallSite` allocation, and a volatile publish, where the interpreter pays
+one `getVar'`. Compiling more of the body simply buys more cache misses.
+
+This is the same effect measured earlier by `GuardSpecializationBenchmarks`, where
+guards only paid off against a fresh frame per call, and it is why phase 3 returned
+1.3% rather than the projected multiple.
+
+One further trap found here: operands must not be partially evaluated. Constant
+folding an operand raises errors from expressions that may never be evaluated, and
+`(and? #f (/ 1 0))` must short-circuit.
+
+**Phase 4 (revised) — make call-site caching work in fresh frames.** The blocker is
+the validation strategy, not how much of the body is compiled. Resolution from a
+call frame walks a short prefix of fresh frames into a stable closure chain, so a
+cache can validate by confirming the name is absent from that prefix and that the
+frame where resolution lands is the same object, instead of demanding the whole
+environment be identical. That reduces the common case to a dictionary miss and a
+reference comparison, and it makes compiled bodies, compiled operands, and binding
+guards all worth having. It is a change to a concurrency-sensitive component and
+should be measured against the same workload before anything else is compiled.
 
 **Phase 5 — revisit analyzer specialization.** Re-measure with
 `GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
