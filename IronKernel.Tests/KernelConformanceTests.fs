@@ -155,7 +155,23 @@ let private behaviouralChecks () : (string * string list) list = [
     "12.5.12", [ "(=? (abs -5) 5)"; "(=? (abs 5) 5)"; "(=? (abs 0) 0)" ]
     "12.5.13", [ "(=? (max 1 7 3) 7)"; "(=? (min 1 7 3) 1)"; "(=? (max 5) 5)" ]
     "12.5.14", [ "(=? (gcd 12 18) 6)"; "(=? (lcm 4 6) 12)"; "(=? (gcd 0 5) 5)" ]
-    "12.8.2", [ "(eqv? (/ 8 2) 4)" ]
+    "12.8.1", [ "(rational? 1)"; "(rational? 1.5)"; "(eqv? (rational? 'a) #f)"; "(rational?)" ]
+    "12.8.2", [ "(=? (/ 8 2) 4)"
+                // Ordinary division, not the truncating quotient: (/ 1 3) is a third.
+                "(<? 0.3 (/ 1 3))"; "(<? (/ 1 3) 0.34)"
+                // Divides by the product of the remaining arguments.
+                "(=? (/ 24 2 3) 4)" ]
+    "12.8.3", [ "(=? (numerator 0.5) 1)"; "(=? (denominator 0.5) 2)"
+                "(=? (numerator 6) 6)"; "(=? (denominator 6) 1)"
+                "(=? (numerator 0.75) 3)"; "(=? (denominator 0.75) 4)" ]
+    "12.8.4", [ "(=? (floor 3.7) 3)"; "(=? (floor -3.7) -4)"
+                "(=? (ceiling 3.2) 4)"; "(=? (ceiling -3.2) -3)"
+                "(=? (truncate 3.7) 3)"; "(=? (truncate -3.7) -3)"
+                // Halfway cases round to even.
+                "(=? (round 0.5) 0)"; "(=? (round 1.5) 2)"; "(=? (round 2.5) 2)" ]
+    "12.8.5", [ "(=? (simplest-rational 0.2 0.4) (/ 1 3))"
+                "(=? (simplest-rational -0.5 0.5) 0)"
+                "(=? (rationalize 0.3 0.1) (/ 1 3))" ]
 ]
 
 /// Divergences the matrix cannot express as a status, recorded so that a `verified`
@@ -171,6 +187,10 @@ let private divergences () = [
                + "cannot represent."
     "12.5.14", "`(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact "
                + "positive infinity for `(gcd)`."
+    "12.8", "Module Rational is implemented over the existing numeric types, which "
+            + "have no exact rational representation. `(/ 1 3)` is the closest double "
+            + "rather than an exact third, and `numerator`/`denominator` signal an "
+            + "error when a value's exact ratio does not fit in 64 bits."
 ]
 
 let private conformanceEnv () =
@@ -282,6 +302,35 @@ let private renderMatrix () =
     appendLine "|---|---|"
     for entry, text in divergences () do
         appendLine (sprintf "| %s | %s |" entry text)
+    appendLine ""
+
+    appendLine "## Modules"
+    appendLine ""
+    appendLine "R-1RK 1.3.2 makes the *module* the unit of conformance: \"An implementation"
+    appendLine "cannot claim to support a module M unless it both (1) supports all of the"
+    appendLine "features in M, and (2) supports all of the modules assumed by M.\" A module"
+    appendLine "counts as complete here only when every one of its entries is `verified`."
+    appendLine ""
+    appendLine "| Module | Required | Entries | Verified | Complete |"
+    appendLine "|---|---|---:|---:|---|"
+    let moduleKey (f: Feature) = f.Section, f.ChapterTitle, f.SectionTitle, f.Optional
+    let sectionOrder (section: string) =
+        let parts = section.Split('.') |> Array.map int
+        parts.[0], parts.[1]
+    for (section, chapterTitle, sectionTitle, optional) in
+            rows
+            |> List.map (fst >> moduleKey)
+            |> List.distinct
+            |> List.sortBy (fun (s, _, _, _) -> sectionOrder s) do
+        let moduleRows = rows |> List.filter (fun (f, _) -> f.Section = section)
+        let verified =
+            moduleRows |> List.filter (fun (_, (status, _, _)) -> status = Verified) |> List.length
+        appendLine (
+            sprintf "| %s %s — %s | %s | %d | %d | %s |"
+                section chapterTitle sectionTitle
+                (if optional then "optional" else "**required**")
+                (List.length moduleRows) verified
+                (if verified = List.length moduleRows then "yes" else "no"))
     appendLine ""
 
     for chapter in rows |> List.map (fun (f, _) -> f.Chapter) |> List.distinct |> List.sortBy int do

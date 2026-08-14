@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 53 | 39% |
+| `verified` | 57 | 42% |
 | `bound` | 12 | 9% |
 | `partial` | 0 | 0% |
-| `absent` | 70 | 52% |
+| `absent` | 66 | 49% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -45,6 +45,61 @@ exercised, not that IronKernel matches the report exactly.
 | 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
+| 12.8 | Module Rational is implemented over the existing numeric types, which have no exact rational representation. `(/ 1 3)` is the closest double rather than an exact third, and `numerator`/`denominator` signal an error when a value's exact ratio does not fit in 64 bits. |
+
+## Modules
+
+R-1RK 1.3.2 makes the *module* the unit of conformance: "An implementation
+cannot claim to support a module M unless it both (1) supports all of the
+features in M, and (2) supports all of the modules assumed by M." A module
+counts as complete here only when every one of its entries is `verified`.
+
+| Module | Required | Entries | Verified | Complete |
+|---|---|---:|---:|---|
+| 4.1 Core types and primitive features — Booleans | **required** | 1 | 0 | no |
+| 4.2 Core types and primitive features — Equivalence under mutation (optional) | optional | 1 | 0 | no |
+| 4.3 Core types and primitive features — Equivalence up to mutation | **required** | 1 | 0 | no |
+| 4.4 Core types and primitive features — Symbols | **required** | 1 | 0 | no |
+| 4.5 Core types and primitive features — Control | **required** | 2 | 1 | no |
+| 4.6 Core types and primitive features — Pairs and lists | **required** | 3 | 3 | yes |
+| 4.7 Core types and primitive features — Pair mutation (optional) | optional | 2 | 0 | no |
+| 4.8 Core types and primitive features — Environments | **required** | 4 | 3 | no |
+| 4.9 Core types and primitive features — Environment mutation (optional) | optional | 1 | 0 | no |
+| 4.10 Core types and primitive features — Combiners | **required** | 5 | 3 | no |
+| 5.1 Core library features (I) — Control | **required** | 1 | 1 | yes |
+| 5.2 Core library features (I) — Pairs and lists | **required** | 2 | 2 | yes |
+| 5.3 Core library features (I) — Combiners | **required** | 2 | 2 | yes |
+| 5.4 Core library features (I) — Pairs and lists | **required** | 1 | 1 | yes |
+| 5.5 Core library features (I) — Combiners | **required** | 1 | 1 | yes |
+| 5.6 Core library features (I) — Control | **required** | 1 | 1 | yes |
+| 5.7 Core library features (I) — Pairs and lists | **required** | 2 | 0 | no |
+| 5.8 Core library features (I) — Pair mutation (optional) | optional | 1 | 0 | no |
+| 5.9 Core library features (I) — Combiners | **required** | 1 | 1 | yes |
+| 5.10 Core library features (I) — Environments | **required** | 1 | 1 | yes |
+| 6.1 Core library features (II) — Booleans | **required** | 5 | 5 | yes |
+| 6.2 Core library features (II) — Combiners | **required** | 1 | 0 | no |
+| 6.3 Core library features (II) — Pairs and lists | **required** | 10 | 1 | no |
+| 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 0 | no |
+| 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 0 | no |
+| 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 0 | no |
+| 6.7 Core library features (II) — Environments | **required** | 10 | 4 | no |
+| 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 1 | no |
+| 6.9 Core library features (II) — Control | **required** | 1 | 1 | yes |
+| 7.2 Continuations — Primitive features | **required** | 7 | 1 | no |
+| 7.3 Continuations — Library features | **required** | 4 | 1 | no |
+| 8.1 Encapsulations — Primitive features | **required** | 1 | 1 | yes |
+| 9.1 Promises — Library features | **required** | 4 | 3 | no |
+| 10.1 Keyed dynamic variables — Primitive features | **required** | 1 | 0 | no |
+| 11.1 Keyed static variables — Primitive features | **required** | 1 | 0 | no |
+| 12.5 Numbers — Number features | **required** | 14 | 14 | yes |
+| 12.6 Numbers — Inexact features | optional | 6 | 0 | no |
+| 12.7 Numbers — Narrow inexact features | optional | 1 | 0 | no |
+| 12.8 Numbers — Rational features | optional | 5 | 5 | yes |
+| 12.9 Numbers — Real features | optional | 6 | 0 | no |
+| 12.10 Numbers — Complex features | optional | 3 | 0 | no |
+| 13.1 Strings — Primitive features | **required** | 1 | 0 | no |
+| 15.1 Ports — Primitive features | **required** | 8 | 0 | no |
+| 15.2 Ports — Library features | **required** | 3 | 0 | no |
 
 ## 4 Core types and primitive features
 
@@ -199,11 +254,11 @@ exercised, not that IronKernel matches the report exactly.
 | 12.6.5 | `real->inexact, real->exact` | Inexact features | `absent` | optional module; `real->inexact` absent; `real->exact` absent |
 | 12.6.6 | `with-strict-arithmetic, get-strict-arithmetic?` | Inexact features | `absent` | optional module; `with-strict-arithmetic` absent; `get-strict-arithmetic?` absent |
 | 12.7.1 | `with-narrow-arithmetic, get-narrow-arithmetic?` | Narrow inexact features | `absent` | optional module; `with-narrow-arithmetic` absent; `get-narrow-arithmetic?` absent |
-| 12.8.1 | `rational?` | Rational features | `absent` | optional module |
-| 12.8.2 | `/` | Rational features | `verified` | optional module; 1 behavioural check(s) |
-| 12.8.3 | `numerator, denominator` | Rational features | `absent` | optional module; `numerator` absent; `denominator` absent |
-| 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `absent` | optional module; `floor` absent; `ceiling` absent; `truncate` absent; `round` absent |
-| 12.8.5 | `rationalize, simplest-rational` | Rational features | `absent` | optional module; `rationalize` absent; `simplest-rational` absent |
+| 12.8.1 | `rational?` | Rational features | `verified` | optional module; 4 behavioural check(s) |
+| 12.8.2 | `/` | Rational features | `verified` | optional module; 4 behavioural check(s) |
+| 12.8.3 | `numerator, denominator` | Rational features | `verified` | optional module; 6 behavioural check(s) |
+| 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `verified` | optional module; 9 behavioural check(s) |
+| 12.8.5 | `rationalize, simplest-rational` | Rational features | `verified` | optional module; 3 behavioural check(s) |
 | 12.9.1 | `real?` | Real features | `absent` | optional module |
 | 12.9.2 | `exp, log` | Real features | `absent` | optional module; `exp` absent; `log` absent |
 | 12.9.3 | `sin, cos, tan` | Real features | `absent` | optional module; `sin` absent; `cos` absent; `tan` absent |

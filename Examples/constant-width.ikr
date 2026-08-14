@@ -284,7 +284,7 @@
       (lambda (sol)
         (vector-set! found 0 (+ (vector-ref found 0) 1))
         (printf "#{0}: type ({1}, {2}, {3})\n"
-                (vector-ref found 0) n (/ (length sol) w) w)
+                (vector-ref found 0) n (div (length sol) w) w)
         (draw n sol)
         (print "\n")))
     (printf "{0} figure(s)\n" (vector-ref found 0))))

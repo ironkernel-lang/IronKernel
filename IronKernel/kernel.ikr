@@ -297,17 +297,8 @@
 ; real2 * n <= real1, which is only bounded for a positive divisor; its rationale
 ; states the report follows the R6RS div/mod, whose defining property is
 ; 0 <= mod < |real2| for either sign. That is what is implemented here.
-; A zero divisor is reported by / itself (R-1RK 12.8.2), so no separate check.
-(define div-and-mod
-  (lambda (a b)
-    (let* ((q (/ a b))
-           (r (- a (* b q))))
-      (if (< r 0)
-        (if (< 0 b)
-          (list (- q 1) (+ r b))
-          (list (+ q 1) (- r b)))
-        (list q r)))))
-
+; div-and-mod is a primitive: it needs integer quotient semantics, and / is
+; ordinary division (R-1RK 12.8.2) rather than the truncating quotient.
 (define div (lambda (a b) (car (div-and-mod a b))))
 (define mod (lambda (a b) (car (cdr (div-and-mod a b)))))
 
@@ -368,8 +359,45 @@
                     (if (null? ys)
                       acc
                       (let ((n (abs (car ys))))
-                        (if (zero? n) 0 (aux (/ (* acc n) ($gcd2 acc n)) (cdr ys))))))))
+                        (if (zero? n) 0 (aux (div (* acc n) ($gcd2 acc n)) (cdr ys))))))))
       (aux 1 xs))))
+
+; --- R-1RK 12.8 Rational features --------------------------------------------
+; An optional module. rational?, /, numerator, denominator, floor, ceiling,
+; truncate and round are primitives; the two interval searches are derived here.
+;
+; IronKernel has no exact rational type, so a non-integral quotient is inexact and
+; these return the closest representable value rather than an exact ratio. The
+; divergence is recorded in the conformance matrix.
+
+; 12.8.5: the simplest rational in [lo, hi]. Zero is simpler than every other
+; rational, and within an interval that excludes zero the simplest value is found
+; by continued fractions: take the integer part, and if no integer lies inside,
+; recurse on the reciprocals of the remainders.
+(define simplest-rational
+  (lambda (lo hi)
+    (if (<? hi lo)
+      (error "simplest-rational: lower bound exceeds upper bound")
+      (letrec ((search
+                 (lambda (lo hi)
+                   (let ((whole (floor lo)))
+                     (if (=? whole lo)
+                       whole
+                       (if (<? whole (floor hi))
+                         (+ whole 1)
+                         (+ whole
+                            (/ 1 (search (/ 1 (- hi whole)) (/ 1 (- lo whole)))))))))))
+        (if (<? 0 lo)
+          (search lo hi)
+          (if (<? hi 0)
+            (- 0 (search (- 0 hi) (- 0 lo)))
+            ; The interval spans zero, and zero is the simplest rational.
+            0))))))
+
+; 12.8.5: the simplest rational within real1 plus or minus real2.
+(define rationalize
+  (lambda (x tolerance)
+    (simplest-rational (- x tolerance) (+ x tolerance))))
 
 ; --- R-1RK canonical names ---------------------------------------------------
 ; The report spells operatives with a leading `$`, and the primitive definer as

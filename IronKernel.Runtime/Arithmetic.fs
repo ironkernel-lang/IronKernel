@@ -130,10 +130,15 @@ namespace IronKernel
             | Singles(x, y) -> box (x * y)
             | Doubles(x, y) -> box (x * y)
 
+        /// Integer division only stays integral when it divides evenly. R-1RK 12.8.2
+        /// makes `/` ordinary division, not the truncating quotient: (/ 1 3) is a third,
+        /// not zero. Truncation is available as `div` (12.5.8), which is a separate
+        /// feature. Without an exact rational type the inexact quotient is the closest
+        /// available result; recorded as a divergence.
         let private divideWidened = function
-            | Bytes(x, y) -> box (x / y)
-            | Ints(x, y) -> box (x / y)
-            | Longs(x, y) -> box (x / y)
+            | Bytes(x, y) -> if x % y = 0uy then box (x / y) else box (float x / float y)
+            | Ints(x, y) -> if x % y = 0 then box (x / y) else box (float x / float y)
+            | Longs(x, y) -> if x % y = 0L then box (x / y) else box (float x / float y)
             | Singles(x, y) -> box (x / y)
             | Doubles(x, y) -> box (x / y)
 
@@ -198,6 +203,54 @@ namespace IronKernel
                     match guardedDivide widened with
                     | Choice2Of2 result -> returnM (Obj result)
                     | Choice1Of2 ex -> throwError (ClrException ex)
+                | Choice1Of2 FirstOperand ->
+                    throwError (ClrTypeMismatch("number", a.GetType().Name))
+                | Choice1Of2 SecondOperand ->
+                    throwError (ClrTypeMismatch(rankName (rankOf a), b.GetType().Name))
+            | Obj _, found -> throwError (TypeMismatch("object", found))
+            | found, _ -> throwError (TypeMismatch("object", found))
+
+        /// R-1RK 12.5.8, as its own operation rather than something derived from `/`.
+        /// `/` is ordinary division (12.8.2) and no longer truncates, and `div` belongs
+        /// to the required Numbers module, which may not depend on the optional
+        /// Rational module that supplies `truncate`. The remainder satisfies
+        /// 0 <= mod < |divisor| for either sign of divisor.
+        let private divAndModWidened widened =
+            let adjust (q: float) (r: float) (y: float) =
+                if r < 0.0 then (if y > 0.0 then (q - 1.0, r + y) else (q + 1.0, r - y))
+                else (q, r)
+            match widened with
+            | Bytes(x, y) ->
+                let q = x / y
+                box (int q), box (int (x - y * q))
+            | Ints(x, y) ->
+                let q0 = x / y
+                let r0 = x - y * q0
+                let q, r = if r0 < 0 then (if y > 0 then (q0 - 1, r0 + y) else (q0 + 1, r0 - y)) else (q0, r0)
+                box q, box r
+            | Longs(x, y) ->
+                let q0 = x / y
+                let r0 = x - y * q0
+                let q, r = if r0 < 0L then (if y > 0L then (q0 - 1L, r0 + y) else (q0 + 1L, r0 - y)) else (q0, r0)
+                box q, box r
+            | Singles(x, y) ->
+                let q0 = System.Math.Truncate(float x / float y)
+                let q, r = adjust q0 (float x - float y * q0) (float y)
+                box (float32 q), box (float32 r)
+            | Doubles(x, y) ->
+                let q0 = System.Math.Truncate(x / y)
+                let q, r = adjust q0 (x - y * q0) y
+                box q, box r
+
+        let opDivAndMod a' b' =
+            match a', b' with
+            | Obj a, Obj b ->
+                match widen a b with
+                | Choice2Of2 widened when divisorIsZero widened ->
+                    throwError (Default "division by zero")
+                | Choice2Of2 widened ->
+                    let quotient, remainder = divAndModWidened widened
+                    returnM (Obj quotient, Obj remainder)
                 | Choice1Of2 FirstOperand ->
                     throwError (ClrTypeMismatch("number", a.GetType().Name))
                 | Choice1Of2 SecondOperand ->
