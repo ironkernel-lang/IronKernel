@@ -6,6 +6,7 @@ open IronKernel.Ast
 open IronKernel.Analyze
 open IronKernel.Compiler
 open IronKernel.Contracts
+open IronKernel.Eval
 open IronKernel.Ir
 open IronKernel.PartialEval
 open IronKernel.SymbolTable
@@ -149,7 +150,7 @@ let ``contract fold falls back after rebinding`` () =
 
     ignore (evalIn env "(define + (vau operands _ operands))")
 
-    match compiled.Invoke(env, newContinuation env) with
+    match run (compiled.Invoke(env, newContinuation env)) with
     | Choice2Of2 (List [Obj (:? int as one); Obj (:? int as two)]) ->
         Assert.Equal(1, one)
         Assert.Equal(2, two)
@@ -169,7 +170,7 @@ let ``contract folds deoptimize across environment binding changes`` () =
             mutate compiledEnv operator
 
             let interpreted = evalRaw Interpreted interpretedEnv source |> observe
-            let compiledResult = compiled.Invoke(compiledEnv, newContinuation compiledEnv) |> observe
+            let compiledResult = run (compiled.Invoke(compiledEnv, newContinuation compiledEnv)) |> observe
             if interpreted <> compiledResult then
                 failwithf
                     "%s contract fold mismatch for %s\ninterpreted: %A\ncompiled: %A"

@@ -17,7 +17,11 @@ module Compiler =
     open PartialEval
     open Choice
 
-    type KernelFunc = Func<LispVal, LispVal, ThrowsError<LispVal>>
+    /// Compiled code returns `Step`, so it runs inside the caller's trampoline
+    /// rather than starting a nested one. A nested trampoline would consume CLR
+    /// stack on every Kernel tail call, collapse escaping continuations into a
+    /// finished value, and block on `Await`. See ADR 0004.
+    type KernelFunc = Func<LispVal, LispVal, Step>
 
     type private CompilationWork =
         | CompileExpression of CoreExpr
@@ -32,48 +36,49 @@ module Compiler =
         | BuildLocated of SourceSpan * string option
 
     type Helpers =
-        static member Continue(env: LispVal, cont: LispVal, v: LispVal) : ThrowsError<LispVal> =
-            continueEval env cont v
-        static member Lookup(env: LispVal, cont: LispVal, name: string) : ThrowsError<LispVal> =
+        static member Continue(env: LispVal, cont: LispVal, v: LispVal) : Step =
+            bounceContinue env cont v
+        static member Lookup(env: LispVal, cont: LispVal, name: string) : Step =
             match SymbolTable.getVar env name with
-            | Choice2Of2 r -> continueEval env cont r
-            | Choice1Of2 e -> throwError e
-        static member IfThenElse(env: LispVal, cont: LispVal, fc: KernelFunc, fa: KernelFunc, fb: KernelFunc) : ThrowsError<LispVal> =
-            match fc.Invoke(env, newContinuation env) with
-            | Choice2Of2 (Bool true) -> fa.Invoke(env, cont)
-            | Choice2Of2 (Bool false) -> fb.Invoke(env, cont)
-            | Choice2Of2 found -> throwError (TypeMismatch("bool", found))
-            | Choice1Of2 e -> throwError e
-        static member Seq(env: LispVal, cont: LispVal, forms: KernelFunc[]) : ThrowsError<LispVal> =
-            let rec loop i =
-                if i >= forms.Length then continueEval env cont Inert
-                elif i = forms.Length - 1 then forms.[i].Invoke(env, cont)
-                else
-                    match forms.[i].Invoke(env, newContinuation env) with
-                    | Choice1Of2 e -> throwError e
-                    | Choice2Of2 _ -> loop (i + 1)
-            loop 0
-        static member Define(env: LispVal, cont: LispVal, name: string, fr: KernelFunc) : ThrowsError<LispVal> =
-            match fr.Invoke(env, newContinuation env) with
-            | Choice1Of2 e -> throwError e
-            | Choice2Of2 v ->
-                match SymbolTable.defineVar env name v with
-                | Choice1Of2 e -> throwError e
-                | Choice2Of2 _ -> continueEval env cont Inert
-        static member EvalForms(env: LispVal, cont: LispVal, fe: KernelFunc, fx: KernelFunc) : ThrowsError<LispVal> =
-            match fe.Invoke(env, newContinuation env) with
-            | Choice1Of2 e -> throwError e
-            | Choice2Of2 envVal ->
-                match fx.Invoke(env, newContinuation env) with
-                | Choice1Of2 e -> throwError e
-                | Choice2Of2 code -> eval envVal cont code
+            | Choice2Of2 r -> bounceContinue env cont r
+            | Choice1Of2 e -> Done(throwError e)
+        static member IfThenElse(env: LispVal, cont: LispVal, fc: KernelFunc, fa: KernelFunc, fb: KernelFunc) : Step =
+            fc.Invoke(
+                env,
+                makeCPS env cont (fun e c value _ ->
+                    match value with
+                    | Bool true -> fa.Invoke(e, c)
+                    | Bool false -> fb.Invoke(e, c)
+                    | found -> Done(throwError (TypeMismatch("bool", found)))))
+        static member Seq(env: LispVal, cont: LispVal, forms: KernelFunc[]) : Step =
+            if forms.Length = 0 then bounceContinue env cont Inert
+            else
+                let rec step index e c =
+                    if index = forms.Length - 1 then forms.[index].Invoke(e, c)
+                    else forms.[index].Invoke(e, makeCPS e c (fun se sc _ _ -> step (index + 1) se sc))
+                step 0 env cont
+        static member Define(env: LispVal, cont: LispVal, name: string, fr: KernelFunc) : Step =
+            fr.Invoke(
+                env,
+                makeCPS env cont (fun e c value _ ->
+                    match SymbolTable.defineVar e name value with
+                    | Choice1Of2 error -> Done(throwError error)
+                    | Choice2Of2 _ -> bounceContinue e c Inert))
+        static member EvalForms(env: LispVal, cont: LispVal, fe: KernelFunc, fx: KernelFunc) : Step =
+            fe.Invoke(
+                env,
+                makeCPS env cont (fun e c environmentValue _ ->
+                    fx.Invoke(
+                        e,
+                        makeCPS e c (fun _ xc code _ -> bounceEval environmentValue xc code))))
         /// Kernel combination: evaluate operator, then operate with *unevaluated* operands.
         /// Applicatives evaluate their arguments inside `operate`; operatives see raw trees.
-        static member App(env: LispVal, cont: LispVal, fop: KernelFunc, operands: LispVal[]) : ThrowsError<LispVal> =
-            match fop.Invoke(env, newContinuation env) with
-            | Choice1Of2 e -> throwError e
-            | Choice2Of2 combiner -> operate env cont combiner (Array.toList operands)
-        static member AppNamed(env: LispVal, cont: LispVal, name: string, operands: LispVal[]) : ThrowsError<LispVal> =
+        static member App(env: LispVal, cont: LispVal, fop: KernelFunc, operands: LispVal[]) : Step =
+            fop.Invoke(
+                env,
+                makeCPS env cont (fun e c combiner _ ->
+                    bounceOperate e c combiner (Array.toList operands)))
+        static member AppNamed(env: LispVal, cont: LispVal, name: string, operands: LispVal[]) : Step =
             RuntimeDispatch.appNamed env cont name operands
 
     let private resolveHelper name parameterTypes =
@@ -84,7 +89,7 @@ module Compiler =
                 null,
                 parameterTypes,
                 null)
-        if isNull methodInfo || methodInfo.ReturnType <> typeof<ThrowsError<LispVal>> then
+        if isNull methodInfo || methodInfo.ReturnType <> typeof<Step> then
             invalidOp (sprintf "Compiler helper '%s' has an incompatible signature" name)
         methodInfo
 
@@ -163,7 +168,7 @@ module Compiler =
                     completed <-
                         KernelFunc(fun env cont ->
                             let op = Operative { prms = formals; envarg = envarg; body = bodyLv; closure = env }
-                            continueEval env cont op)
+                            bounceContinue env cont op)
                         :: completed
                 | CEval (environmentExpression, valueExpression) ->
                     pending <-
@@ -175,7 +180,7 @@ module Compiler =
                     // Delimited continuations must go through the trampoline interpreter so
                     // shift sees the proper meta-continuation chain (including under begin/applicatives).
                     let form = List [Atom "reset"; toLispVal body]
-                    completed <- KernelFunc(fun env cont -> eval env cont form) :: completed
+                    completed <- KernelFunc(fun env cont -> bounceEval env cont form) :: completed
                 | CApp (operator, args) ->
                     let operands = List.map toLispVal args |> List.toArray
                     pending <- CompileExpression operator :: BuildApp operands :: pending
@@ -196,8 +201,8 @@ module Compiler =
                     completed <-
                         KernelFunc(fun env cont ->
                             match identity with
-                            | PrimitiveIf -> run (Runtime.if_then_else env cont operands)
-                            | PrimitiveDefine -> run (Runtime.define env cont operands))
+                            | PrimitiveIf -> Runtime.if_then_else env cont operands
+                            | PrimitiveDefine -> Runtime.define env cont operands)
                         :: completed
                 | CGuarded (guard, specialized, fallback) ->
                     pending <-
@@ -211,12 +216,12 @@ module Compiler =
                         :: BuildContractFold(guard, folded)
                         :: pending
                 | CResidual v ->
-                    completed <- KernelFunc(fun env cont -> eval env cont v) :: completed
+                    completed <- KernelFunc(fun env cont -> bounceEval env cont v) :: completed
                 | CLocated (span, sourceLine, inner) ->
                     pending <- CompileExpression inner :: BuildLocated(span, sourceLine) :: pending
                 | other ->
                     let value = toLispVal other
-                    completed <- KernelFunc(fun env cont -> eval env cont value) :: completed
+                    completed <- KernelFunc(fun env cont -> bounceEval env cont value) :: completed
             | BuildIf ->
                 match takeCompleted 3 with
                 | [condition; consequent; alternative] ->
@@ -279,7 +284,7 @@ module Compiler =
                 | [fallback] ->
                     completed <-
                         KernelFunc(fun env cont ->
-                            if contractGuardMatches env guard then continueEval env cont folded
+                            if contractGuardMatches env guard then bounceContinue env cont folded
                             else fallback.Invoke(env, cont))
                         :: completed
                 | _ -> invalidOp "Contract fold compilation is incomplete"
@@ -288,10 +293,7 @@ module Compiler =
                 | [inner] ->
                     completed <-
                         KernelFunc(fun env cont ->
-                            match inner.Invoke(env, cont) with
-                            | Choice1Of2 (LocatedError _ as error) -> throwError error
-                            | Choice1Of2 error -> throwError (LocatedError(span, sourceLine, error))
-                            | Choice2Of2 value -> returnM value)
+                            RuntimeDispatch.runLocated env cont span sourceLine inner)
                         :: completed
                 | _ -> invalidOp "Located compilation is incomplete"
 
@@ -308,7 +310,10 @@ module Compiler =
     let compileForms (forms: LispVal list) = List.map compileLispVal forms
     let compileFormsGuarded env forms = List.map (compileLispValGuarded env) forms
 
-    let evalCompiled env cont (v: LispVal) = compileLispValGuarded env v |> fun f -> f.Invoke(env, cont)
+    /// Single trampoline entry for compiled code. Everything below this point
+    /// returns `Step` and shares this one loop.
+    let evalCompiled env cont (v: LispVal) =
+        compileLispValGuarded env v |> fun f -> run (f.Invoke(env, cont))
 
     let analyzeAndCompile (source: string) : ThrowsError<KernelFunc list> =
         match Parser.readExprList source with

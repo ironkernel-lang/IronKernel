@@ -41,11 +41,11 @@ type CompilerBenchmarks() =
 
     [<Benchmark>]
     member _.CompiledGeneric() =
-        compiledGeneric.Invoke(env, newContinuation env)
+        run (compiledGeneric.Invoke(env, newContinuation env))
 
     [<Benchmark>]
     member _.CompiledFolded() =
-        compiledFolded.Invoke(env, newContinuation env)
+        run (compiledFolded.Invoke(env, newContinuation env))
 
 [<MemoryDiagnoser>]
 type SymbolLookupBenchmarks() =
@@ -248,7 +248,7 @@ type GuardSpecializationBenchmarks() =
         unguarded <- compileLispVal form
         guarded <- compileLispValGuarded env form
         let requireOne (func: KernelFunc) =
-            match func.Invoke(env, newContinuation env) with
+            match run (func.Invoke(env, newContinuation env)) with
             | Choice2Of2 (Obj (:? int as value)) when value = 1 -> ()
             | result -> invalidOp (sprintf "Guard benchmark setup failed: %A" result)
         requireOne unguarded
@@ -256,11 +256,11 @@ type GuardSpecializationBenchmarks() =
 
     [<Benchmark(Baseline = true)>]
     member _.Unguarded() =
-        unguarded.Invoke(env, newContinuation env)
+        run (unguarded.Invoke(env, newContinuation env))
 
     [<Benchmark>]
     member _.Guarded() =
-        guarded.Invoke(env, newContinuation env)
+        run (guarded.Invoke(env, newContinuation env))
 
     // The realistic case for code inside a procedure body: a fresh child frame per
     // call, so the named call-site cache misses and must re-resolve and refill.
@@ -268,12 +268,12 @@ type GuardSpecializationBenchmarks() =
     [<Benchmark>]
     member _.UnguardedFreshEnv() =
         let frame = newEnv [env]
-        unguarded.Invoke(frame, newContinuation frame)
+        run (unguarded.Invoke(frame, newContinuation frame))
 
     [<Benchmark>]
     member _.GuardedFreshEnv() =
         let frame = newEnv [env]
-        guarded.Invoke(frame, newContinuation frame)
+        run (guarded.Invoke(frame, newContinuation frame))
 
 [<EntryPoint>]
 let main args =

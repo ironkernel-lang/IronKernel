@@ -601,3 +601,30 @@ let ``repl exits cleanly at end of piped input`` () =
     let exitCode, _, stderr = runReplWithInput "(+ 1 2)\n"
     Assert.Equal(0, exitCode)
     Assert.DoesNotContain("Unhandled exception", stderr)
+
+[<Fact>]
+let ``runtime diagnostics do not attribute operand errors to the operator`` () =
+    // The operator is evaluated before the operands, and compiled code hands it
+    // the caller's own continuation. Its span must stop at that hand-off, or it
+    // swallows every later error and reports column 2 for the whole program.
+    match bootstrapEnv () with
+    | Choice1Of2 error -> failwith (showError error)
+    | Choice2Of2 env ->
+        match runSource env "operand-error.ikr" "(define ready #t)\n(+ 1 missing)" with
+        | Choice2Of2 value -> failwithf "unexpectedly returned %A" value
+        | Choice1Of2 error ->
+            let diagnostic = showError error
+            Assert.Contains("operand-error.ikr:2:1", diagnostic)
+            Assert.Contains("^^^^^^^^^^^^^", diagnostic)
+
+[<Fact>]
+let ``runtime diagnostics keep the enclosing span for errors after an if condition`` () =
+    match bootstrapEnv () with
+    | Choice1Of2 error -> failwith (showError error)
+    | Choice2Of2 env ->
+        match runSource env "if-condition.ikr" "(if 5 1 2)" with
+        | Choice2Of2 value -> failwithf "unexpectedly returned %A" value
+        | Choice1Of2 error ->
+            let diagnostic = showError error
+            Assert.Contains("if-condition.ikr:1:1", diagnostic)
+            Assert.Contains("^^^^^^^^^^", diagnostic)
