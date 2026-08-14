@@ -125,22 +125,36 @@ module Eval =
             More (fun () -> f e (Continuation (ncr, metaCont, ct)) value args)
         | Continuation ({ closure = e; currentCont = Some (KernelCode cBody); nextCont = nextCont }, metaCont, ct) ->
             match cBody with
-            | [] ->
-                match nextCont with
-                | Some (Continuation (cr, None, _)) ->
-                    More (fun () -> continueEvalStep e (Continuation (cr, metaCont, ct)) value)
-                | None ->
-                    match metaCont with
-                    | Some frame -> More (fun () -> continueEvalStep e frame.parentCont value)
-                    | None -> ok value
-                | Some _ ->
-                    fail (Default "Internal Error: metacontinuation in wrong position")
+            | [] -> finishDeferredBody e nextCont metaCont ct value
             | p :: tail ->
                 More (fun () ->
                     evalStep e
                         (Continuation ({ closure = e; currentCont = Some (KernelCode tail); nextCont = nextCont; args = None }, metaCont, ct))
                         p)
+        // Same rule as KernelCode: the head form runs against a continuation holding
+        // the remaining forms, so the final form inherits `nextCont` and stays in
+        // tail position.
+        | Continuation ({ closure = e; currentCont = Some (CompiledCode forms); nextCont = nextCont }, metaCont, ct) ->
+            match forms with
+            | [] -> finishDeferredBody e nextCont metaCont ct value
+            | form :: tail ->
+                More (fun () ->
+                    form
+                        e
+                        (Continuation ({ closure = e; currentCont = Some (CompiledCode tail); nextCont = nextCont; args = None }, metaCont, ct)))
         | _ -> fail (TypeMismatch ("continuation", cont))
+
+    /// A deferred body ran out of forms: hand the value to whatever follows.
+    and private finishDeferredBody e nextCont metaCont ct value : Step =
+        match nextCont with
+        | Some (Continuation (cr, None, _)) ->
+            More (fun () -> continueEvalStep e (Continuation (cr, metaCont, ct)) value)
+        | None ->
+            match metaCont with
+            | Some frame -> More (fun () -> continueEvalStep e frame.parentCont value)
+            | None -> ok value
+        | Some _ ->
+            fail (Default "Internal Error: metacontinuation in wrong position")
 
     and evalStep env cont value : Step =
         match env, cont with
@@ -269,26 +283,26 @@ module Eval =
                 More (fun () -> operateStep _env resumeCont resumption.continuation [argument])
             | [_] -> fail (Default "resumption has already been consumed")
             | _ -> fail (NumArgs(1, args))
-        | Operative { prms = prms; envarg = envarg; body = body; closure = closure } ->
+        | Operative { prms = prms; envarg = envarg; body = body; closure = closure; compiledBody = compiledBody } ->
             let evalBody env =
-                match cpr with
-                | { currentCont = Some (KernelCode cBody); nextCont = nextCont } ->
-                    match cBody with
-                    | [] ->
-                        More (fun () ->
-                            continueEvalStep env
-                                (Continuation ({ closure = env; currentCont = Some (KernelCode body); nextCont = nextCont; args = None }, metaCont, ct))
-                                Nil)
-                    | _ ->
-                        More (fun () ->
-                            continueEvalStep env
-                                (Continuation ({ closure = env; currentCont = Some (KernelCode body); nextCont = Some (Continuation (cpr, None, Full)); args = None }, metaCont, ct))
-                                Nil)
-                | _ ->
-                    More (fun () ->
-                        continueEvalStep env
-                            (Continuation ({ closure = env; currentCont = Some (KernelCode body); nextCont = Some (Continuation (cpr, None, Full)); args = None }, metaCont, ct))
-                            Nil)
+                let continuationAfterBody =
+                    match cpr with
+                    // The caller has no forms left to run, so this call is in tail
+                    // position: inherit its continuation instead of stacking a frame
+                    // on it. A compiled caller reports an exhausted body the same way,
+                    // and missing that case would grow the continuation on every tail
+                    // call out of compiled code.
+                    | { currentCont = Some (KernelCode []); nextCont = nextCont }
+                    | { currentCont = Some (CompiledCode []); nextCont = nextCont } -> nextCont
+                    | _ -> Some (Continuation (cpr, None, Full))
+                let deferredBody =
+                    match compiledBody with
+                    | Some forms -> CompiledCode forms
+                    | None -> KernelCode body
+                More (fun () ->
+                    continueEvalStep env
+                        (Continuation ({ closure = env; currentCont = Some deferredBody; nextCont = continuationAfterBody; args = None }, metaCont, ct))
+                        Nil)
 
             let newEnv = newEnv [closure]
             match bind newEnv (newContinuation _env) prms (List args) with

@@ -167,7 +167,7 @@ module Compiler =
                     let bodyLv = List.map toLispVal body
                     completed <-
                         KernelFunc(fun env cont ->
-                            let op = Operative { prms = formals; envarg = envarg; body = bodyLv; closure = env }
+                            let op = Operative { prms = formals; envarg = envarg; body = bodyLv; closure = env; compiledBody = None }
                             bounceContinue env cont op)
                         :: completed
                 | CEval (environmentExpression, valueExpression) ->

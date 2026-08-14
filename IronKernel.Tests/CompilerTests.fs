@@ -622,3 +622,101 @@ let ``inline cache reports unbound operand variables`` () =
     | Choice1Of2 error -> failwith (showError error)
     | Choice2Of2 _ -> ()
     assertEqv (invokeSite compiled env) (Obj (42 :> obj))
+
+// ADR 0004 phase 2: compiled procedure bodies live in the continuation as a list
+// of compiled forms. Phase 3 fills `compiledBody` in automatically; these build it
+// by hand so the representation and its tail-call rule are exercised now.
+
+/// Compiles each source form and adapts it to the plain function `CompiledCode` holds.
+let private compiledBody env sources =
+    sources
+    |> List.map (fun source ->
+        let compiled = compileLispValGuarded env (parseOk source)
+        fun (e: LispVal) (c: LispVal) -> compiled.Invoke(e, c))
+
+/// Defines `name` as an applicative whose body is compiled rather than interpreted.
+let private defineCompiledProcedure env name formals sources =
+    let operative =
+        Operative
+            { prms = parseOk formals
+              envarg = "_"
+              body = List.map parseOk sources
+              closure = env
+              compiledBody = Some(compiledBody env sources) }
+    match defineVar env name (Applicative operative) with
+    | Choice1Of2 error -> failwith (showError error)
+    | Choice2Of2 _ -> ()
+
+[<Fact>]
+let ``compiled body runs its forms in order and yields the last value`` () =
+    let env = freshEnv ()
+    defineCompiledProcedure env "run" "()" [ "(define a 1)"; "(define b 2)"; "(+ a b)" ]
+    assertEval env "(run)" (Obj (3 :> obj))
+
+[<Fact>]
+let ``compiled body propagates errors from any form`` () =
+    let env = freshEnv ()
+    defineCompiledProcedure env "run" "()" [ "(define a 1)"; "missing"; "(define b 2)" ]
+    match evalRaw Compiled env "(run)" with
+    | Choice1Of2 (UnboundVar (_, "missing")) -> ()
+    | result -> failwithf "unexpected error result: %A" result
+
+[<Fact>]
+let ``compiled body sees its own frame and the caller's arguments`` () =
+    let env = freshEnv ()
+    defineCompiledProcedure env "twice" "(n)" [ "(+ n n)" ]
+    assertEval env "(twice 21)" (Obj (42 :> obj))
+
+/// Length of a continuation's `nextCont` chain. Proper tail calls keep this
+/// bounded; a missed tail call adds one frame per iteration.
+let rec private continuationDepth value =
+    match value with
+    | Continuation (record, _, _) ->
+        match record.nextCont with
+        | Some next -> 1 + continuationDepth next
+        | None -> 1
+    | _ -> 0
+
+[<Fact>]
+let ``self tail call through a compiled body does not grow the continuation`` () =
+    // The last form of a compiled body leaves `CompiledCode []` as the caller's
+    // continuation. If operative application does not treat that as a tail call, a
+    // frame is retained per iteration. The trampoline keeps the CLR stack flat
+    // either way and still returns the right answer, so the leak is only visible in
+    // the continuation captured at the deepest point.
+    withKernel (fun env ->
+        ignore (evalIn env "(define captured (vector 0))")
+        defineCompiledProcedure
+            env
+            "countdown"
+            "(n)"
+            [ "(if (eqv? n 0) (vector-set! captured 0 (call/cc (lambda (k) k))) (countdown (- n 1)))" ]
+
+        let depthAfter iterations =
+            ignore (evalIn env (sprintf "(countdown %d)" iterations))
+            match evalIn env "(vector-ref captured 0)" with
+            | Continuation _ as continuation -> continuationDepth continuation
+            | other -> failwithf "expected a captured continuation, got %A" other
+
+        let shallow = depthAfter 10
+        let deep = depthAfter 1000
+        Assert.Equal(shallow, deep))
+
+[<Fact>]
+let ``continuation captured inside a compiled body resumes the remaining forms`` () =
+    // Resuming re-enters the body part-way through, which is why a body stays a list
+    // of compiled forms rather than one opaque delegate.
+    withKernel (fun env ->
+        ignore (evalIn env "(define store (vector 0))")
+        ignore (evalIn env "(define saved (vector 0))")
+        defineCompiledProcedure
+            env
+            "record"
+            "()"
+            [ "(vector-set! saved 0 (call/cc (lambda (k) k)))"
+              "(vector-set! store 0 (+ (vector-ref store 0) 1))"
+              "(vector-ref store 0)" ]
+
+        assertEval env "(record)" (Obj (1 :> obj))
+        ignore (evalIn env "((vector-ref saved 0) 0)")
+        assertEval env "(vector-ref store 0)" (Obj (2 :> obj)))
