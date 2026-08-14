@@ -129,3 +129,25 @@ let ``effects and async preserve interpreter compiler parity`` () =
           "(define effect (make-prompt-tag))"
           "(prompt effect (lambda (value k) (resume k value)) (+ 1 (perform effect 41)))"
           "(+ 1 (await-task (task-delay 5 41)))" ]
+
+[<Fact>]
+let ``await-task returns the awaited value`` () =
+    // The value used to be discarded and reported as #inert. An F# `task { ... }` is
+    // an AsyncStateMachineBox that *derives from* Task<T> without being it, so a check
+    // against the concrete type never matched. Nothing awaited a task and inspected
+    // the result, so only capability gating was covered and this went unnoticed.
+    withKernel (fun env ->
+        assertEval env "(await-task (task-delay 5 42))" (Obj 42)
+        assertEval env "(equal? (await-task (task-delay 5 'done)) 'done)" (Bool true)
+        // The value must survive being bound, not just being returned.
+        ignore (evalIn env "(define awaited (await-task (task-delay 5 7)))")
+        assertEval env "(=? awaited 7)" (Bool true)
+        // And it must compose with further computation rather than ending it.
+        assertEval env "(+ 1 (await-task (task-delay 5 41)))" (Obj 42))
+
+[<Fact>]
+let ``await-task rejects a non-task argument`` () =
+    let env = freshEnv ()
+    match evalIn env "(await-task 5)" with
+    | Status message -> Assert.Contains("Task", message)
+    | value -> failwithf "expected an error, got %s" (showVal value)
