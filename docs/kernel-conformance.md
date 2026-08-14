@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 106 | 79% |
+| `verified` | 110 | 81% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 29 | 21% |
+| `absent` | 25 | 19% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -46,6 +46,7 @@ exercised, not that IronKernel matches the report exactly.
 | 12.2 | Inexact reals are non-robust with bounds of exact negative and positive infinity, which 12.2 sanctions explicitly ("an implementation can fully support module Inexact without making any effort to maintain finite bounds or robustness"). Two things follow. `robust?` is exactly "every argument is exact". And no number is ever created with its lower bound above its upper bound, so the report's `undefined` number never arises and `undefined?` is always false. Narrowing the bounds is what module Narrow inexact (12.7) asks for, and that module is absent. |
 | 12.7 | Module Narrow inexact is supported in the sense the report requires -- the variable binds and reads, and the bounding information is no less restrictive when it is set than when it is cleared -- but setting it changes nothing observable. Narrowing is advice ("the implementation is advised to maintain the most restrictive bounding and robustness information it (correctly) can"), and IronKernel maintains the infinite bounds of 12.2 either way. |
 | 12.3.3 | Under strict arithmetic the report signals on numeric overflow and underflow as well as on a result with no primary value. IronKernel signals only the latter: an overflow still yields an infinity and an underflow a zero, which is the report's behaviour for *cleared* strict-arithmetic. Its initial value here is true, which the report leaves open. |
+| 7.2 | The continuation hierarchy carries no entry/exit guards, so an abnormal pass is a normal receipt at its destination. That is not an approximation of 7.2.5's selection and interception: with `guard-continuation` absent no guards can exist, so no interceptor is ever selectable. `root-continuation` and `error-continuation` are absent with it -- the report's rationale gives `root-continuation`'s purpose as being a guard selector that is always selected, and `error-continuation` is where an exit guard for a signalled error would attach, so all three belong to the same piece of machinery. |
 | 4.2.1 | `eq?` is bound to the same structural comparison as `eqv?`, so it is coarser than the report's, which distinguishes objects that `equal?` does not. |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
@@ -93,8 +94,8 @@ divergences before taking any row as a claim of conformance.
 | 6.7 Core library features (II) — Environments | **required** | 10 | 7 | no |
 | 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 3 | yes |
 | 6.9 Core library features (II) — Control | **required** | 1 | 1 | yes |
-| 7.2 Continuations — Primitive features | **required** | 7 | 1 | no |
-| 7.3 Continuations — Library features | **required** | 4 | 1 | no |
+| 7.2 Continuations — Primitive features | **required** | 7 | 4 | no |
+| 7.3 Continuations — Library features | **required** | 4 | 2 | no |
 | 8.1 Encapsulations — Primitive features | **required** | 1 | 1 | yes |
 | 9.1 Promises — Library features | **required** | 4 | 3 | no |
 | 10.1 Keyed dynamic variables — Primitive features | **required** | 1 | 1 | yes |
@@ -198,14 +199,14 @@ divergences before taking any row as a claim of conformance.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 7.2.1 | `continuation?` | Primitive features | `absent` |  |
+| 7.2.1 | `continuation?` | Primitive features | `verified` | 4 behavioural check(s) |
 | 7.2.2 | `call/cc` | Primitive features | `verified` | 1 behavioural check(s) |
-| 7.2.3 | `extend-continuation` | Primitive features | `absent` |  |
+| 7.2.3 | `extend-continuation` | Primitive features | `verified` | 3 behavioural check(s) |
 | 7.2.4 | `guard-continuation` | Primitive features | `absent` |  |
-| 7.2.5 | `continuation->applicative` | Primitive features | `absent` |  |
+| 7.2.5 | `continuation->applicative` | Primitive features | `verified` | 4 behavioural check(s) |
 | 7.2.6 | `root-continuation` | Primitive features | `absent` |  |
 | 7.2.7 | `error-continuation` | Primitive features | `absent` |  |
-| 7.3.1 | `apply-continuation` | Library features | `absent` |  |
+| 7.3.1 | `apply-continuation` | Library features | `verified` | 2 behavioural check(s) |
 | 7.3.2 | `$let/cc` | Library features | `verified` | 1 behavioural check(s) |
 | 7.3.3 | `guard-dynamic-extent` | Library features | `absent` |  |
 | 7.3.4 | `exit` | Library features | `absent` |  |

@@ -173,6 +173,24 @@ let private behaviouralChecks () : (string * string list) list = [
     // 6.9.1: (for-each applicative . lists) -- applicative first, as for map.
     "6.9.1", [ "(let ((t (vector 0))) (sequence (for-each (lambda (x) (vector-set! t 0 x)) (list 7)) (=? (vector-ref t 0) 7)))" ]
     "7.2.2", [ "(eqv? (call/cc (lambda (k) (k 42))) 42)" ]
+    "7.2.1", [ "(call/cc (lambda (k) (continuation? k)))"
+               "(eqv? (continuation? 5) #f)"
+               "(eqv? (continuation? (lambda () 0)) #f)"
+               "(continuation?)" ]
+    "7.2.3", [ // A child of the continuation that prepends a computation, its result
+               // normally returning to the original continuation.
+               "(=? (call/cc (lambda (k)"
+               + " (apply-continuation (extend-continuation k (lambda (x) (* x 10))) (list 4)))) 40)"
+               "(=? (+ 1 (call/cc (lambda (k)"
+               + " (apply-continuation (extend-continuation k (lambda (x) (* x 10))) (list 4))))) 41)"
+               "(call/cc (lambda (k) (continuation? (extend-continuation k (lambda (x) x)))))" ]
+    "7.2.5", [ "(call/cc (lambda (k) (applicative? (continuation->applicative k))))"
+               // The operand tree is passed whole.
+               "(=? (car (call/cc (lambda (k) ((continuation->applicative k) 1 2) 99))) 1)"
+               "(=? (car (cdr (call/cc (lambda (k) ((continuation->applicative k) 1 2) 99)))) 2)"
+               "(null? (call/cc (lambda (k) ((continuation->applicative k)) 99)))" ]
+    "7.3.1", [ "(=? (call/cc (lambda (k) (apply-continuation k 5) 99)) 5)"
+               "(=? (car (call/cc (lambda (k) (apply-continuation k (list 1 2)) 99))) 1)" ]
     "7.3.2", [ "(eqv? (let/cc k (k 9)) 9)" ]
     "8.1.1", [ "(let ((t (make-encapsulation-type))) (let ((e ((car t) 1)) (p (car (cdr t)))) (p e)))" ]
     "9.1.1", [ "(promise? (memoize 1))" ]
@@ -466,6 +484,15 @@ let private divergences () = [
               + "underflow a zero, which is the report's behaviour for *cleared* "
               + "strict-arithmetic. Its initial value here is true, which the report "
               + "leaves open."
+    "7.2", "The continuation hierarchy carries no entry/exit guards, so an abnormal "
+           + "pass is a normal receipt at its destination. That is not an "
+           + "approximation of 7.2.5's selection and interception: with "
+           + "`guard-continuation` absent no guards can exist, so no interceptor is "
+           + "ever selectable. `root-continuation` and `error-continuation` are absent "
+           + "with it -- the report's rationale gives `root-continuation`'s purpose as "
+           + "being a guard selector that is always selected, and `error-continuation` "
+           + "is where an exit guard for a signalled error would attach, so all three "
+           + "belong to the same piece of machinery."
     "4.2.1", "`eq?` is bound to the same structural comparison as `eqv?`, so it is "
              + "coarser than the report's, which distinguishes objects that `equal?` "
              + "does not."

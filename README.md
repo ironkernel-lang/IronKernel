@@ -10,8 +10,8 @@ This tree is a **hybrid CLR runtime**: programs are analyzed to a Core IR and co
 
 [`docs/kernel-conformance.md`](docs/kernel-conformance.md) tracks IronKernel against
 the [Revised-1 Report on the Kernel Programming Language](https://ftp.cs.wpi.edu/pub/techreports/pdf/05-07.pdf)
-(R-1RK), feature by feature. Of the report's 135 feature entries, **106 are verified
-by a behavioural check and 29 are absent**; nothing is merely bound-but-unchecked.
+(R-1RK), feature by feature. Of the report's 135 feature entries, **110 are verified
+by a behavioural check and 25 are absent**; nothing is merely bound-but-unchecked.
 34 entries belong to modules the report marks optional. The matrix also reports
 status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **33 of 44
 modules are complete**.
