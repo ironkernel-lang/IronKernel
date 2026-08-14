@@ -92,3 +92,41 @@ let ``eqv on numbers`` () =
         "(eqv? 7 8)", Bool false
         "(eq? 1 1)", Bool true
     ] |> evalSession
+
+[<Fact>]
+let ``dividing by zero signals an error instead of faulting`` () =
+    // R-1RK 12.8.2 requires an error when the divisor is zero. .NET disagrees in both
+    // directions: integer division throws, and floating-point division yields an
+    // infinity. Before this was handled, either case escaped as a CLR exception and
+    // faulted the process -- so a test host running this at all is part of the check.
+    let env = freshEnv ()
+    for expression in [ "(/ 1 0)"; "(/ 1.0 0.0)"; "(/ 0 0)"; "(/ 5 (- 3 3))" ] do
+        match evalIn env expression with
+        | Status message -> Assert.Contains("division by zero", message)
+        | value -> failwithf "%s should signal an error, got %s" expression (showVal value)
+
+[<Fact>]
+let ``arithmetic overflow signals an error instead of faulting`` () =
+    // Int32.MinValue / -1 has no representable result and raises inside the CLR.
+    let env = freshEnv ()
+    match evalIn env "(/ -2147483648 -1)" with
+    | Status message -> Assert.Contains("overflow", message.ToLowerInvariant())
+    | value -> failwithf "overflow should signal an error, got %s" (showVal value)
+
+[<Fact>]
+let ``division still works for non-zero divisors`` () =
+    [
+        "(/ 8 2)", Obj 4
+        "(/ 9.0 2.0)", Obj 4.5
+        "(/ -6 3)", Obj -2
+    ] |> evalSession
+
+[<Fact>]
+let ``a signalled division error leaves the environment usable`` () =
+    // The failure must be an ordinary Kernel error, not something that unwinds past
+    // the evaluator: further evaluation in the same environment has to keep working.
+    let env = freshEnv ()
+    match evalIn env "(/ 1 0)" with
+    | Status _ -> ()
+    | value -> failwithf "expected an error, got %s" (showVal value)
+    assertEval env "(+ 1 2)" (Obj 3)

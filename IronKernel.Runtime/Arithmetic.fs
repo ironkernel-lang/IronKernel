@@ -80,17 +80,28 @@ namespace IronKernel
                     | 3 -> Singles(toSingle a, toSingle b)
                     | _ -> Doubles(toDouble a, toDouble b))
 
-        let private numericBinaryOp apply (a': LispVal) (b': LispVal) =
+        /// `validate` rejects operand combinations for which the operation is undefined,
+        /// before the CLR is asked to perform it. The `try` is a backstop for the rest:
+        /// integer division can still overflow (Int32.MinValue / -1), and an escaping
+        /// CLR exception would fault the process rather than raise a Kernel error.
+        let private numericBinaryOpWith validate apply (a': LispVal) (b': LispVal) =
             match a', b' with
             | Obj a, Obj b ->
                 match widen a b with
-                | Choice2Of2 widened -> returnM (Obj(apply widened))
+                | Choice2Of2 widened ->
+                    match validate widened with
+                    | Some error -> throwError error
+                    | None ->
+                        try returnM (Obj(apply widened))
+                        with ex -> throwError (ClrException ex)
                 | Choice1Of2 FirstOperand ->
                     throwError (ClrTypeMismatch("number", a.GetType().Name))
                 | Choice1Of2 SecondOperand ->
                     throwError (ClrTypeMismatch(rankName (rankOf a), b.GetType().Name))
             | Obj _, found -> throwError (TypeMismatch("object", found))
             | found, _ -> throwError (TypeMismatch("object", found))
+
+        let private numericBinaryOp apply = numericBinaryOpWith (fun _ -> None) apply
 
         let private comparisonBinaryOp apply (a': LispVal) (b': LispVal) =
             match a', b' with
@@ -163,7 +174,26 @@ namespace IronKernel
             | _ -> numericBinaryOp subtractWidened a' b'
 
         let opMultiply a' b' = numericBinaryOp multiplyWidened a' b'
-        let opDivide a' b' = numericBinaryOp divideWidened a' b'
+
+        let private divisorIsZero = function
+            | Bytes(_, y) -> y = 0uy
+            | Ints(_, y) -> y = 0
+            | Longs(_, y) -> y = 0L
+            | Singles(_, y) -> y = 0.0f
+            | Doubles(_, y) -> y = 0.0
+
+        /// R-1RK 12.8.2: dividing by zero signals an error. The check is explicit
+        /// because .NET disagrees with the report in both directions -- integer
+        /// division throws, and floating-point division quietly yields an infinity,
+        /// which the report rejects because the limit depends on the direction zero
+        /// is approached from.
+        let opDivide a' b' =
+            numericBinaryOpWith
+                (fun widened ->
+                    if divisorIsZero widened then Some(Default "division by zero") else None)
+                divideWidened
+                a'
+                b'
 
         let opLessThan a' b' = comparisonBinaryOp lessThanWidened a' b'
         let opLessThanOrEqual a' b' = comparisonBinaryOp lessThanOrEqualWidened a' b'
