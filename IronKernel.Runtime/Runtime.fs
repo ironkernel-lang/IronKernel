@@ -211,15 +211,82 @@
             | [List (_::_) ]    -> bounceContinue env cont <| Bool(true) 
             | _                 -> bounceContinue env cont <| Bool(false)
 
-        let isZero env cont = function 
-            |[Obj x] -> match x with 
-                        | :? byte -> bounceContinue env cont <| Bool(byte (0) = (x :?> byte)) 
-                        | :? int -> bounceContinue env cont <| Bool(0 = (x :?> int)) 
-                        | :? int64 -> bounceContinue env cont <| Bool((x :?> int64) = 0L) 
-                        | :? float32 -> bounceContinue env cont <| Bool((x :?> float32) = 0.0f) 
-                        | :? float -> bounceContinue env cont <| Bool((x :?> float) = 0.0) 
-                        | _ -> bounceContinue env cont <| Bool(false)
-            |_ -> bounceContinue env cont <| Bool(false)
+        /// R-1RK 12.5.1. `number?` and `integer?` are type predicates, so a
+        /// non-number argument yields false rather than an error; `finite?` requires
+        /// numbers, so a non-number is an error. All three are variadic and true for
+        /// an empty argument list.
+        let private isNumberValue (value: obj) =
+            match value with
+            | :? byte | :? int | :? int64 | :? float32 | :? float -> true
+            | _ -> false
+
+        let private isIntegerValue (value: obj) =
+            match value with
+            | :? byte | :? int | :? int64 -> true
+            | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f) && Math.Floor(float f) = float f
+            | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d) && Math.Floor d = d
+            | _ -> false
+
+        let private isFiniteValue (value: obj) =
+            match value with
+            | :? byte | :? int | :? int64 -> Some true
+            | :? float32 as f -> Some(not (Single.IsNaN f) && not (Single.IsInfinity f))
+            | :? float as d -> Some(not (Double.IsNaN d) && not (Double.IsInfinity d))
+            | _ -> None
+
+        let isNumber env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest when isNumberValue value -> loop rest
+                | _ -> bounceContinue env cont (Bool false)
+            loop args
+
+        let isInteger env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest when isIntegerValue value -> loop rest
+                | _ -> bounceContinue env cont (Bool false)
+            loop args
+
+        let isFinite env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest ->
+                    match isFiniteValue value with
+                    | Some true -> loop rest
+                    | Some false -> bounceContinue env cont (Bool false)
+                    | None -> fail (TypeMismatch("number", Obj value))
+                | found :: _ -> fail (TypeMismatch("number", found))
+            loop args
+
+        /// Signals an error from Kernel code. Not a feature of the report's required
+        /// modules -- R-1RK routes errors through error-continuation (7.2.7), which
+        /// IronKernel does not implement -- but permitted as an extension (1.3.2) and
+        /// needed so the standard library can report its own failures.
+        let raiseError _ cont args =
+            ignore cont
+            match args with
+            | [Obj message] -> fail (Default(string message))
+            | [] -> fail (Default "error")
+            | values -> fail (Default(String.Join(" ", values |> List.map showVal)))
+
+        /// R-1RK 12.5.7: (zero? . numbers), true when every argument is zero. A
+        /// non-number is an error rather than false: zero? is not a type predicate.
+        let isZero env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest when isNumberValue value ->
+                    let isZeroValue =
+                        match value with
+                        | :? byte as x -> x = 0uy
+                        | :? int as x -> x = 0
+                        | :? int64 as x -> x = 0L
+                        | :? float32 as x -> x = 0.0f
+                        | :? float as x -> x = 0.0
+                        | _ -> false
+                    if isZeroValue then loop rest else bounceContinue env cont (Bool false)
+                | found :: _ -> fail (TypeMismatch("number", found))
+            loop args
         
         open Arithmetic
 
@@ -651,6 +718,10 @@
                   ("null?", isNull);
                   ("pair?", isPair) ;
                   ("zero?", isZero);
+                  ("error", raiseError);
+                  ("number?", isNumber);
+                  ("integer?", isInteger);
+                  ("finite?", isFinite);
                   ("environment?", isEnvironment)
                   ("make-environment", makeEnvironment);
                   ("print", print);

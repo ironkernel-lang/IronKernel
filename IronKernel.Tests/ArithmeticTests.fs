@@ -130,3 +130,65 @@ let ``a signalled division error leaves the environment usable`` () =
     | Status _ -> ()
     | value -> failwithf "expected an error, got %s" (showVal value)
     assertEval env "(+ 1 2)" (Obj 3)
+
+[<Fact>]
+let ``div and mod satisfy the division identity for every sign`` () =
+    // R-1RK 12.5.8 defines mod as real1 - (real2 * n). The report's own phrasing
+    // ("greatest integer n with real2 * n <= real1") is unbounded for a negative
+    // divisor; its rationale defers to the R6RS, whose defining property is
+    // 0 <= mod < |real2|. Both are checked here.
+    withKernel (fun env ->
+        for a in [ -7; -1; 0; 1; 7; 12 ] do
+            for b in [ -3; -1; 1; 3; 5 ] do
+                let identity = sprintf "(=? %d (+ (* %d (div %d %d)) (mod %d %d)))" a b a b a b
+                assertEval env identity (Bool true)
+                let ranged = sprintf "(and? (<=? 0 (mod %d %d)) (<? (mod %d %d) (abs %d)))" a b a b b
+                assertEval env ranged (Bool true))
+
+[<Fact>]
+let ``div0 and mod0 centre the remainder`` () =
+    // R-1RK 12.5.9: the remainder lies in [-|real2|/2, |real2|/2).
+    withKernel (fun env ->
+        for a in [ -8; -7; 0; 6; 7; 8 ] do
+            for b in [ -3; 3; 4 ] do
+                let identity = sprintf "(=? %d (+ (* %d (div0 %d %d)) (mod0 %d %d)))" a b a b a b
+                assertEval env identity (Bool true)
+                let ranged =
+                    sprintf "(and? (<=? (- 0 (abs %d)) (* 2 (mod0 %d %d))) (<? (* 2 (mod0 %d %d)) (abs %d)))"
+                        b a b a b b
+                assertEval env ranged (Bool true))
+
+[<Fact>]
+let ``integer division by zero signals an error`` () =
+    withKernel (fun env ->
+        for expression in [ "(div 7 0)"; "(mod 7 0)"; "(div0 7 0)"; "(div-and-mod 7 0)" ] do
+            match evalIn env expression with
+            | Status message -> Assert.Contains("division by zero", message)
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``max and min reject an empty argument list`` () =
+    // The report returns exact infinities here, which IronKernel cannot represent.
+    withKernel (fun env ->
+        for expression in [ "(max)"; "(min)" ] do
+            match evalIn env expression with
+            | Status message -> Assert.Contains("at least one argument", message)
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``type predicates accept non-numbers but finite? does not`` () =
+    withKernel (fun env ->
+        // number? and integer? are type predicates (R-1RK 12.5.1).
+        assertEval env "(number? 'a)" (Bool false)
+        assertEval env "(integer? \"x\")" (Bool false)
+        // finite? requires numbers, so a non-number is an error.
+        match evalIn env "(finite? 'a)" with
+        | Status _ -> ()
+        | value -> failwithf "(finite? 'a) should signal an error, got %s" (showVal value))
+
+[<Fact>]
+let ``numeric comparison is not structural equality`` () =
+    withKernel (fun env ->
+        assertEval env "(=? 1 1.0)" (Bool true)
+        // eqv? compares representations, so it disagrees -- that is expected.
+        assertEval env "(eqv? 1 1.0)" (Bool false))

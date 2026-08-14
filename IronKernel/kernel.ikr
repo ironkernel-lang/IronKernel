@@ -257,6 +257,120 @@
                       (if (car ys) #t (aux (cdr ys)))))))
       (aux xs))))
 
+; --- R-1RK 12.5 Number features ----------------------------------------------
+; The required Numbers module. number?, integer?, finite? and zero? are runtime
+; primitives; the rest are derived here from the binary <, <= and arithmetic
+; primitives. Predicates are variadic and true for an empty argument list, per the
+; report's "every element" phrasing.
+
+; 12.5.2 / 12.5.3: chain predicates over consecutive elements. `=?` compares
+; numerically rather than structurally, so 1 and 1.0 are equal; eqv? would not be.
+(define $chain-compare?
+  (lambda (ok? xs)
+    (letrec ((aux (lambda (ys)
+                    (if (null? ys)
+                      #t
+                      (if (null? (cdr ys))
+                        #t
+                        (if (ok? (car ys) (car (cdr ys)))
+                          (aux (cdr ys))
+                          #f))))))
+      (aux xs))))
+
+(define =?  (lambda xs ($chain-compare? (lambda (a b) (if (<= a b) (<= b a) #f)) xs)))
+(define <?  (lambda xs ($chain-compare? (lambda (a b) (< a b)) xs)))
+(define <=? (lambda xs ($chain-compare? (lambda (a b) (<= a b)) xs)))
+(define >?  (lambda xs ($chain-compare? (lambda (a b) (< b a)) xs)))
+(define >=? (lambda xs ($chain-compare? (lambda (a b) (<= b a)) xs)))
+
+; 12.5.10 / 12.5.11
+(define $all-numbers?
+  (lambda (ok? xs)
+    (letrec ((aux (lambda (ys)
+                    (if (null? ys) #t (if (ok? (car ys)) (aux (cdr ys)) #f)))))
+      (aux xs))))
+
+(define positive? (lambda xs ($all-numbers? (lambda (x) (< 0 x)) xs)))
+(define negative? (lambda xs ($all-numbers? (lambda (x) (< x 0)) xs)))
+
+; 12.5.8: div and mod. The report defines n as the greatest integer with
+; real2 * n <= real1, which is only bounded for a positive divisor; its rationale
+; states the report follows the R6RS div/mod, whose defining property is
+; 0 <= mod < |real2| for either sign. That is what is implemented here.
+; A zero divisor is reported by / itself (R-1RK 12.8.2), so no separate check.
+(define div-and-mod
+  (lambda (a b)
+    (let* ((q (/ a b))
+           (r (- a (* b q))))
+      (if (< r 0)
+        (if (< 0 b)
+          (list (- q 1) (+ r b))
+          (list (+ q 1) (- r b)))
+        (list q r)))))
+
+(define div (lambda (a b) (car (div-and-mod a b))))
+(define mod (lambda (a b) (car (cdr (div-and-mod a b)))))
+
+; 12.5.9: div0 and mod0 put the remainder in [-|real2|/2, |real2|/2). The test is
+; (2 * r) >= |b| rather than r >= |b|/2, because |b|/2 is computed in integer
+; arithmetic and would truncate: for b = 3 it gives 1 rather than 1.5, which moves
+; the boundary and returns the wrong remainder for r = 1.
+; div-and-mod leaves 0 <= r < |b|, so only the upper adjustment is ever needed.
+(define div0-and-mod0
+  (lambda (a b)
+    (let* ((dm (div-and-mod a b))
+           (q (car dm))
+           (r (car (cdr dm))))
+      (if (<= (abs b) (* 2 r))
+        (if (< 0 b) (list (+ q 1) (- r b)) (list (- q 1) (+ r b)))
+        (list q r)))))
+
+(define div0 (lambda (a b) (car (div0-and-mod0 a b))))
+(define mod0 (lambda (a b) (car (cdr (div0-and-mod0 a b)))))
+
+; 12.5.11
+(define even? (lambda xs ($all-numbers? (lambda (x) (zero? (mod x 2))) xs)))
+(define odd?  (lambda xs ($all-numbers? (lambda (x) (if (zero? (mod x 2)) #f #t)) xs)))
+
+; 12.5.12
+(define abs (lambda (x) (if (< x 0) (- 0 x) x)))
+
+; 12.5.13: max and min over a non-empty list.
+(define $fold-reals
+  (lambda (pick xs)
+    (letrec ((aux (lambda (best ys)
+                    (if (null? ys) best (aux (pick best (car ys)) (cdr ys))))))
+      (if (null? xs)
+        ; The report returns exact negative/positive infinity for the empty case,
+        ; which IronKernel has no representation for; recorded as a divergence.
+        (error "max and min require at least one argument")
+        (aux (car xs) (cdr xs))))))
+
+(define max (lambda xs ($fold-reals (lambda (a b) (if (< a b) b a)) xs)))
+(define min (lambda xs ($fold-reals (lambda (a b) (if (< b a) b a)) xs)))
+
+; 12.5.14: gcd by Euclid, lcm from it. gcd with no arguments is 0 here rather than
+; the report's exact positive infinity, which this implementation cannot represent;
+; the divergence is recorded in the conformance matrix.
+(define $gcd2
+  (lambda (a b)
+    (letrec ((aux (lambda (x y) (if (zero? y) x (aux y (mod x y))))))
+      (aux (abs a) (abs b)))))
+
+(define gcd
+  (lambda xs
+    (letrec ((aux (lambda (acc ys) (if (null? ys) acc (aux ($gcd2 acc (car ys)) (cdr ys))))))
+      (aux 0 xs))))
+
+(define lcm
+  (lambda xs
+    (letrec ((aux (lambda (acc ys)
+                    (if (null? ys)
+                      acc
+                      (let ((n (abs (car ys))))
+                        (if (zero? n) 0 (aux (/ (* acc n) ($gcd2 acc n)) (cdr ys))))))))
+      (aux 1 xs))))
+
 ; --- R-1RK canonical names ---------------------------------------------------
 ; The report spells operatives with a leading `$`, and the primitive definer as
 ; `$define!`. IronKernel's own spelling drops the sigil; these bind the report's

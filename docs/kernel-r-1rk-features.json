@@ -1254,7 +1254,7 @@
         "robust?",
         "undefined?"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.6.2",
@@ -1267,7 +1267,7 @@
         "get-real-internal-bounds",
         "get-real-exact-bounds"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.6.3",
@@ -1280,7 +1280,7 @@
         "get-real-internal-primary",
         "get-real-exact-primary"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.6.4",
@@ -1292,7 +1292,7 @@
       "bindings": [
         "make-inexact"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.6.5",
@@ -1305,7 +1305,7 @@
         "real->inexact",
         "real->exact"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.6.6",
@@ -1318,7 +1318,7 @@
         "with-strict-arithmetic",
         "get-strict-arithmetic?"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.7.1",
@@ -1331,7 +1331,7 @@
         "with-narrow-arithmetic",
         "get-narrow-arithmetic?"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.8.1",
@@ -1343,7 +1343,7 @@
       "bindings": [
         "rational?"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.8.2",
@@ -1355,7 +1355,7 @@
       "bindings": [
         "/"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.8.3",
@@ -1368,7 +1368,7 @@
         "numerator",
         "denominator"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.8.4",
@@ -1383,7 +1383,7 @@
         "truncate",
         "round"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.8.5",
@@ -1396,7 +1396,7 @@
         "rationalize",
         "simplest-rational"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.9.1",
@@ -1408,7 +1408,7 @@
       "bindings": [
         "real?"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.9.2",
@@ -1421,7 +1421,7 @@
         "exp",
         "log"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.9.3",
@@ -1435,7 +1435,7 @@
         "cos",
         "tan"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.9.4",
@@ -1449,7 +1449,7 @@
         "acos",
         "atan"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.9.5",
@@ -1461,7 +1461,7 @@
       "bindings": [
         "sqrt"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.9.6",
@@ -1473,7 +1473,7 @@
       "bindings": [
         "expt"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.10.1",
@@ -1485,7 +1485,7 @@
       "bindings": [
         "complex?"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.10.2",
@@ -1499,7 +1499,7 @@
         "real-part",
         "imag-part"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "12.10.3",
@@ -1513,7 +1513,7 @@
         "magnitude",
         "angle"
       ],
-      "optional": false
+      "optional": true
     },
     {
       "entry": "13.1.1",
