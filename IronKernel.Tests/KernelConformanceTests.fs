@@ -85,7 +85,26 @@ let private behaviouralChecks () : (string * string list) list = [
                "(equal? \"ab\" \"ab\")" ]
     "4.4.1", [ "(symbol? 'a)"; "(eqv? (symbol? 1) #f)"; "(symbol?)" ]
     "4.5.1", [ "(inert? #inert)"; "(eqv? (inert? 1) #f)"; "(inert?)" ]
+    // 4.2.1 / 6.5.1: eq? is coarser here than the report's (see the divergence), so
+    // these check what it does guarantee.
+    "4.2.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)"; "(eq? 1 1)" ]
     "4.6.1", [ "(pair? (cons 1 2))"; "(eqv? (pair? ()) #f)" ]
+    // 4.9.1: $define! binds in the current environment and returns inert.
+    "4.9.1", [ "(let ((e (get-current-environment))) (sequence (eval (list $define! 'dz 11) e) (=? dz 11)))"
+               "(inert? ($define! dy 1))" ]
+    "6.5.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)" ]
+    "6.7.6", [ // $letrec* binds sequentially, so a later binding sees an earlier one.
+               "(=? (letrec* ((a 1) (b (+ a 1))) b) 2)" ]
+    "6.7.7", [ "(=? (let-redirect (make-environment) ((x 5)) x) 5)"
+               // The body is evaluated in the redirected environment, so a binding of
+               // the caller is not visible: `car` is unbound in a fresh environment.
+               "(=? (let-redirect (get-current-environment) ((x 5)) (car (list x))) 5)" ]
+    "6.7.10", [ "(environment? (bindings->environment (n 3)))"
+                "(=? (remote-eval n (bindings->environment (n 3))) 3)" ]
+    "6.8.2", [ "(sequence (provide! (pa pb) (define pa 1) (define pb 2)) (=? (+ pa pb) 3))"
+               // Only the named symbols escape; the helper stays private.
+               "(sequence (provide! (shown) (define hidden 41) (define shown (+ hidden 1))) (=? shown 42))" ]
+    "6.8.3", [ "(sequence (define src (bindings->environment (q 9))) (import! src q) (=? q 9))" ]
     "4.10.1", [ "(operative? vau)"; "(eqv? (operative? car) #f)"; "(operative?)" ]
     "4.10.2", [ "(applicative? car)"; "(eqv? (applicative? vau) #f)"; "(applicative?)" ]
     "5.7.1", [ "(equal? (get-list-metrics (list 1 2 3)) (list 3 1 3 0))"
@@ -215,6 +234,15 @@ let private behaviouralChecks () : (string * string list) list = [
     "12.10.2", [ "(=? (real-part (make-rectangular 3 4)) 3)"
                  "(=? (imag-part (make-rectangular 3 4)) 4)"
                  "(=? (* (make-rectangular 0 1) (make-rectangular 0 1)) -1)" ]
+    // 15.1.5 / 15.1.7 / 15.1.8: a value written to a file and read back must come
+    // back equal. Numbers do not survive this, because `write` prints them as
+    // `<obj 42 : Int32>`, which `read` cannot parse -- the 3.6 divergence. Symbols,
+    // lists and booleans do.
+    "15.1.5", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (. System.IO.File Delete f) #t))" ]
+    "15.1.7", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v 'alpha))))))" ]
+    "15.1.8", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write '(a b c) p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v '(a b c)))))))" ]
+    // 15.2.2: load evaluates the file's forms in the calling environment.
+    "15.2.2", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (. System.IO.File WriteAllText f \"(define loaded-marker 7)\") (load f) (. System.IO.File Delete f) (=? loaded-marker 7)))" ]
     "12.10.3", [ "(<? (abs (- (magnitude (make-rectangular 3 4)) 5)) 0.000001)"
                  "(<? (abs (- (angle (make-rectangular 0 1)) 1.5707963267948966)) 0.000001)"
                  "(=? (make-polar 1 0) 1)" ]
@@ -242,7 +270,9 @@ let private behaviouralChecks () : (string * string list) list = [
 /// row is not read as "identical to the report".
 let private divergences () = [
     "3.6", "External representations differ: IronKernel prints a number as "
-           + "`<obj 3 : Int32>` rather than `3`."
+           + "`<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a "
+           + "number written to a port cannot be read back by `read`; symbols, lists "
+           + "and booleans round-trip."
     "12.2", "There is no exact/inexact distinction. Numbers are CLR primitives, so "
             + "exactness, bounds and robustness (module Inexact, 12.6) are absent and "
             + "no number can be an exact infinity."

@@ -259,7 +259,16 @@ module Eval =
             else
                 match evalArgs _env (newContinuation _env) args with
                 | Choice1Of2 e -> fail e
-                | Choice2Of2 q -> ofResult (f q)
+                // The result has to be handed to `cont`, not returned as `Done`.
+                // `Done` ends the trampoline, which was harmless while every combiner
+                // ran inside its own nested `run`, but since compiled code shares one
+                // trampoline (ADR 0004) it discards the rest of the computation: the
+                // value of `(define p (open-output-file f))` became the value of the
+                // whole form and the binding never happened.
+                | Choice2Of2 q ->
+                    match f q with
+                    | Choice1Of2 error -> fail error
+                    | Choice2Of2 value -> More (fun () -> continueEvalStep _env cont value)
         | Applicative f -> evalArgsExStep _env cont args f
         | Continuation (cr, capturedPrompt, ct') ->
             match args with
