@@ -132,9 +132,11 @@ let private behaviouralChecks () : (string * string list) list = [
                 "(=? 1 1.0)"; "(eqv? (=? 1 2) #f)" ]
     "12.5.3", [ "(<=?)"; "(<=? 1)"; "(<=? 1 3 7 15)"; "(eqv? (<=? 1 7 3 15) #f)"
                 "(<? 1 2 3)"; "(eqv? (<? 1 1) #f)"; "(>? 3 2 1)"; "(>=? 3 3 1)" ]
-    "12.5.4", [ "(eqv? (+ 1 2) 3)" ]
-    "12.5.5", [ "(eqv? (* 3 4) 12)" ]
-    "12.5.6", [ "(eqv? (- 5 2) 3)" ]
+    "12.5.4", [ "(=? (+ 1 2) 3)"; "(=? (+) 0)"; "(=? (+ 7) 7)"; "(=? (+ 1 2 3 4 5) 15)" ]
+    "12.5.5", [ "(=? (* 3 4) 12)"; "(=? (*) 1)"; "(=? (* 7) 7)"; "(=? (* 1 2 3 4) 24)" ]
+    // 12.5.6: (- number . numbers) needs at least two arguments; the report
+    // deliberately gives `-` no unary meaning.
+    "12.5.6", [ "(=? (- 5 2) 3)"; "(=? (- 10 3 2) 5)" ]
     "12.5.7", [ "(zero? 0)"; "(zero? 0 0)"; "(eqv? (zero? 1) #f)"; "(zero?)" ]
     "12.5.8", [ "(=? (div 7 3) 2)"; "(=? (mod 7 3) 1)"
                 // Negative operands: the defining property is 0 <= mod < |divisor|.
@@ -164,8 +166,6 @@ let private divergences () = [
     "12.2", "There is no exact/inexact distinction. Numbers are CLR primitives, so "
             + "exactness, bounds and robustness (module Inexact, 12.6) are absent and "
             + "no number can be an exact infinity."
-    "12.5.4", "`+`, `*` and `-` are binary. The report makes them variadic, with "
-              + "`(+)` exact zero and `(*)` exact one."
     "12.5.13", "`(max)` and `(min)` with no arguments signal an error. The report "
                + "returns exact negative and positive infinity, which IronKernel "
                + "cannot represent."

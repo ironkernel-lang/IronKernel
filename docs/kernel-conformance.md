@@ -43,7 +43,6 @@ exercised, not that IronKernel matches the report exactly.
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. |
 | 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
-| 12.5.4 | `+`, `*` and `-` are binary. The report makes them variadic, with `(+)` exact zero and `(*)` exact one. |
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
 
@@ -182,9 +181,9 @@ exercised, not that IronKernel matches the report exactly.
 | 12.5.1 | `number?, finite?, integer?` | Number features | `verified` | 10 behavioural check(s) |
 | 12.5.2 | `=?` | Number features | `verified` | 5 behavioural check(s) |
 | 12.5.3 | `<?, <=?, >=?, >?` | Number features | `verified` | 8 behavioural check(s) |
-| 12.5.4 | `+` | Number features | `verified` | 1 behavioural check(s) |
-| 12.5.5 | `*` | Number features | `verified` | 1 behavioural check(s) |
-| 12.5.6 | `-` | Number features | `verified` | 1 behavioural check(s) |
+| 12.5.4 | `+` | Number features | `verified` | 4 behavioural check(s) |
+| 12.5.5 | `*` | Number features | `verified` | 4 behavioural check(s) |
+| 12.5.6 | `-` | Number features | `verified` | 2 behavioural check(s) |
 | 12.5.7 | `zero?` | Number features | `verified` | 4 behavioural check(s) |
 | 12.5.8 | `div, mod, div-and-mod` | Number features | `verified` | 8 behavioural check(s) |
 | 12.5.9 | `div0, mod0, div0-and-mod0` | Number features | `verified` | 7 behavioural check(s) |

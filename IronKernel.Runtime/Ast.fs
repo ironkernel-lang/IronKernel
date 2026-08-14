@@ -64,6 +64,11 @@ module Ast =
         effect : ContractEffect
         inlineable : bool
         trust : ContractTrust
+        /// `None` fixes the arity at `operands.Length`. `Some n` accepts n or more
+        /// arguments, matching argument i against `operands[i]` and every argument
+        /// past the end against the last declared shape. R-1RK's arithmetic is
+        /// variadic ((+ . numbers)), so a fixed arity cannot describe it.
+        minimumOperands : int option
     }
 
     type ContinuationType = Full | Delimited

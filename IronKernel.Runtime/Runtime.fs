@@ -427,7 +427,8 @@
                           result = result
                           effect = effect
                           inlineable = inlineable
-                          trust = Asserted }
+                          trust = Asserted
+                          minimumOperands = None }
                     match Contracts.attach contract value with
                     | Some contracted ->
                         match defineVar env name contracted with
@@ -634,9 +635,44 @@
             | [found; _] -> fail (TypeMismatch("non-negative int", found))
             | bad -> fail (NumArgs(2, bad))
 
-        let plus env cont args = numericBinOp env cont opAdd args
-        let minus env cont args = numericBinOp env cont opMinus args
-        let times env cont args = numericBinOp env cont opMultiply args
+        /// R-1RK 12.5.4 / 12.5.5: (+ . numbers) and (* . numbers) are variadic, with
+        /// the empty sum zero and the empty product one. Folding left keeps the CLR
+        /// extensions working -- (+ date timespan) is still a DateTime -- because each
+        /// step is the same binary operation as before.
+        let private foldNumeric op identity env cont args =
+            match args with
+            | [] -> bounceContinue env cont (Obj identity)
+            | first :: rest ->
+                let rec loop acc = function
+                    | [] -> bounceContinue env cont acc
+                    | next :: remaining ->
+                        match op acc next with
+                        | Choice2Of2 result -> loop result remaining
+                        | Choice1Of2 error -> fail error
+                loop first rest
+
+        /// The binary case is matched directly. Two arguments is overwhelmingly the
+        /// common shape, and routing it through the fold costs a closure and a list
+        /// traversal on the hottest path in the language.
+        let inline private binaryOrFold op identity env cont args =
+            match args with
+            | [a; b] ->
+                match op a b with
+                | Choice2Of2 result -> bounceContinue env cont result
+                | Choice1Of2 error -> fail error
+            | _ -> foldNumeric op identity env cont args
+
+        let plus env cont args = binaryOrFold opAdd (box 0) env cont args
+        let times env cont args = binaryOrFold opMultiply (box 1) env cont args
+
+        /// R-1RK 12.5.6: (- number . numbers) needs at least two arguments. The report
+        /// declines to give `-` a unary meaning, so that negation is not silently
+        /// spelled the same way as subtraction.
+        let minus env cont args =
+            match args with
+            | [_; _] -> binaryOrFold opMinus (box 0) env cont args
+            | _ :: _ :: _ -> foldNumeric opMinus (box 0) env cont args
+            | _ -> fail (NumArgs(2, args))
         let divide env cont args = numericBinOp env cont opDivide args
         let lessThan env cont args = numBoolBinop env cont opLessThan args
         let lessThanOrEqual env cont args = numBoolBinop env cont opLessThanOrEqual args
@@ -768,19 +804,23 @@
                     // in a validation continuation, which these hot paths avoid.
                     | "+" ->
                         Some(
-                            certifiedApplicative
+                            certifiedVariadicApplicative
                                 name
                                 [ OneOfShape [NumberShape; DateTimeShape]
                                   OneOfShape [NumberShape; TimeSpanShape] ]
+                                0
                                 AnyShape)
                     | "-" ->
                         Some(
-                            certifiedApplicative
+                            certifiedVariadicApplicative
                                 name
                                 [ OneOfShape [NumberShape; DateTimeShape]
                                   OneOfShape [NumberShape; DateTimeShape] ]
+                                2
                                 AnyShape)
-                    | "*" | "/" ->
+                    | "*" ->
+                        Some(certifiedVariadicApplicative name [NumberShape; NumberShape] 0 NumberShape)
+                    | "/" ->
                         Some(certifiedApplicative name [NumberShape; NumberShape] NumberShape)
                     | "<" | "<=" | ">" ->
                         Some(certifiedApplicative name [NumberShape; NumberShape] BooleanShape)

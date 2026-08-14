@@ -80,28 +80,22 @@ namespace IronKernel
                     | 3 -> Singles(toSingle a, toSingle b)
                     | _ -> Doubles(toDouble a, toDouble b))
 
-        /// `validate` rejects operand combinations for which the operation is undefined,
-        /// before the CLR is asked to perform it. The `try` is a backstop for the rest:
-        /// integer division can still overflow (Int32.MinValue / -1), and an escaping
-        /// CLR exception would fault the process rather than raise a Kernel error.
-        let private numericBinaryOpWith validate apply (a': LispVal) (b': LispVal) =
+        /// No exception handler and no validation hook on this path. F# addition,
+        /// subtraction and multiplication are unchecked and wrap rather than raise, so
+        /// a handler would guard against nothing while sitting on the hottest operation
+        /// in the language; division is the only arithmetic that can raise, and it is
+        /// implemented separately below with its own checks.
+        let private numericBinaryOp apply (a': LispVal) (b': LispVal) =
             match a', b' with
             | Obj a, Obj b ->
                 match widen a b with
-                | Choice2Of2 widened ->
-                    match validate widened with
-                    | Some error -> throwError error
-                    | None ->
-                        try returnM (Obj(apply widened))
-                        with ex -> throwError (ClrException ex)
+                | Choice2Of2 widened -> returnM (Obj(apply widened))
                 | Choice1Of2 FirstOperand ->
                     throwError (ClrTypeMismatch("number", a.GetType().Name))
                 | Choice1Of2 SecondOperand ->
                     throwError (ClrTypeMismatch(rankName (rankOf a), b.GetType().Name))
             | Obj _, found -> throwError (TypeMismatch("object", found))
             | found, _ -> throwError (TypeMismatch("object", found))
-
-        let private numericBinaryOp apply = numericBinaryOpWith (fun _ -> None) apply
 
         let private comparisonBinaryOp apply (a': LispVal) (b': LispVal) =
             match a', b' with
@@ -187,13 +181,29 @@ namespace IronKernel
         /// division throws, and floating-point division quietly yields an infinity,
         /// which the report rejects because the limit depends on the direction zero
         /// is approached from.
+        /// Division is the one arithmetic operation the CLR can still raise from once a
+        /// zero divisor is excluded: Int32.MinValue / -1 has no representable result.
+        /// An escaping exception would fault the process, so this path keeps a handler.
+        let private guardedDivide widened =
+            try Choice2Of2(divideWidened widened)
+            with ex -> Choice1Of2 ex
+
         let opDivide a' b' =
-            numericBinaryOpWith
-                (fun widened ->
-                    if divisorIsZero widened then Some(Default "division by zero") else None)
-                divideWidened
-                a'
-                b'
+            match a', b' with
+            | Obj a, Obj b ->
+                match widen a b with
+                | Choice2Of2 widened when divisorIsZero widened ->
+                    throwError (Default "division by zero")
+                | Choice2Of2 widened ->
+                    match guardedDivide widened with
+                    | Choice2Of2 result -> returnM (Obj result)
+                    | Choice1Of2 ex -> throwError (ClrException ex)
+                | Choice1Of2 FirstOperand ->
+                    throwError (ClrTypeMismatch("number", a.GetType().Name))
+                | Choice1Of2 SecondOperand ->
+                    throwError (ClrTypeMismatch(rankName (rankOf a), b.GetType().Name))
+            | Obj _, found -> throwError (TypeMismatch("object", found))
+            | found, _ -> throwError (TypeMismatch("object", found))
 
         let opLessThan a' b' = comparisonBinaryOp lessThanWidened a' b'
         let opLessThanOrEqual a' b' = comparisonBinaryOp lessThanOrEqualWidened a' b'

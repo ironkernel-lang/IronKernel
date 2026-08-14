@@ -192,3 +192,38 @@ let ``numeric comparison is not structural equality`` () =
         assertEval env "(=? 1 1.0)" (Bool true)
         // eqv? compares representations, so it disagrees -- that is expected.
         assertEval env "(eqv? 1 1.0)" (Bool false))
+
+[<Fact>]
+let ``arithmetic is variadic with the report's identities`` () =
+    // R-1RK 12.5.4/12.5.5: (+ . numbers) and (* . numbers), empty sum zero and
+    // empty product one.
+    [
+        "(+)", Obj 0
+        "(*)", Obj 1
+        "(+ 7)", Obj 7
+        "(* 7)", Obj 7
+        "(+ 1 2 3 4 5)", Obj 15
+        "(* 1 2 3 4)", Obj 24
+        "(- 10 3 2)", Obj 5
+    ] |> evalSession
+
+[<Fact>]
+let ``minus keeps a minimum arity of two`` () =
+    // R-1RK 12.5.6 gives `-` no unary meaning, so that negation is not spelled the
+    // same way as subtraction.
+    let env = freshEnv ()
+    match evalIn env "(- 5)" with
+    | Status message -> Assert.Contains("at least 2 operands", message)
+    | value -> failwithf "(- 5) should signal an error, got %s" (showVal value)
+
+[<Fact>]
+let ``variadic addition preserves the datetime extension`` () =
+    // Folding left keeps (+ date timespan) working, and repeating the timespan
+    // stays well typed because each step is the same binary operation.
+    withKernel (fun env ->
+        ignore (evalIn env "(define d (new System.DateTime 2020 1 1))")
+        ignore (evalIn env "(define ts (new System.TimeSpan 24 0 0))")
+        // Compared as elapsed hours rather than by object equality, which keeps the
+        // assertion about arithmetic instead of about CLR equality semantics.
+        assertEval env "(=? (.get (- (+ d ts) d) TotalHours) 24.0)" (Bool true)
+        assertEval env "(=? (.get (- (+ d ts ts) d) TotalHours) 48.0)" (Bool true))

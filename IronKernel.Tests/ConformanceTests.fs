@@ -62,7 +62,9 @@ let ``generated malformed expressions preserve interpreter compiler errors`` () 
             let number = generateNumber random 2 []
             let operator = choose random ["+"; "-"; "*"]
             match index % 6 with
-            | 0 -> $"({operator} {number})"
+            // `-` keeps a minimum arity of two (R-1RK 12.5.6); `+` and `*` are
+            // variadic, so a single argument is well formed for them.
+            | 0 -> $"(- {number})"
             | 1 -> $"({operator} #t {number})"
             | 2 -> $"(if {number} 1 2)"
             | 3 -> $"(car {number})"
@@ -104,7 +106,7 @@ let ``interpreter and compiler agree on core evaluation`` () =
 [<Fact>]
 let ``interpreter and compiler report structured errors without corrupting state`` () =
     let cases =
-        [ "(+ 1)", (function ContractViolation "+ expected 2 operands, found 1" -> true | _ -> false)
+        [ "(- 1)", (function ContractViolation "- expected at least 2 operands, found 1" -> true | _ -> false)
           "(car 42)", (function TypeMismatch ("pair", Obj _) -> true | _ -> false)
           "(if 1 2 3)", (function TypeMismatch ("bool", Obj _) -> true | _ -> false)
           "missing", (function UnboundVar (_, "missing") -> true | _ -> false)
@@ -202,3 +204,13 @@ let ``guarded if preserves continuation context`` () =
           "(define saved #f)"
           "(+ 10 (if (call/cc (lambda (k) (begin (define saved k) #t))) 1 2))"
           "(saved #f)" ]
+
+[<Fact>]
+let ``interpreter and compiler agree on variadic arithmetic`` () =
+    // R-1RK 12.5.4/12.5.5 make + and * variadic, with the empty sum zero and the
+    // empty product one. These arities used to be contract violations.
+    assertParitySession
+        [ "(load \"kernel.ikr\")"
+          "(+)"; "(*)"; "(+ 7)"; "(* 7)"
+          "(+ 1 2 3 4 5)"; "(* 1 2 3 4)"; "(- 10 3 2)"
+          "(+ 1 2.5 3)" ]
