@@ -315,9 +315,17 @@
                 match sequence (List.map toObjects tail) [] with
                 | Choice1Of2 e -> fail e
                 | Choice2Of2 mapargs ->
-                    let str = String.Format(sf :?> string,List.toArray mapargs) 
-                    System.Console.Write(str)
-                    bounceContinue env cont Inert
+                    // A format string with more placeholders than arguments raises
+                    // FormatException, which escaped the evaluator and aborted the
+                    // process rather than signalling a Kernel error.
+                    match
+                        (try Choice2Of2(String.Format(sf :?> string, List.toArray mapargs))
+                         with ex -> Choice1Of2 ex)
+                        with
+                    | Choice1Of2 ex -> fail (Default("printf: " + ex.Message))
+                    | Choice2Of2 str ->
+                        System.Console.Write(str)
+                        bounceContinue env cont Inert
           | _ -> fail (NumArgs(2,prms))
 
         let show env cont (prms : LispVal list) =
