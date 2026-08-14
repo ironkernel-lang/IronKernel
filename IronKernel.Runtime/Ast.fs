@@ -133,6 +133,14 @@ module Ast =
         /// stays independent of the compiler (ADR 0002).
         | CompiledCode of (LispVal -> LispVal -> Step) list
         | NativeCode of NativeFuncRecord
+        /// A keyed dynamic binding (R-1RK 10.1.1). It is not code -- returning
+        /// through it just ends the binding -- but it lives here so that the binding
+        /// is a *continuation frame* rather than an entry on a side stack. That is
+        /// what makes the dynamic extent right in the presence of first-class
+        /// continuations: capturing a continuation inside the extent captures the
+        /// binding with it, and resuming that continuation from outside re-enters
+        /// the binding, where a push/pop discipline would already have popped it.
+        | DynamicBinding of System.Guid * LispVal
     and ContinuationRecord = {
         closure     : LispVal
         currentCont : DeferredCode option
@@ -291,6 +299,20 @@ module Ast =
         match cont with
         | Continuation(cr, mc, ct) ->
             Continuation ({closure = env; currentCont = Some (NativeCode { cont = f ; args = None} ); nextCont = Some (Continuation(cr,None, Full)) ; args = None},mc, ct)
+        | _ -> invalidArg (nameof cont) "Expected a continuation"
+
+    /// Pushes a keyed dynamic binding onto `cont`, the same shape `makeCPS` builds:
+    /// the metacontinuation stays at the outermost record, since the evaluator treats
+    /// one nested inside `nextCont` as an internal error.
+    let makeDynamicBinding env cont key value =
+        match cont with
+        | Continuation(cr, mc, ct) ->
+            Continuation (
+                { closure = env
+                  currentCont = Some (DynamicBinding(key, value))
+                  nextCont = Some (Continuation(cr, None, Full))
+                  args = None },
+                mc, ct)
         | _ -> invalidArg (nameof cont) "Expected a continuation"
 
     let unwords (lst: string list) = System.String.Join(" ",List.toArray(*mono needs this call toArray*) lst)

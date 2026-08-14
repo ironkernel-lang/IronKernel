@@ -117,3 +117,6 @@
 (sqrt (/ 1 4))
 (gcd (/ 1 3) 2)
 (even? (/ 1 3))
+((car (make-keyed-dynamic-variable)) 1 2)
+((car (cdr (make-keyed-dynamic-variable))))
+((car (make-keyed-dynamic-variable)) 1 (lambda () (car ())))

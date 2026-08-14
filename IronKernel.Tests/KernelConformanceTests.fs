@@ -177,6 +177,38 @@ let private behaviouralChecks () : (string * string list) list = [
     "8.1.1", [ "(let ((t (make-encapsulation-type))) (let ((e ((car t) 1)) (p (car (cdr t)))) (p e)))" ]
     "9.1.1", [ "(promise? (memoize 1))" ]
     "9.1.2", [ "(eqv? (force (memoize 5)) 5)" ]
+    // R-1RK 10.1.1. `b` and `a` below are the binder and accessor of one fresh
+    // keyed dynamic variable.
+    "10.1.1", [ // The accessor returns the bound object for the extent of the call.
+                "(let ((p (make-keyed-dynamic-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p)))) (=? (b 42 (lambda () (a))) 42)))"
+                // The binder's value is the combiner's, not the bound object.
+                "(let ((p (make-keyed-dynamic-variable)))"
+                + " (=? ((car p) 42 (lambda () 99)) 99))"
+                // Dynamic rather than lexical: reached through an intervening call.
+                "(let ((p (make-keyed-dynamic-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (let ((peek (lambda () (a)))) (=? (b 7 (lambda () (peek))) 7))))"
+                // The nearest enclosing binding wins, and the outer one is restored.
+                "(let ((p (make-keyed-dynamic-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (=? (b 1 (lambda () (b 2 (lambda () (a))))) 2)))"
+                "(let ((p (make-keyed-dynamic-variable)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (=? (b 1 (lambda () (b 2 (lambda () 0)) (a))) 1)))"
+                // Each call makes a different variable, so one binder's object is not
+                // visible through the other's accessor.
+                "(let ((p (make-keyed-dynamic-variable)) (q (make-keyed-dynamic-variable)))"
+                + " (let ((bp (car p)) (ap (car (cdr p))) (bq (car q)))"
+                + " (=? (bp 1 (lambda () (bq 2 (lambda () (ap))))) 1)))"
+                // The binding is part of the continuation, so a continuation captured
+                // inside the extent still sees it when resumed from outside.
+                "(let ((p (make-keyed-dynamic-variable)) (flag (vector 0)))"
+                + " (let ((b (car p)) (a (car (cdr p))))"
+                + " (=? (let ((k (call/cc (lambda (return)"
+                + " (b 11 (lambda () (call/cc (lambda (c) (return c))) (a)))))))"
+                + " (if (zero? (vector-ref flag 0))"
+                + " (begin (vector-set! flag 0 1) (k 0)) k)) 11)))" ]
     "9.1.4", [ "(eqv? (force (memoize 5)) 5)" ]
     "12.5.1", [ "(number? 1)"; "(number? 1.5)"; "(eqv? (number? 'a) #f)"; "(number?)"
                 "(integer? 3)"; "(integer? 3.0)"; "(eqv? (integer? 3.5) #f)"
@@ -382,9 +414,14 @@ let private describe = function
     | Partial -> "partial"
     | Absent' -> "absent"
 
-let private renderMatrix () =
+/// Every feature paired with its probed status, against a real bootstrapped
+/// environment. Both the matrix and the README check read from this.
+let private matrixRows () =
     let env = conformanceEnv ()
-    let rows = features () |> List.map (fun f -> f, statusOf env f)
+    features () |> List.map (fun f -> f, statusOf env f)
+
+let private renderMatrix () =
+    let rows = matrixRows ()
     let output = StringBuilder()
     let appendLine (text: string) = output.Append(text).Append('\n') |> ignore
 
@@ -511,6 +548,30 @@ let ``conformance matrix is current`` () =
             (committed = rendered.Replace("\r\n", "\n")),
             "docs/kernel-conformance.md is out of date. Regenerate it with "
             + "IRONKERNEL_UPDATE_CONFORMANCE=1 dotnet test --filter conformance")
+
+/// The README quotes the matrix's headline counts. They are prose, not generated,
+/// and they had already drifted once -- claiming 25 of 34 complete modules when the
+/// matrix has always listed 44 -- so a reader had no way to tell which was right.
+[<Fact>]
+let ``the README quotes the matrix's current counts`` () =
+    let rows = matrixRows ()
+    let entriesWith status =
+        rows |> List.filter (fun (_, (s, _, _)) -> s = status) |> List.length
+    let modules =
+        rows
+        |> List.groupBy (fun (f, _) -> f.Section)
+        |> List.map (fun (_, group) -> group |> List.forall (fun (_, (s, _, _)) -> s = Verified))
+    let expected =
+        [ sprintf "**%d are verified" (entriesWith Verified)
+          sprintf "and %d are absent**" (entriesWith Absent')
+          sprintf "**%d of %d\nmodules are complete**"
+            (modules |> List.filter id |> List.length) modules.Length ]
+    let readme =
+        File.ReadAllText(Path.Combine(repoRoot (), "README.md")).Replace("\r\n", "\n")
+    for fragment in expected do
+        Assert.True(
+            readme.Contains fragment,
+            sprintf "README.md is out of date: it should say %s" (fragment.Replace("\n", " ")))
 
 [<Fact>]
 let ``every behavioural check names a real report entry`` () =

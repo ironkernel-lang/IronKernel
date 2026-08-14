@@ -104,6 +104,32 @@ module Eval =
                 combined <- appendContinuationRecord records.[index] combined
             Some(combined, frame)
 
+    /// The nearest keyed dynamic binding for `key`, looking outward from `continuation`
+    /// (R-1RK 10.1.1). The chain is walked the way the evaluator walks it -- along
+    /// `nextCont`, then into the metacontinuation's parent when a segment runs out --
+    /// so a binding is visible for precisely the dynamic extent of the binder's call.
+    let findDynamicBinding key continuation =
+        let mutable current = continuation
+        let mutable found = None
+        let mutable searching = true
+        while searching do
+            match current with
+            | Continuation (record, metaCont, ct) ->
+                match record.currentCont with
+                | Some (DynamicBinding(bindingKey, value)) when bindingKey = key ->
+                    found <- Some value
+                    searching <- false
+                | _ ->
+                    match record.nextCont with
+                    | Some (Continuation (next, None, _)) ->
+                        current <- Continuation (next, metaCont, ct)
+                    | _ ->
+                        match metaCont with
+                        | Some frame -> current <- frame.parentCont
+                        | None -> searching <- false
+            | _ -> searching <- false
+        found
+
     let promptContinuation env parent tag handler =
         Continuation(
             { closure = env
@@ -151,6 +177,11 @@ module Eval =
                     form
                         e
                         (Continuation ({ closure = e; currentCont = Some (CompiledCode tail); nextCont = nextCont; args = None }, metaCont, ct)))
+        // A keyed dynamic binding (R-1RK 10.1.1) holds no code. Returning through it
+        // is what ends the binder's dynamic extent, so it simply hands the value
+        // outward exactly as an exhausted body does.
+        | Continuation ({ closure = e; currentCont = Some (DynamicBinding _); nextCont = nextCont }, metaCont, ct) ->
+            finishDeferredBody e nextCont metaCont ct value
         | _ -> fail (TypeMismatch ("continuation", cont))
 
     /// A deferred body ran out of forms: hand the value to whatever follows.
