@@ -562,3 +562,42 @@ let ``run with non-source args forwards them to the discovered project`` () =
         Assert.DoesNotContain("Parser error", stderr)
     finally
         Directory.Delete(root, true)
+
+/// Drives the REPL with stdin redirected, which is exactly the case the
+/// Mono.Terminal line editor cannot handle.
+let private runReplWithInput (input: string) =
+    let startInfo = ProcessStartInfo("dotnet")
+    startInfo.WorkingDirectory <- repoRoot
+    startInfo.UseShellExecute <- false
+    startInfo.RedirectStandardInput <- true
+    startInfo.RedirectStandardError <- true
+    startInfo.RedirectStandardOutput <- true
+    startInfo.ArgumentList.Add "run"
+    startInfo.ArgumentList.Add "--project"
+    startInfo.ArgumentList.Add "IronKernel"
+    startInfo.ArgumentList.Add "-c"
+    startInfo.ArgumentList.Add buildConfiguration
+    startInfo.ArgumentList.Add "--no-build"
+    use child = Process.Start startInfo
+    child.StandardInput.Write input
+    child.StandardInput.Close()
+    let stdout = child.StandardOutput.ReadToEnd()
+    let stderr = child.StandardError.ReadToEnd()
+    child.WaitForExit()
+    child.ExitCode, stdout, stderr
+
+[<Fact>]
+let ``repl evaluates piped stdin without a tty`` () =
+    let exitCode, stdout, stderr = runReplWithInput "(+ 1 2)\n(* 6 7)\nquit\n"
+    Assert.Equal(0, exitCode)
+    Assert.DoesNotContain("Unhandled exception", stderr)
+    Assert.DoesNotContain("SetCursorPosition", stderr)
+    Assert.DoesNotContain("DivideByZeroException", stderr)
+    Assert.Contains("3", stdout)
+    Assert.Contains("42", stdout)
+
+[<Fact>]
+let ``repl exits cleanly at end of piped input`` () =
+    let exitCode, _, stderr = runReplWithInput "(+ 1 2)\n"
+    Assert.Equal(0, exitCode)
+    Assert.DoesNotContain("Unhandled exception", stderr)
