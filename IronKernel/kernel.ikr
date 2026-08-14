@@ -513,6 +513,33 @@
                       (if (equal? object (car rest)) #t (aux (cdr rest)))))))
       (aux ls))))
 
+; --- R-1RK pair mutation features that do not mutate (6.4) -------------------
+; The Pair mutation module also has set-car!, set-cdr!, encycle! and append!,
+; which IronKernel's immutable pairs cannot support; these four need no mutation.
+
+; 6.4.3 / 6.4.4: assq and memq? are assoc and member? with eq? in place of
+; equal?. IronKernel binds eq? to the same structural comparison as eqv?
+; (recorded as a divergence at 4.2.1), so here they agree with assoc and
+; member? on more objects than the report's would.
+(define assq
+  (lambda (object alist)
+    (let ((matches (filter (lambda (record) (eq? object (car record))) alist)))
+      (if (null? matches) () (car matches)))))
+
+(define memq?
+  (lambda (object ls)
+    (apply or? (map (lambda (x) (eq? object x)) ls))))
+
+; 6.4.2: a fresh evaluation structure -- the set of pairs reachable from the
+; object without passing through a non-pair -- with non-pair referents left
+; alone. The report's derivation threads an association list to handle cycles
+; and preserve sharing; neither can arise without mutation, so the copy is a
+; plain recursion. The report also promises the result is not eq? to a pair
+; argument, which structural eq? cannot express here: see the 4.7 divergence.
+(define copy-es
+  (lambda (x)
+    (if (pair? x) (cons (copy-es (car x)) (copy-es (cdr x))) x)))
+
 ; 6.3.8 / 6.3.9: with no cycles possible, a countable list is a finite list, and both
 ; reduce to "the improper list starting here is terminated by nil".
 (define $list-shaped?

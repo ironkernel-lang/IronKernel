@@ -90,6 +90,25 @@ let private behaviouralChecks () : (string * string list) list = [
     "4.2.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)"; "(eq? 1 1)" ]
     "4.6.1", [ "(pair? (cons 1 2))"; "(eqv? (pair? ()) #f)" ]
     // 4.9.1: $define! binds in the current environment and returns inert.
+    "4.7.2", [ "(=? (copy-es-immutable 5) 5)"
+               "(equal? (copy-es-immutable (list (list 1 2) 3)) (list (list 1 2) 3))"
+               "(pair? (copy-es-immutable (list 1 2)))" ]
+    "6.4.2", [ "(=? (copy-es 5) 5)"
+               "(equal? (copy-es (list (list 1 2) 3)) (list (list 1 2) 3))"
+               "(pair? (copy-es (list 1 2)))"
+               // The structure is walked to the leaves, and the cdr of an improper
+               // pair is part of it.
+               "(=? (car (car (cdr (copy-es (list (list 1 2) (list 3 (list 4))))))) 3)"
+               "(=? (cdr (copy-es (cons 1 2))) 2)"
+               // Non-pair referents come through as themselves.
+               "(eq? (car (car (copy-es (list (list 'a))))) 'a)" ]
+    "6.4.3", [ "(=? (car (assq 2 (list (list 1 'a) (list 2 'b)))) 2)"
+               "(eqv? (car (cdr (assq 2 (list (list 1 'a) (list 2 'b))))) 'b)"
+               "(null? (assq 9 (list (list 1 'a))))"
+               "(null? (assq 1 (list)))" ]
+    "6.4.4", [ "(memq? 2 (list 1 2 3))"
+               "(eqv? (memq? 9 (list 1 2 3)) #f)"
+               "(eqv? (memq? 1 (list)) #f)" ]
     "4.9.1", [ "(let ((e (get-current-environment))) (sequence (eval (list $define! 'dz 11) e) (=? dz 11)))"
                "(inert? ($define! dy 1))" ]
     "6.5.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)" ]
@@ -543,6 +562,17 @@ let private divergences () = [
              + "which is what \"the ancestor of all other continuations\" means for the "
              + "selection algorithm, so a clause selecting on it is always selected. "
              + "Receiving a value ends the session, and the process exit status is 0."
+    "4.7", "Module Pair mutation is only half implemented, and deliberately so. "
+           + "IronKernel's pairs are immutable -- lists are F# immutable lists rather "
+           + "than cons cells -- so `set-car!`, `set-cdr!`, `encycle!` and `append!` "
+           + "have no cell to write into and are absent. The four entries that need no "
+           + "mutation are implemented. `copy-es-immutable` returns its argument, which "
+           + "4.7.2 permits outright for an argument that is already an immutable pair; "
+           + "`copy-es` copies the structure, but the report's promise that the result "
+           + "is not `eq?` to a pair argument is unobservable here, since `eq?` compares "
+           + "structurally (see 4.2.1). Supporting the module fully means replacing the "
+           + "list representation with mutable cons cells and making every traversal "
+           + "cycle-safe, including `equal?`, which is a separate piece of work."
     "4.2.1", "`eq?` is bound to the same structural comparison as `eqv?`, so it is "
              + "coarser than the report's, which distinguishes objects that `equal?` "
              + "does not."

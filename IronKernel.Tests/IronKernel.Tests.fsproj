@@ -35,6 +35,7 @@
     <Compile Include="KeyedStaticVariableTests.fs" />
     <Compile Include="InexactTests.fs" />
     <Compile Include="ContinuationFeatureTests.fs" />
+    <Compile Include="PairMutationTests.fs" />
     <Compile Include="KernelConformanceTests.fs" />
   </ItemGroup>
   <ItemGroup>
