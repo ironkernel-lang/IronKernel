@@ -697,6 +697,88 @@
                     | Choice2Of2 result -> bounceContinue env cont result
                     | Choice1Of2 error -> fail error
             | _ -> fail (NumArgs(2, args))
+        /// R-1RK 12.9. The report gives these entries signatures only: Appendix A.2
+        /// records that it is an incomplete draft whose unwritten portions were "only
+        /// planned in rough outline". They therefore carry their standard mathematical
+        /// meanings, and the choices the report leaves open are made here.
+        ///
+        /// A NaN result signals an error rather than being returned. In the report's
+        /// terms NaN is a value with no primary value, and 12.2 signals an error for
+        /// those; it is also what keeps (sqrt -1) from silently producing a non-number
+        /// while the Complex module (12.10) is unimplemented. Infinities *are*
+        /// returned: they are representable, ordered, and finite? reports them
+        /// correctly, so (log 0) is negative infinity rather than an error.
+        let private toFloat (value: obj) =
+            match value with
+            | :? byte as b -> Some(float b)
+            | :? int as i -> Some(float i)
+            | :? int64 as l -> Some(float l)
+            | :? float32 as f -> Some(float f)
+            | :? float as d -> Some d
+            | _ -> None
+
+        let private realPrimitive name (apply: float -> float) env cont args =
+            match args with
+            | [Obj value] ->
+                match toFloat value with
+                | None -> fail (TypeMismatch("number", Obj value))
+                | Some input ->
+                    let result = apply input
+                    if Double.IsNaN result && not (Double.IsNaN input) then
+                        fail (Default(name + ": argument is outside the domain"))
+                    else bounceContinue env cont (Obj(box result))
+            | [found] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(1, args))
+
+        /// R-1RK 12.9.1: without a complex type every number is real.
+        let isReal env cont args = isNumber env cont args
+
+        let expReal env cont args = realPrimitive "exp" Math.Exp env cont args
+        let logReal env cont args = realPrimitive "log" Math.Log env cont args
+        let sinReal env cont args = realPrimitive "sin" Math.Sin env cont args
+        let cosReal env cont args = realPrimitive "cos" Math.Cos env cont args
+        let tanReal env cont args = realPrimitive "tan" Math.Tan env cont args
+        let asinReal env cont args = realPrimitive "asin" Math.Asin env cont args
+        let acosReal env cont args = realPrimitive "acos" Math.Acos env cont args
+        let sqrtReal env cont args = realPrimitive "sqrt" Math.Sqrt env cont args
+
+        /// R-1RK 12.9.4 gives atan both a one- and a two-argument form.
+        let atanReal env cont args =
+            match args with
+            | [_] -> realPrimitive "atan" Math.Atan env cont args
+            | [Obj y; Obj x] ->
+                match toFloat y, toFloat x with
+                | Some y', Some x' -> bounceContinue env cont (Obj(box (Math.Atan2(y', x'))))
+                | None, _ -> fail (TypeMismatch("number", Obj y))
+                | _, None -> fail (TypeMismatch("number", Obj x))
+            | [found; _] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(1, args))
+
+        /// R-1RK 12.9.6. An integer base raised to a non-negative integer power stays
+        /// an integer when the result is representable, so (expt 2 10) is 1024 rather
+        /// than 1024.0; anything else is computed as a real.
+        let exptReal env cont args =
+            match args with
+            | [Obj b; Obj e] ->
+                match toFloat b, toFloat e with
+                | Some baseValue, Some exponent ->
+                    let integral (value: obj) =
+                        match value with
+                        | :? byte | :? int | :? int64 -> true
+                        | _ -> false
+                    let result = Math.Pow(baseValue, exponent)
+                    if Double.IsNaN result then
+                        fail (Default "expt: argument is outside the domain")
+                    elif integral b && integral e && exponent >= 0.0
+                         && Math.Abs result <= 9.2233720368547758e18
+                         && Math.Floor result = result then
+                        bounceContinue env cont (Obj(box (int64 result)))
+                    else bounceContinue env cont (Obj(box result))
+                | None, _ -> fail (TypeMismatch("number", Obj b))
+                | _, None -> fail (TypeMismatch("number", Obj e))
+            | [found; _] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(2, args))
+
         /// R-1RK 12.8.1. A rational is a ratio of integers, so every finite number
         /// qualifies and infinities and NaN do not. Being a type predicate, a
         /// non-number is false rather than an error.
@@ -877,6 +959,17 @@
                   ("zero?", isZero);
                   ("div-and-mod", divAndMod);
                   ("rational?", isRational);
+                  ("real?", isReal);
+                  ("exp", expReal);
+                  ("log", logReal);
+                  ("sin", sinReal);
+                  ("cos", cosReal);
+                  ("tan", tanReal);
+                  ("asin", asinReal);
+                  ("acos", acosReal);
+                  ("atan", atanReal);
+                  ("sqrt", sqrtReal);
+                  ("expt", exptReal);
                   ("floor", floorReal);
                   ("ceiling", ceilingReal);
                   ("truncate", truncateReal);

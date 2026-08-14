@@ -169,6 +169,24 @@ let private behaviouralChecks () : (string * string list) list = [
                 "(=? (truncate 3.7) 3)"; "(=? (truncate -3.7) -3)"
                 // Halfway cases round to even.
                 "(=? (round 0.5) 0)"; "(=? (round 1.5) 2)"; "(=? (round 2.5) 2)" ]
+    // 12.9: the report gives these signatures only (see the note in the matrix), so
+    // the checks assert the standard mathematical meanings.
+    "12.9.1", [ "(real? 1)"; "(real? 1.5)"; "(eqv? (real? 'a) #f)"; "(real?)" ]
+    "12.9.2", [ "(<? (abs (- (exp 0) 1)) 0.000001)"
+                "(<? (abs (- (log 1) 0)) 0.000001)"
+                "(<? (abs (- (log (exp 2)) 2)) 0.000001)" ]
+    "12.9.3", [ "(<? (abs (- (sin 0) 0)) 0.000001)"
+                "(<? (abs (- (cos 0) 1)) 0.000001)"
+                "(<? (abs (- (tan 0) 0)) 0.000001)" ]
+    "12.9.4", [ "(<? (abs (- (asin 0) 0)) 0.000001)"
+                "(<? (abs (- (acos 1) 0)) 0.000001)"
+                "(<? (abs (- (atan 0) 0)) 0.000001)"
+                // 12.9.4 gives atan a two-argument form as well.
+                "(<? (abs (- (atan 1 1) 0.7853981633974483)) 0.000001)" ]
+    "12.9.5", [ "(<? (abs (- (sqrt 4) 2)) 0.000001)"
+                "(<? (abs (- (sqrt 2) 1.4142135623730951)) 0.000001)" ]
+    "12.9.6", [ "(=? (expt 2 10) 1024)"; "(=? (expt 3 0) 1)"
+                "(<? (abs (- (expt 2 -1) 0.5)) 0.000001)" ]
     "12.8.5", [ "(=? (simplest-rational 0.2 0.4) (/ 1 3))"
                 "(=? (simplest-rational -0.5 0.5) 0)"
                 "(=? (rationalize 0.3 0.1) (/ 1 3))" ]
@@ -187,6 +205,12 @@ let private divergences () = [
                + "cannot represent."
     "12.5.14", "`(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact "
                + "positive infinity for `(gcd)`."
+    "12.9", "The report specifies 12.9.2 through 12.9.6 by signature only. Appendix "
+            + "A.2 records that it is an incomplete draft whose unwritten portions were "
+            + "\"only planned in rough outline\", so `verified` there means the binding "
+            + "exists with its standard mathematical meaning, and the choices the "
+            + "report leaves open (a NaN result signals an error; infinities are "
+            + "returned) are IronKernel's."
     "12.8", "Module Rational is implemented over the existing numeric types, which "
             + "have no exact rational representation. `(/ 1 3)` is the closest double "
             + "rather than an exact third, and `numerator`/`denominator` signal an "

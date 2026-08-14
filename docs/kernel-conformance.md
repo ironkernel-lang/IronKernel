@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 57 | 42% |
+| `verified` | 63 | 47% |
 | `bound` | 12 | 9% |
 | `partial` | 0 | 0% |
-| `absent` | 66 | 49% |
+| `absent` | 60 | 44% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -45,6 +45,7 @@ exercised, not that IronKernel matches the report exactly.
 | 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
+| 12.9 | The report specifies 12.9.2 through 12.9.6 by signature only. Appendix A.2 records that it is an incomplete draft whose unwritten portions were "only planned in rough outline", so `verified` there means the binding exists with its standard mathematical meaning, and the choices the report leaves open (a NaN result signals an error; infinities are returned) are IronKernel's. |
 | 12.8 | Module Rational is implemented over the existing numeric types, which have no exact rational representation. `(/ 1 3)` is the closest double rather than an exact third, and `numerator`/`denominator` signal an error when a value's exact ratio does not fit in 64 bits. |
 
 ## Modules
@@ -95,7 +96,7 @@ counts as complete here only when every one of its entries is `verified`.
 | 12.6 Numbers — Inexact features | optional | 6 | 0 | no |
 | 12.7 Numbers — Narrow inexact features | optional | 1 | 0 | no |
 | 12.8 Numbers — Rational features | optional | 5 | 5 | yes |
-| 12.9 Numbers — Real features | optional | 6 | 0 | no |
+| 12.9 Numbers — Real features | optional | 6 | 6 | yes |
 | 12.10 Numbers — Complex features | optional | 3 | 0 | no |
 | 13.1 Strings — Primitive features | **required** | 1 | 0 | no |
 | 15.1 Ports — Primitive features | **required** | 8 | 0 | no |
@@ -259,12 +260,12 @@ counts as complete here only when every one of its entries is `verified`.
 | 12.8.3 | `numerator, denominator` | Rational features | `verified` | optional module; 6 behavioural check(s) |
 | 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `verified` | optional module; 9 behavioural check(s) |
 | 12.8.5 | `rationalize, simplest-rational` | Rational features | `verified` | optional module; 3 behavioural check(s) |
-| 12.9.1 | `real?` | Real features | `absent` | optional module |
-| 12.9.2 | `exp, log` | Real features | `absent` | optional module; `exp` absent; `log` absent |
-| 12.9.3 | `sin, cos, tan` | Real features | `absent` | optional module; `sin` absent; `cos` absent; `tan` absent |
-| 12.9.4 | `asin, acos, atan` | Real features | `absent` | optional module; `asin` absent; `acos` absent; `atan` absent |
-| 12.9.5 | `sqrt` | Real features | `absent` | optional module |
-| 12.9.6 | `expt` | Real features | `absent` | optional module |
+| 12.9.1 | `real?` | Real features | `verified` | optional module; 4 behavioural check(s) |
+| 12.9.2 | `exp, log` | Real features | `verified` | optional module; 3 behavioural check(s) |
+| 12.9.3 | `sin, cos, tan` | Real features | `verified` | optional module; 3 behavioural check(s) |
+| 12.9.4 | `asin, acos, atan` | Real features | `verified` | optional module; 4 behavioural check(s) |
+| 12.9.5 | `sqrt` | Real features | `verified` | optional module; 2 behavioural check(s) |
+| 12.9.6 | `expt` | Real features | `verified` | optional module; 3 behavioural check(s) |
 | 12.10.1 | `complex?` | Complex features | `absent` | optional module |
 | 12.10.2 | `make-rectangular, real-part, imag-part` | Complex features | `absent` | optional module; `make-rectangular` absent; `real-part` absent; `imag-part` absent |
 | 12.10.3 | `make-polar, magnitude, angle` | Complex features | `absent` | optional module; `make-polar` absent; `magnitude` absent; `angle` absent |
