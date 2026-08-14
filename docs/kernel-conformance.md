@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 66 | 49% |
+| `verified` | 85 | 63% |
 | `bound` | 12 | 9% |
 | `partial` | 0 | 0% |
-| `absent` | 57 | 42% |
+| `absent` | 38 | 28% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -46,6 +46,7 @@ exercised, not that IronKernel matches the report exactly.
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
 | 12.9 | The report specifies 12.9.2 through 12.9.6 by signature only. Appendix A.2 records that it is an incomplete draft whose unwritten portions were "only planned in rough outline", so `verified` there means the binding exists with its standard mathematical meaning, and the choices the report leaves open are IronKernel's: an argument outside a function's real domain takes its complex value now that 12.10 is supported, so `(sqrt -1)` is `i`; a NaN result still signals an error; and infinities are returned as values. |
+| 4.2.1 | `eq?` is bound to the same structural comparison as `eqv?`, so it is coarser than the report's, which distinguishes objects that `equal?` does not. |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Module Rational is implemented over the existing numeric types, which have no exact rational representation. `(/ 1 3)` is the closest double rather than an exact third, and `numerator`/`denominator` signal an error when a value's exact ratio does not fit in 64 bits. |
 
@@ -58,32 +59,32 @@ counts as complete here only when every one of its entries is `verified`.
 
 | Module | Required | Entries | Verified | Complete |
 |---|---|---:|---:|---|
-| 4.1 Core types and primitive features — Booleans | **required** | 1 | 0 | no |
+| 4.1 Core types and primitive features — Booleans | **required** | 1 | 1 | yes |
 | 4.2 Core types and primitive features — Equivalence under mutation (optional) | optional | 1 | 0 | no |
-| 4.3 Core types and primitive features — Equivalence up to mutation | **required** | 1 | 0 | no |
-| 4.4 Core types and primitive features — Symbols | **required** | 1 | 0 | no |
-| 4.5 Core types and primitive features — Control | **required** | 2 | 1 | no |
+| 4.3 Core types and primitive features — Equivalence up to mutation | **required** | 1 | 1 | yes |
+| 4.4 Core types and primitive features — Symbols | **required** | 1 | 1 | yes |
+| 4.5 Core types and primitive features — Control | **required** | 2 | 2 | yes |
 | 4.6 Core types and primitive features — Pairs and lists | **required** | 3 | 3 | yes |
 | 4.7 Core types and primitive features — Pair mutation (optional) | optional | 2 | 0 | no |
 | 4.8 Core types and primitive features — Environments | **required** | 4 | 3 | no |
 | 4.9 Core types and primitive features — Environment mutation (optional) | optional | 1 | 0 | no |
-| 4.10 Core types and primitive features — Combiners | **required** | 5 | 3 | no |
+| 4.10 Core types and primitive features — Combiners | **required** | 5 | 5 | yes |
 | 5.1 Core library features (I) — Control | **required** | 1 | 1 | yes |
 | 5.2 Core library features (I) — Pairs and lists | **required** | 2 | 2 | yes |
 | 5.3 Core library features (I) — Combiners | **required** | 2 | 2 | yes |
 | 5.4 Core library features (I) — Pairs and lists | **required** | 1 | 1 | yes |
 | 5.5 Core library features (I) — Combiners | **required** | 1 | 1 | yes |
 | 5.6 Core library features (I) — Control | **required** | 1 | 1 | yes |
-| 5.7 Core library features (I) — Pairs and lists | **required** | 2 | 0 | no |
+| 5.7 Core library features (I) — Pairs and lists | **required** | 2 | 2 | yes |
 | 5.8 Core library features (I) — Pair mutation (optional) | optional | 1 | 0 | no |
 | 5.9 Core library features (I) — Combiners | **required** | 1 | 1 | yes |
 | 5.10 Core library features (I) — Environments | **required** | 1 | 1 | yes |
 | 6.1 Core library features (II) — Booleans | **required** | 5 | 5 | yes |
-| 6.2 Core library features (II) — Combiners | **required** | 1 | 0 | no |
-| 6.3 Core library features (II) — Pairs and lists | **required** | 10 | 1 | no |
+| 6.2 Core library features (II) — Combiners | **required** | 1 | 1 | yes |
+| 6.3 Core library features (II) — Pairs and lists | **required** | 10 | 10 | yes |
 | 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 0 | no |
 | 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 0 | no |
-| 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 0 | no |
+| 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 1 | yes |
 | 6.7 Core library features (II) — Environments | **required** | 10 | 4 | no |
 | 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 1 | no |
 | 6.9 Core library features (II) — Control | **required** | 1 | 1 | yes |
@@ -107,11 +108,11 @@ counts as complete here only when every one of its entries is `verified`.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 4.1.1 | `boolean?` | Booleans | `absent` |  |
+| 4.1.1 | `boolean?` | Booleans | `verified` | 4 behavioural check(s) |
 | 4.2.1 | `eq?` | Equivalence under mutation (optional) | `bound` | optional module |
-| 4.3.1 | `equal?` | Equivalence up to mutation | `absent` |  |
-| 4.4.1 | `symbol?` | Symbols | `absent` |  |
-| 4.5.1 | `inert?` | Control | `absent` |  |
+| 4.3.1 | `equal?` | Equivalence up to mutation | `verified` | 3 behavioural check(s) |
+| 4.4.1 | `symbol?` | Symbols | `verified` | 3 behavioural check(s) |
+| 4.5.1 | `inert?` | Control | `verified` | 3 behavioural check(s) |
 | 4.5.2 | `$if` | Control | `verified` | 3 behavioural check(s) |
 | 4.6.1 | `pair?` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 4.6.2 | `null?` | Pairs and lists | `verified` | 2 behavioural check(s) |
@@ -123,8 +124,8 @@ counts as complete here only when every one of its entries is `verified`.
 | 4.8.3 | `eval` | Environments | `verified` | 1 behavioural check(s) |
 | 4.8.4 | `make-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 4.9.1 | `$define!` | Environment mutation (optional) | `bound` | optional module |
-| 4.10.1 | `operative?` | Combiners | `absent` |  |
-| 4.10.2 | `applicative?` | Combiners | `absent` |  |
+| 4.10.1 | `operative?` | Combiners | `verified` | 3 behavioural check(s) |
+| 4.10.2 | `applicative?` | Combiners | `verified` | 3 behavioural check(s) |
 | 4.10.3 | `$vau` | Combiners | `verified` | 1 behavioural check(s) |
 | 4.10.4 | `wrap` | Combiners | `verified` | 1 behavioural check(s) |
 | 4.10.5 | `unwrap` | Combiners | `verified` | 1 behavioural check(s) |
@@ -141,8 +142,8 @@ counts as complete here only when every one of its entries is `verified`.
 | 5.4.1 | `car, cdr` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.5.1 | `apply` | Combiners | `verified` | 1 behavioural check(s) |
 | 5.6.1 | `$cond` | Control | `verified` | 1 behavioural check(s) |
-| 5.7.1 | `get-list-metrics` | Pairs and lists | `absent` |  |
-| 5.7.2 | `list-tail` | Pairs and lists | `absent` |  |
+| 5.7.1 | `get-list-metrics` | Pairs and lists | `verified` | 3 behavioural check(s) |
+| 5.7.2 | `list-tail` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.8.1 | `encycle!` | Pair mutation (optional) | `absent` | optional module |
 | 5.9.1 | `map` | Combiners | `verified` | 1 behavioural check(s) |
 | 5.10.1 | `$let` | Environments | `verified` | 1 behavioural check(s) |
@@ -156,23 +157,23 @@ counts as complete here only when every one of its entries is `verified`.
 | 6.1.3 | `or?` | Booleans | `verified` | 4 behavioural check(s) |
 | 6.1.4 | `$and?` | Booleans | `verified` | 4 behavioural check(s) |
 | 6.1.5 | `$or?` | Booleans | `verified` | 4 behavioural check(s) |
-| 6.2.1 | `combiner?` | Combiners | `absent` |  |
+| 6.2.1 | `combiner?` | Combiners | `verified` | 3 behavioural check(s) |
 | 6.3.1 | `length` | Pairs and lists | `verified` | 2 behavioural check(s) |
-| 6.3.2 | `list-ref` | Pairs and lists | `absent` |  |
-| 6.3.3 | `append` | Pairs and lists | `absent` |  |
-| 6.3.4 | `list-neighbors` | Pairs and lists | `absent` |  |
-| 6.3.5 | `filter` | Pairs and lists | `absent` |  |
-| 6.3.6 | `assoc` | Pairs and lists | `absent` |  |
-| 6.3.7 | `member?` | Pairs and lists | `absent` |  |
-| 6.3.8 | `finite-list?` | Pairs and lists | `absent` |  |
-| 6.3.9 | `countable-list?` | Pairs and lists | `absent` |  |
-| 6.3.10 | `reduce` | Pairs and lists | `absent` |  |
+| 6.3.2 | `list-ref` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.3 | `append` | Pairs and lists | `verified` | 4 behavioural check(s) |
+| 6.3.4 | `list-neighbors` | Pairs and lists | `verified` | 3 behavioural check(s) |
+| 6.3.5 | `filter` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.6 | `assoc` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.7 | `member?` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.8 | `finite-list?` | Pairs and lists | `verified` | 3 behavioural check(s) |
+| 6.3.9 | `countable-list?` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.10 | `reduce` | Pairs and lists | `verified` | 3 behavioural check(s) |
 | 6.4.1 | `append!` | Pair mutation (optional) | `absent` | optional module |
 | 6.4.2 | `copy-es` | Pair mutation (optional) | `absent` | optional module |
 | 6.4.3 | `assq` | Pair mutation (optional) | `absent` | optional module |
 | 6.4.4 | `memq?` | Pair mutation (optional) | `absent` | optional module |
 | 6.5.1 | `eq?` | Equivalence under mutation (optional) | `bound` | optional module |
-| 6.6.1 | `equal?` | Equivalence up to mutation | `absent` |  |
+| 6.6.1 | `equal?` | Equivalence up to mutation | `verified` | 2 behavioural check(s) |
 | 6.7.1 | `$binds?` | Environments | `absent` |  |
 | 6.7.2 | `get-current-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.3 | `make-kernel-standard-environment` | Environments | `absent` |  |

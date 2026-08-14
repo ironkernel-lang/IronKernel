@@ -153,8 +153,10 @@
     (eval (cons (eval (list* lambda (map car bindings) body) (eval exp env))
                 (map cadr bindings)) env)))
 
+; R-1RK 6.9.1: (for-each applicative . lists) -- the applicative comes first, as it
+; does for map (5.9.1). IronKernel used to take the list first.
 (define for-each
-  (wrap (vau (x f) env (apply map (list f x) env) #inert)))
+  (wrap (vau (f x) env (apply map (list f x) env) #inert)))
   
 (define get-current-environment (wrap (vau () e e)))
 
@@ -398,6 +400,105 @@
 (define rationalize
   (lambda (x tolerance)
     (simplest-rational (- x tolerance) (+ x tolerance))))
+
+; --- R-1RK list features (5.7, 6.3) ------------------------------------------
+; get-list-metrics is a primitive; the rest are derived from it and from the pair
+; primitives. IronKernel's pairs are immutable and the optional Pair mutation
+; module is unimplemented, so no list can be cyclic: every list here is finite,
+; and the cycle-handling the report describes has nothing to act on.
+
+; 5.7.2
+(define list-tail
+  (lambda (ls k)
+    (letrec ((aux (lambda (rest n) (if (zero? n) rest (aux (cdr rest) (- n 1))))))
+      (aux ls k))))
+
+; 6.3.2
+(define list-ref (lambda (ls k) (car (list-tail ls k))))
+
+; 6.3.3: the last argument is referenced rather than copied, so (append) is nil and
+; (append x) is x.
+(define append
+  (lambda lists
+    (letrec ((join (lambda (a b) (if (null? a) b (cons (car a) (join (cdr a) b)))))
+             (aux (lambda (ls)
+                    (if (null? ls)
+                      ()
+                      (if (null? (cdr ls))
+                        (car ls)
+                        (join (car ls) (aux (cdr ls))))))))
+      (aux lists))))
+
+; 6.3.4: consecutive sublists of length two. Nil gives nil, and otherwise the result
+; is one shorter than the argument.
+(define list-neighbors
+  (lambda (ls)
+    (letrec ((aux (lambda (rest)
+                    (if (null? rest)
+                      ()
+                      (if (null? (cdr rest))
+                        ()
+                        (cons (list (car rest) (car (cdr rest))) (aux (cdr rest))))))))
+      (aux ls))))
+
+; 6.3.5: (filter applicative list). The result of each call must be boolean.
+(define filter
+  (lambda (accept? ls)
+    (letrec ((aux (lambda (rest)
+                    (if (null? rest)
+                      ()
+                      (let ((keep (accept? (car rest))))
+                        (if (boolean? keep)
+                          (if keep
+                            (cons (car rest) (aux (cdr rest)))
+                            (aux (cdr rest)))
+                          (error "filter: predicate returned a non-boolean")))))))
+      (aux ls))))
+
+; 6.3.6 / 6.3.7: assoc searches a list of pairs by car; member? searches for an
+; element. Both compare with equal? (structural), per the report.
+(define assoc
+  (lambda (key pairs)
+    (letrec ((aux (lambda (rest)
+                    (if (null? rest)
+                      ()
+                      (if (equal? key (car (car rest)))
+                        (car rest)
+                        (aux (cdr rest)))))))
+      (aux pairs))))
+
+(define member?
+  (lambda (object ls)
+    (letrec ((aux (lambda (rest)
+                    (if (null? rest)
+                      #f
+                      (if (equal? object (car rest)) #t (aux (cdr rest)))))))
+      (aux ls))))
+
+; 6.3.8 / 6.3.9: with no cycles possible, a countable list is a finite list, and both
+; reduce to "the improper list starting here is terminated by nil".
+(define $list-shaped?
+  (lambda (xs)
+    (letrec ((aux (lambda (ys)
+                    (if (null? ys) #t (if (pair? ys) (aux (cdr ys)) #f)))))
+      (aux xs))))
+
+(define $every?
+  (lambda (ok? xs)
+    (letrec ((aux (lambda (ys) (if (null? ys) #t (if (ok? (car ys)) (aux (cdr ys)) #f)))))
+      (aux xs))))
+
+(define finite-list? (lambda xs ($every? $list-shaped? xs)))
+(define countable-list? (lambda xs ($every? $list-shaped? xs)))
+
+; 6.3.10: (reduce list binary identity). The report also gives a six-argument form
+; for cyclic lists; with no cycles to describe, the three-argument form is the whole
+; of it here.
+(define reduce
+  (lambda (ls binary identity)
+    (letrec ((aux (lambda (rest acc)
+                    (if (null? rest) acc (aux (cdr rest) (binary acc (car rest)))))))
+      (if (null? ls) identity (aux (cdr ls) (car ls))))))
 
 ; --- R-1RK canonical names ---------------------------------------------------
 ; The report spells operatives with a leading `$`, and the primitive definer as

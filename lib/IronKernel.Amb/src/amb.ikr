@@ -99,7 +99,7 @@
   (define require (lambda (test) (if test #inert (fail))))
 
   ; Yield each element of xs. An empty list fails.
-  (define amb (lambda (xs) (shift (lambda (k) (for-each xs k)))))
+  (define amb (lambda (xs) (shift (lambda (k) (for-each k xs)))))
 
   ; Yield each integer in [lo, hi) without building the list.
   (define amb-range
@@ -115,10 +115,10 @@
   (define amb-bracket
     (lambda (xs ok? enter! leave!)
       (shift (lambda (k)
-        (for-each xs (lambda (x)
+        (for-each (lambda (x)
           (if (ok? x)
             (with-bracket x enter! leave! k)
-            #inert)))))))
+            #inert)) xs)))))
 
   ; amb-bracket over the integers in [lo, hi).
   (define amb-bracket-range

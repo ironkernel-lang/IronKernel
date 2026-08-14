@@ -839,6 +839,62 @@
             | [found; _] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(2, args))
 
+        /// Type predicates from chapters 4 and 6. Each is variadic and true for an
+        /// empty argument list, matching the report's "every element" phrasing.
+        let private typePredicate test env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | value :: rest -> if test value then loop rest else bounceContinue env cont (Bool false)
+            loop args
+
+        let isBoolean env cont args =
+            typePredicate (function Bool _ -> true | _ -> false) env cont args
+
+        let isSymbol env cont args =
+            typePredicate (function Atom _ -> true | _ -> false) env cont args
+
+        let isInert env cont args =
+            typePredicate (function Inert -> true | _ -> false) env cont args
+
+        /// R-1RK 4.10.1 / 4.10.2 / 6.2.1. A combiner is an operative or an applicative;
+        /// wrapping is what makes it applicative, so anything not wrapped is operative.
+        let private isApplicativeValue = function
+            | Applicative _ -> true
+            | _ -> false
+
+        let private isOperativeValue = function
+            | Operative _
+            | PrimitiveOperative _
+            | CompiledCombiner _ -> true
+            | ContractedCombiner record -> record.contract.mode = RawOperands
+            | _ -> false
+
+        let isApplicative env cont args = typePredicate isApplicativeValue env cont args
+        let isOperative env cont args = typePredicate isOperativeValue env cont args
+
+        let isCombiner env cont args =
+            typePredicate (fun v -> isApplicativeValue v || isOperativeValue v) env cont args
+
+        /// R-1RK 5.7.1. Returns (p n a c): pairs, nils, acyclic prefix length and cycle
+        /// length of the improper list starting at the argument.
+        ///
+        /// IronKernel's pairs are immutable and it does not implement the optional Pair
+        /// mutation module, so no cyclic structure can be built and c is always zero
+        /// and a always equals p. The shape of the answer is still the report's.
+        let getListMetrics env cont args =
+            match args with
+            | [value] ->
+                let pairs, nils =
+                    match value with
+                    | List [] -> 0, 1
+                    | List items -> List.length items, 1
+                    | DottedList(items, tail) ->
+                        List.length items, (match tail with List [] -> 1 | _ -> 0)
+                    | _ -> 0, 0
+                let counted n = Obj(box n)
+                bounceContinue env cont (List [counted pairs; counted nils; counted pairs; counted 0])
+            | _ -> fail (NumArgs(1, args))
+
         /// R-1RK 12.10. Like 12.9 the report gives these signatures only, so they take
         /// their standard meanings. A complex whose imaginary part is zero is a real,
         /// so make-rectangular collapses that case rather than creating a value that
@@ -1057,6 +1113,14 @@
                   ("cdr", cdr);
                   ("cons", cons);
                   ("eq?", eqv);
+                  ("equal?", eqv);
+                  ("boolean?", isBoolean);
+                  ("symbol?", isSymbol);
+                  ("inert?", isInert);
+                  ("operative?", isOperative);
+                  ("applicative?", isApplicative);
+                  ("combiner?", isCombiner);
+                  ("get-list-metrics", getListMetrics);
                   ("eqv?", eqv);
                   ("null?", isNull);
                   ("pair?", isPair) ;
