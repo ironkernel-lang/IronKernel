@@ -120,12 +120,24 @@
                 returnM (File.ReadAllText filename :> obj |> Ast.Obj) 
             with _ -> throwError (Default("File not found: '" + filename + "'"))
 
+        /// File operations are guarded so that an I/O failure -- a missing file, a
+        /// locked file, a permissions error -- becomes a Kernel error. Left unguarded
+        /// the CLR exception escapes the evaluator and faults the process, taking the
+        /// REPL or script host with it, as division by zero used to.
+        let private guardIO description work =
+            try work () with
+            | :? IOException as ex -> throwError (Default(description + ": " + ex.Message))
+            | :? UnauthorizedAccessException as ex ->
+                throwError (Default(description + ": " + ex.Message))
+            | :? ArgumentException as ex -> throwError (Default(description + ": " + ex.Message))
+            | :? NotSupportedException as ex -> throwError (Default(description + ": " + ex.Message))
+
         let makePort mode = function
             | [Obj filename] ->
                 either {
                     let! fname = cast filename
-                    let port = File.Open(fname, FileMode.OpenOrCreate, mode)
-                    return Port port
+                    return! guardIO "open file" (fun () ->
+                        returnM (Port(File.Open(fname, FileMode.OpenOrCreate, mode))))
                 }
             | [found] -> throwError(TypeMismatch("string", found))
             | bad -> throwError(NumArgs(1, bad))
@@ -141,8 +153,7 @@
             | [Obj filename] ->
                 either {
                     let! path = cast filename
-                    let contents = File.ReadAllText path
-                    return makeObj contents
+                    return! guardIO "read file" (fun () -> returnM (makeObj (File.ReadAllText path)))
                 }
             | [found] -> throwError(TypeMismatch("string", found))
             | bad -> throwError(NumArgs(1, bad))
@@ -168,9 +179,11 @@
 
         let writeProc = function
                 | [ob] -> Console.Out.Write(showVal ob);returnM (Bool true)
-                | [ob; Port port] -> use writer = new StreamWriter(port)
-                                     writer.Write(showVal ob)
-                                     returnM (Bool true)
+                | [ob; Port port] ->
+                    guardIO "write" (fun () ->
+                        use writer = new StreamWriter(port)
+                        writer.Write(showVal ob)
+                        returnM (Bool true))
                 | bad -> throwError (NumArgs(1, bad))
 
         let readProc port =
@@ -179,7 +192,7 @@
                    | Choice1Of2 error -> throwError error
                    | Choice2Of2 services -> reader.ReadLine() |> services.parseExpression
                match port with
-                | [Port p]  -> use s = new StreamReader(p) in parseReader s
+                | [Port p] -> guardIO "read" (fun () -> use s = new StreamReader(p) in parseReader s)
                 | [] -> parseReader Console.In
                 | bad -> throwError (NumArgs(1, bad))
           
@@ -375,7 +388,12 @@
                     match load fname with
                     | Choice1Of2 e -> fail e
                     | Choice2Of2 lisp ->
-                        match sequence (List.map (eval env cont) lisp) [] with
+                        // Each loaded form gets a fresh continuation. Passing the
+                        // caller's `cont` ran the rest of the caller's computation once
+                        // per loaded form, and then `bounceContinue` ran it again, so a
+                        // nested (load f) evaluated its enclosing form twice.
+                        let evaluateForm form = eval env (newContinuation env) form
+                        match sequence (List.map evaluateForm lisp) [] with
                         | Choice1Of2 e -> fail e
                         | Choice2Of2 _ -> bounceContinue env cont Inert
             | badform -> fail (NumArgs(1, badform))

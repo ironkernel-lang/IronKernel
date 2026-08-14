@@ -25,8 +25,8 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 85 | 63% |
-| `bound` | 12 | 9% |
+| `verified` | 97 | 72% |
+| `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
 | `absent` | 38 | 28% |
 | **total** | **135** | |
@@ -41,7 +41,7 @@ exercised, not that IronKernel matches the report exactly.
 
 | Report | Divergence |
 |---|---|
-| 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. |
+| 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a number written to a port cannot be read back by `read`; symbols, lists and booleans round-trip. |
 | 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
@@ -60,14 +60,14 @@ counts as complete here only when every one of its entries is `verified`.
 | Module | Required | Entries | Verified | Complete |
 |---|---|---:|---:|---|
 | 4.1 Core types and primitive features — Booleans | **required** | 1 | 1 | yes |
-| 4.2 Core types and primitive features — Equivalence under mutation (optional) | optional | 1 | 0 | no |
+| 4.2 Core types and primitive features — Equivalence under mutation (optional) | optional | 1 | 1 | yes |
 | 4.3 Core types and primitive features — Equivalence up to mutation | **required** | 1 | 1 | yes |
 | 4.4 Core types and primitive features — Symbols | **required** | 1 | 1 | yes |
 | 4.5 Core types and primitive features — Control | **required** | 2 | 2 | yes |
 | 4.6 Core types and primitive features — Pairs and lists | **required** | 3 | 3 | yes |
 | 4.7 Core types and primitive features — Pair mutation (optional) | optional | 2 | 0 | no |
 | 4.8 Core types and primitive features — Environments | **required** | 4 | 3 | no |
-| 4.9 Core types and primitive features — Environment mutation (optional) | optional | 1 | 0 | no |
+| 4.9 Core types and primitive features — Environment mutation (optional) | optional | 1 | 1 | yes |
 | 4.10 Core types and primitive features — Combiners | **required** | 5 | 5 | yes |
 | 5.1 Core library features (I) — Control | **required** | 1 | 1 | yes |
 | 5.2 Core library features (I) — Pairs and lists | **required** | 2 | 2 | yes |
@@ -83,10 +83,10 @@ counts as complete here only when every one of its entries is `verified`.
 | 6.2 Core library features (II) — Combiners | **required** | 1 | 1 | yes |
 | 6.3 Core library features (II) — Pairs and lists | **required** | 10 | 10 | yes |
 | 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 0 | no |
-| 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 0 | no |
+| 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 1 | yes |
 | 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 1 | yes |
-| 6.7 Core library features (II) — Environments | **required** | 10 | 4 | no |
-| 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 1 | no |
+| 6.7 Core library features (II) — Environments | **required** | 10 | 7 | no |
+| 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 3 | yes |
 | 6.9 Core library features (II) — Control | **required** | 1 | 1 | yes |
 | 7.2 Continuations — Primitive features | **required** | 7 | 1 | no |
 | 7.3 Continuations — Library features | **required** | 4 | 1 | no |
@@ -101,15 +101,15 @@ counts as complete here only when every one of its entries is `verified`.
 | 12.9 Numbers — Real features | optional | 6 | 6 | yes |
 | 12.10 Numbers — Complex features | optional | 3 | 3 | yes |
 | 13.1 Strings — Primitive features | **required** | 1 | 0 | no |
-| 15.1 Ports — Primitive features | **required** | 8 | 0 | no |
-| 15.2 Ports — Library features | **required** | 3 | 0 | no |
+| 15.1 Ports — Primitive features | **required** | 8 | 3 | no |
+| 15.2 Ports — Library features | **required** | 3 | 1 | no |
 
 ## 4 Core types and primitive features
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
 | 4.1.1 | `boolean?` | Booleans | `verified` | 4 behavioural check(s) |
-| 4.2.1 | `eq?` | Equivalence under mutation (optional) | `bound` | optional module |
+| 4.2.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 3 behavioural check(s) |
 | 4.3.1 | `equal?` | Equivalence up to mutation | `verified` | 3 behavioural check(s) |
 | 4.4.1 | `symbol?` | Symbols | `verified` | 3 behavioural check(s) |
 | 4.5.1 | `inert?` | Control | `verified` | 3 behavioural check(s) |
@@ -123,7 +123,7 @@ counts as complete here only when every one of its entries is `verified`.
 | 4.8.2 | `ignore?` | Environments | `absent` |  |
 | 4.8.3 | `eval` | Environments | `verified` | 1 behavioural check(s) |
 | 4.8.4 | `make-environment` | Environments | `verified` | 1 behavioural check(s) |
-| 4.9.1 | `$define!` | Environment mutation (optional) | `bound` | optional module |
+| 4.9.1 | `$define!` | Environment mutation (optional) | `verified` | optional module; 2 behavioural check(s) |
 | 4.10.1 | `operative?` | Combiners | `verified` | 3 behavioural check(s) |
 | 4.10.2 | `applicative?` | Combiners | `verified` | 3 behavioural check(s) |
 | 4.10.3 | `$vau` | Combiners | `verified` | 1 behavioural check(s) |
@@ -172,21 +172,21 @@ counts as complete here only when every one of its entries is `verified`.
 | 6.4.2 | `copy-es` | Pair mutation (optional) | `absent` | optional module |
 | 6.4.3 | `assq` | Pair mutation (optional) | `absent` | optional module |
 | 6.4.4 | `memq?` | Pair mutation (optional) | `absent` | optional module |
-| 6.5.1 | `eq?` | Equivalence under mutation (optional) | `bound` | optional module |
+| 6.5.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 2 behavioural check(s) |
 | 6.6.1 | `equal?` | Equivalence up to mutation | `verified` | 2 behavioural check(s) |
 | 6.7.1 | `$binds?` | Environments | `absent` |  |
 | 6.7.2 | `get-current-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.3 | `make-kernel-standard-environment` | Environments | `absent` |  |
 | 6.7.4 | `$let*` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.5 | `$letrec` | Environments | `verified` | 1 behavioural check(s) |
-| 6.7.6 | `$letrec*` | Environments | `bound` |  |
-| 6.7.7 | `$let-redirect` | Environments | `bound` |  |
+| 6.7.6 | `$letrec*` | Environments | `verified` | 1 behavioural check(s) |
+| 6.7.7 | `$let-redirect` | Environments | `verified` | 2 behavioural check(s) |
 | 6.7.8 | `$let-safe` | Environments | `absent` |  |
 | 6.7.9 | `$remote-eval` | Environments | `verified` | 1 behavioural check(s) |
-| 6.7.10 | `$bindings->environment` | Environments | `bound` |  |
+| 6.7.10 | `$bindings->environment` | Environments | `verified` | 2 behavioural check(s) |
 | 6.8.1 | `$set!` | Environment mutation (optional) | `verified` | optional module; 1 behavioural check(s) |
-| 6.8.2 | `$provide!` | Environment mutation (optional) | `bound` | optional module |
-| 6.8.3 | `$import!` | Environment mutation (optional) | `bound` | optional module |
+| 6.8.2 | `$provide!` | Environment mutation (optional) | `verified` | optional module; 2 behavioural check(s) |
+| 6.8.3 | `$import!` | Environment mutation (optional) | `verified` | optional module; 1 behavioural check(s) |
 | 6.9.1 | `for-each` | Control | `verified` | 1 behavioural check(s) |
 
 ## 7 Continuations
@@ -286,11 +286,11 @@ counts as complete here only when every one of its entries is `verified`.
 | 15.1.2 | `input-port?, output-port?` | Primitive features | `absent` | `input-port?` absent; `output-port?` absent |
 | 15.1.3 | `with-input-from-file, with-output-to-file` | Primitive features | `absent` | `with-input-from-file` absent; `with-output-to-file` absent |
 | 15.1.4 | `get-current-input-port, get-current-output-port` | Primitive features | `absent` | `get-current-input-port` absent; `get-current-output-port` absent |
-| 15.1.5 | `open-input-file, open-output-file` | Primitive features | `bound` |  |
+| 15.1.5 | `open-input-file, open-output-file` | Primitive features | `verified` | 1 behavioural check(s) |
 | 15.1.6 | `close-input-file, close-output-file` | Primitive features | `absent` | `close-input-file` absent; `close-output-file` absent |
-| 15.1.7 | `read` | Primitive features | `bound` |  |
-| 15.1.8 | `write` | Primitive features | `bound` |  |
+| 15.1.7 | `read` | Primitive features | `verified` | 1 behavioural check(s) |
+| 15.1.8 | `write` | Primitive features | `verified` | 1 behavioural check(s) |
 | 15.2.1 | `call-with-input-file, call-with-output-file` | Library features | `absent` | `call-with-input-file` absent; `call-with-output-file` absent |
-| 15.2.2 | `load` | Library features | `bound` |  |
+| 15.2.2 | `load` | Library features | `verified` | 1 behavioural check(s) |
 | 15.2.3 | `get-module` | Library features | `absent` |  |
 
