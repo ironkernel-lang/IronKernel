@@ -175,13 +175,13 @@ let ``compiled guard deoptimizes after primitive rebinding`` () =
     let env = freshEnv ()
     let compiled = compileLispValGuarded env (parseOk "(if #t 1 2)")
 
-    match compiled.Invoke(env, newContinuation env) with
+    match run (compiled.Invoke(env, newContinuation env)) with
     | Choice2Of2 (Obj (:? int as value)) -> Assert.Equal(1, value)
     | result -> failwithf "unexpected guarded result: %A" result
 
     ignore (evalIn env "(define if (vau operands caller operands))")
 
-    match compiled.Invoke(env, newContinuation env) with
+    match run (compiled.Invoke(env, newContinuation env)) with
     | Choice2Of2 (List [Bool true; Obj (:? int as one); Obj (:? int as two)]) ->
         Assert.Equal(1, one)
         Assert.Equal(2, two)
@@ -214,7 +214,7 @@ let ``compiled guard detects a new shadowing binding`` () =
 
     ignore (evalIn child "(define if (vau operands caller operands))")
 
-    match compiled.Invoke(child, newContinuation child) with
+    match run (compiled.Invoke(child, newContinuation child)) with
     | Choice2Of2 (List [Bool true; Obj (:? int as one); Obj (:? int as two)]) ->
         Assert.Equal(1, one)
         Assert.Equal(2, two)
@@ -228,7 +228,7 @@ let ``compiled guard deoptimizes after parent binding mutation`` () =
 
     ignore (evalIn parent "(define if (vau operands caller operands))")
 
-    match compiled.Invoke(child, newContinuation child) with
+    match run (compiled.Invoke(child, newContinuation child)) with
     | Choice2Of2 (List [Bool true; Obj (:? int as one); Obj (:? int as two)]) ->
         Assert.Equal(1, one)
         Assert.Equal(2, two)
@@ -253,7 +253,7 @@ let ``compiled define guard deoptimizes after binding changes`` () =
             mutate compiledEnv
 
             let interpreted = evalRaw Interpreted interpretedEnv source |> observe
-            let compiledResult = compiled.Invoke(compiledEnv, newContinuation compiledEnv) |> observe
+            let compiledResult = run (compiled.Invoke(compiledEnv, newContinuation compiledEnv)) |> observe
             if interpreted <> compiledResult then
                 failwithf
                     "%s define guard mismatch for %s\ninterpreted: %A\ncompiled: %A"
@@ -298,7 +298,7 @@ let ``located compiled guard retains the generic fallback`` () =
 
     ignore (evalIn env "(define if (vau operands caller operands))")
 
-    match compiled.Invoke(env, newContinuation env) with
+    match run (compiled.Invoke(env, newContinuation env)) with
     | Choice2Of2 (List [Bool true; Obj (:? int as one); Obj (:? int as two)]) ->
         Assert.Equal(1, one)
         Assert.Equal(2, two)
@@ -342,7 +342,7 @@ let ``expression tree helpers compile their live core shapes`` () =
     let env = freshEnv ()
     let invoke expression =
         compileToFunc expression
-        |> fun compiled -> compiled.Invoke(env, newContinuation env)
+        |> fun compiled -> run (compiled.Invoke(env, newContinuation env))
 
     match invoke (CLit (Obj 1)) with
     | Choice2Of2 (Obj (:? int as value)) -> Assert.Equal(1, value)
@@ -529,7 +529,7 @@ let ``static backend emits direct managed entry points without source compilatio
         Assert.DoesNotContain("Expression.Compile", source)
 
 let private invokeSite (compiled: KernelFunc) env =
-    match compiled.Invoke(env, newContinuation env) with
+    match run (compiled.Invoke(env, newContinuation env)) with
     | Choice2Of2 value -> value
     | Choice1Of2 error -> failwith (showError error)
 
@@ -603,7 +603,7 @@ let ``inline cache dispatches per environment under concurrent invocation`` () =
         500_000,
         System.Action<int>(fun index ->
             let env, expected = if index % 2 = 0 then envA, 1 else envB, 2
-            match compiled.Invoke(env, newContinuation env) with
+            match run (compiled.Invoke(env, newContinuation env)) with
             | Choice2Of2 (Obj (:? int as actual)) when actual = expected -> ()
             | _ -> System.Threading.Interlocked.Increment(&mismatches.contents) |> ignore))
     |> ignore
@@ -614,7 +614,7 @@ let ``inline cache dispatches per environment under concurrent invocation`` () =
 let ``inline cache reports unbound operand variables`` () =
     let env = freshEnv ()
     let compiled = compileLispValGuarded env (parseOk "(+ missing 1)")
-    match compiled.Invoke(env, newContinuation env) with
+    match run (compiled.Invoke(env, newContinuation env)) with
     | Choice1Of2 (UnboundVar(_, "missing")) -> ()
     | result -> failwithf "expected unbound operand error, got %A" result
     // Binding the operand afterwards must succeed through the same site.

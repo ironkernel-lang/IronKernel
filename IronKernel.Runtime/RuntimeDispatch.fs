@@ -10,10 +10,14 @@ module RuntimeDispatch =
     open Eval
     open SymbolTable
 
-    let appNamed env cont name (operands: LispVal[]) : ThrowsError<LispVal> =
+    /// Generated code returns `Step` so it runs inside the caller's trampoline
+    /// instead of starting a nested one. Nesting would cost CLR stack on every
+    /// Kernel tail call, trap escaping continuations behind a collapsed result,
+    /// and turn `Await` into a blocking wait. See ADR 0004.
+    let appNamed env cont name (operands: LispVal[]) : Step =
         match getVar env name with
-        | Choice1Of2 error -> throwError error
-        | Choice2Of2 combiner -> operate env cont combiner (Array.toList operands)
+        | Choice1Of2 error -> Done(throwError error)
+        | Choice2Of2 combiner -> bounceOperate env cont combiner (Array.toList operands)
 
     /// One call site's resolved binding, immutable once constructed so that it can
     /// be published to other threads with a single reference write.
@@ -100,17 +104,17 @@ module RuntimeDispatch =
             match resolved.EagerUnderlying with
             | ValueSome underlying ->
                 match evaluateSimpleOperands env [] operands with
-                | Choice1Of2 error -> throwError error
-                | Choice2Of2 args -> operate env cont underlying args
-            | ValueNone -> operate env cont resolved.Combiner operands
+                | Choice1Of2 error -> Done(throwError error)
+                | Choice2Of2 args -> bounceOperate env cont underlying args
+            | ValueNone -> bounceOperate env cont resolved.Combiner operands
 
-        member _.Invoke(env: LispVal, cont: LispVal) : ThrowsError<LispVal> =
+        member _.Invoke(env: LispVal, cont: LispVal) : Step =
             let cached = Volatile.Read(&cache)
             if not (isNull cached) && cacheValid cached env then
                 dispatch cached env cont
             else
                 match SymbolTable.resolveBindingCellWithPath env name with
-                | ValueNone -> throwError (UnboundVar("Getting an unbound variable", name))
+                | ValueNone -> Done(throwError (UnboundVar("Getting an unbound variable", name)))
                 | ValueSome(cell, visitedPath) ->
                     let state = cell.state
                     let resolved =
@@ -124,45 +128,77 @@ module RuntimeDispatch =
                     Volatile.Write(&cache, resolved)
                     dispatch resolved env cont
 
-    type GeneratedFunc = Func<LispVal, LispVal, ThrowsError<LispVal>>
+    type GeneratedFunc = Func<LispVal, LispVal, Step>
 
+    /// Sub-evaluations that must produce a *value* before the caller can proceed
+    /// resume through `makeCPS` rather than collapsing a nested trampoline. The
+    /// continuation handed to the callback is the caller's own, so the final form
+    /// of each construct stays in tail position.
     let runOperate env cont (operator: GeneratedFunc) (operands: LispVal[]) =
-        match operator.Invoke(env, newContinuation env) with
-        | Choice1Of2 error -> throwError error
-        | Choice2Of2 combiner -> operate env cont combiner (Array.toList operands)
+        operator.Invoke(
+            env,
+            makeCPS env cont (fun e c combiner _ ->
+                bounceOperate e c combiner (Array.toList operands)))
 
     let runIf env cont (condition: GeneratedFunc) (consequent: GeneratedFunc) (alternative: GeneratedFunc) =
-        match condition.Invoke(env, newContinuation env) with
-        | Choice2Of2 (Bool true) -> consequent.Invoke(env, cont)
-        | Choice2Of2 (Bool false) -> alternative.Invoke(env, cont)
-        | Choice2Of2 found -> throwError (TypeMismatch("bool", found))
-        | Choice1Of2 error -> throwError error
+        condition.Invoke(
+            env,
+            makeCPS env cont (fun e c value _ ->
+                match value with
+                | Bool true -> consequent.Invoke(e, c)
+                | Bool false -> alternative.Invoke(e, c)
+                | found -> Done(throwError (TypeMismatch("bool", found)))))
 
     let runDefine env cont name (rhs: GeneratedFunc) =
-        match rhs.Invoke(env, newContinuation env) with
-        | Choice1Of2 error -> throwError error
-        | Choice2Of2 value ->
-            match defineVar env name value with
-            | Choice1Of2 error -> throwError error
-            | Choice2Of2 _ -> continueEval env cont Inert
+        rhs.Invoke(
+            env,
+            makeCPS env cont (fun e c value _ ->
+                match defineVar e name value with
+                | Choice1Of2 error -> Done(throwError error)
+                | Choice2Of2 _ -> bounceContinue e c Inert))
 
     let runSequence env cont (forms: GeneratedFunc[]) =
-        let mutable index = 0
-        let mutable result = Choice2Of2 Inert
-        let mutable running = true
-        while index < forms.Length && running do
-            let nextCont = if index = forms.Length - 1 then cont else newContinuation env
-            result <- forms.[index].Invoke(env, nextCont)
-            running <- match result with Choice2Of2 _ -> true | Choice1Of2 _ -> false
-            index <- index + 1
-        if forms.Length = 0 then continueEval env cont Inert else result
+        if forms.Length = 0 then bounceContinue env cont Inert
+        else
+            let rec step index e c =
+                if index = forms.Length - 1 then forms.[index].Invoke(e, c)
+                else forms.[index].Invoke(e, makeCPS e c (fun se sc _ _ -> step (index + 1) se sc))
+            step 0 env cont
 
     let runGuard env cont name expectedIdentity (specialized: GeneratedFunc) (fallback: GeneratedFunc) =
         if bindingHasPrimitiveIdentity env name expectedIdentity then specialized.Invoke(env, cont)
         else fallback.Invoke(env, cont)
 
+    /// Attaches a source span to an error raised *while this form is evaluating*.
+    ///
+    /// Errors short-circuit the trampoline as `Done`, bypassing continuations, so
+    /// the span has to be applied by inspecting the step chain rather than by a
+    /// continuation frame. The chain a compiled form returns also covers whatever
+    /// runs after it, because CPS hands the form the caller's own continuation.
+    /// Attributing all of that to this span would make an operator's span swallow
+    /// errors from the operands evaluated after it. Interpreting collapsed each
+    /// sub-evaluation against a fresh continuation, which bounded the span
+    /// naturally; `reached` restores that boundary by recording when control
+    /// passes out of the form to `cont`.
+    ///
+    /// Each case rebuilds one layer and returns immediately, so the trampoline
+    /// keeps its constant stack. An already-located error keeps its inner span.
     let runLocated env cont span sourceLine (body: GeneratedFunc) =
-        match body.Invoke(env, cont) with
-        | Choice1Of2 (LocatedError _ as error) -> throwError error
-        | Choice1Of2 error -> throwError (LocatedError(span, sourceLine, error))
-        | Choice2Of2 value -> Choice2Of2 value
+        let mutable reached = false
+        let boundary =
+            makeCPS env cont (fun e c value _ ->
+                reached <- true
+                bounceContinue e c value)
+        let rec locate step =
+            match step with
+            | Done (Choice1Of2 (LocatedError _)) -> step
+            | Done (Choice1Of2 error) ->
+                if reached then step
+                else Done(throwError (LocatedError(span, sourceLine, error)))
+            | Done (Choice2Of2 _) -> step
+            | More next -> More(fun () -> locate (next ()))
+            | Await request ->
+                Await
+                    { register = request.register
+                      resume = fun outcome -> locate (request.resume outcome) }
+        locate (body.Invoke(env, boundary))

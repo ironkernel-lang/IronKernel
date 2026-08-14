@@ -97,13 +97,13 @@ module StaticCompiler =
             | CLit value
             | CQuote value ->
                 emitValue value
-                |> Option.map (fun emitted -> generated ("continueEval env cont (" + emitted + ")"))
+                |> Option.map (fun emitted -> generated ("bounceContinue env cont (" + emitted + ")"))
             | CVar name ->
                 Some(
                     generated(
                     "match getVar env " + quote name
-                    + " with | Choice1Of2 error -> throwError error"
-                    + " | Choice2Of2 value -> continueEval env cont value"))
+                    + " with | Choice1Of2 error -> Done(throwError error)"
+                    + " | Choice2Of2 value -> bounceContinue env cont value"))
             | COperate(operator, operands) ->
                 match operands |> List.map emitValue |> sequenceOptions with
                 | Some emitted ->
@@ -155,13 +155,13 @@ module StaticCompiler =
                 |> List.map emitValue
                 |> sequenceOptions
                 |> Option.map (fun values ->
-                    generated("run (if_then_else env cont [" + String.concat "; " values + "])") )
+                    generated("if_then_else env cont [" + String.concat "; " values + "]") )
             | CIntrinsicOperate(PrimitiveDefine, operands) ->
                 operands
                 |> List.map emitValue
                 |> sequenceOptions
                 |> Option.map (fun values ->
-                    generated("run (define env cont [" + String.concat "; " values + "])") )
+                    generated("define env cont [" + String.concat "; " values + "]") )
             | CLocated(span, sourceLine, inner) ->
                 emit inner
                 |> Option.map (fun innerFunc ->
@@ -206,7 +206,7 @@ module StaticCompiler =
             output.AppendLine("    let mutable index = 0") |> ignore
             output.AppendLine("    let mutable running = true") |> ignore
             output.AppendLine("    while index < forms.Length && running do") |> ignore
-            output.AppendLine("        result <- forms.[index].Invoke(env, cont)") |> ignore
+            output.AppendLine("        result <- run (forms.[index].Invoke(env, cont))") |> ignore
             output.AppendLine("        running <- match result with Choice2Of2 _ -> true | Choice1Of2 _ -> false") |> ignore
             output.AppendLine("        index <- index + 1") |> ignore
             output.AppendLine("    match result with") |> ignore

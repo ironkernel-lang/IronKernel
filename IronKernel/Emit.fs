@@ -19,7 +19,7 @@ module Emit =
             match fs with
             | [] -> returnM last
             | f :: rest ->
-                match f.Invoke(env, cont) with
+                match run (f.Invoke(env, cont)) with
                 | Choice1Of2 e -> throwError e
                 | Choice2Of2 v -> loop rest v
         loop forms Inert
@@ -30,7 +30,7 @@ module Emit =
             match remaining with
             | [] -> returnM last
             | form :: rest ->
-                match form.func.Invoke(env, cont) with
+                match run (form.func.Invoke(env, cont)) with
                 | Choice1Of2 (LocatedError _ as error) -> throwError error
                 | Choice1Of2 error ->
                     throwError (LocatedError(form.span, form.sourceLine, error))
