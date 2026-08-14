@@ -19,6 +19,16 @@ module Analyze =
         | BuildEval
         | BuildReset
 
+    /// Guarded analysis runs on an explicit stack. Recursing into the sub-forms of
+    /// `if` and `define` instead would grow the CLR stack with the nesting depth of
+    /// the program being analyzed, and a few thousand nested conditionals is enough
+    /// to overflow it.
+    type private GuardedAnalysisWork =
+        | AnalyzeGuardedForm of LispVal
+        | BuildGuardedIf of BindingGuard * CoreExpr
+        | BuildGuardedDefine of BindingGuard * string * CoreExpr
+        | BuildGuardedOperate of LispVal list
+
     type private LocatedAnalysisWork =
         | AnalyzeLocated of Source.LocatedValue
         | BuildLocatedIf of SourceSpan * string option * BindingGuard * CoreExpr
@@ -76,61 +86,82 @@ module Analyze =
     let analyzeForms (forms: LispVal list) : CoreExpr list =
         List.map analyze forms
 
-    /// Specialized `if` and `define` analyze their sub-forms into Core rather than
+    /// Specialized `if` and `define` lower their sub-forms into Core rather than
     /// leaving them as operands for the runtime primitive. `CIntrinsicOperate` hands
     /// the primitive raw syntax, which it then evaluates through the interpreter, so
     /// leaving them there kept every conditional and every definition inside a
-    /// compiled body interpreted. The located analyzer below has always lowered them
-    /// this way; this makes the ordinary path agree.
-    let rec analyzeGuarded env (value: LispVal) : CoreExpr =
-        let mutable current = value
-        let mutable pendingOperands = []
-        let mutable result = None
+    /// compiled body interpreted. The located analyzer below lowers them the same way.
+    let analyzeGuarded env (value: LispVal) : CoreExpr =
+        let mutable pending = [AnalyzeGuardedForm value]
+        let mutable completed : CoreExpr list = []
 
-        while result.IsNone do
-            match current with
-            | List (Atom "if" :: [condition; consequent; alternative] as form) ->
-                let fallback = COperate(CVar "if", List.tail form)
-                match tryCreateBindingGuard env "if" PrimitiveIf with
-                | Some guard ->
-                    result <-
-                        Some(
-                            CGuarded(
-                                guard,
-                                CIf(
-                                    analyzeGuarded env condition,
-                                    analyzeGuarded env consequent,
-                                    analyzeGuarded env alternative),
-                                fallback))
-                | None -> result <- Some fallback
-            | List (Atom "define" :: [Atom name; rhs] as form) ->
-                let fallback = COperate(CVar "define", List.tail form)
-                match tryCreateBindingGuard env "define" PrimitiveDefine with
-                | Some guard ->
-                    result <-
-                        Some(
-                            CGuarded(
-                                guard,
-                                CDefine(CVar name, analyzeGuarded env rhs),
-                                fallback))
-                | None -> result <- Some fallback
-            | List (Atom name :: operands) ->
-                // Prefer a real binding over CLR call sugar (same rule as Eval).
-                match getVar' env name with
-                | Some _ -> result <- Some(COperate(CVar name, operands))
-                | None ->
-                    match tryRewrite name operands with
-                    | Some rewritten -> current <- rewritten
-                    | None -> result <- Some(COperate(CVar name, operands))
-            | List (op :: operands) ->
-                pendingOperands <- operands :: pendingOperands
-                current <- op
-            | other -> result <- Some(analyze other)
+        let takeCompleted count =
+            let mutable expressions = []
+            for _ in 1..count do
+                match completed with
+                | expression :: rest ->
+                    expressions <- expression :: expressions
+                    completed <- rest
+                | [] -> invalidOp "Guarded analysis stack is incomplete"
+            expressions
 
-        let mutable analyzed = result.Value
-        for operands in pendingOperands do
-            analyzed <- COperate(analyzed, operands)
-        analyzed
+        while not pending.IsEmpty do
+            let work = pending.Head
+            pending <- pending.Tail
+            match work with
+            | AnalyzeGuardedForm form ->
+                match form with
+                | List (Atom "if" :: [condition; consequent; alternative] as whole) ->
+                    let fallback = COperate(CVar "if", List.tail whole)
+                    match tryCreateBindingGuard env "if" PrimitiveIf with
+                    | Some guard ->
+                        pending <-
+                            AnalyzeGuardedForm condition
+                            :: AnalyzeGuardedForm consequent
+                            :: AnalyzeGuardedForm alternative
+                            :: BuildGuardedIf(guard, fallback)
+                            :: pending
+                    | None -> completed <- fallback :: completed
+                | List (Atom "define" :: [Atom name; rhs] as whole) ->
+                    let fallback = COperate(CVar "define", List.tail whole)
+                    match tryCreateBindingGuard env "define" PrimitiveDefine with
+                    | Some guard ->
+                        pending <-
+                            AnalyzeGuardedForm rhs
+                            :: BuildGuardedDefine(guard, name, fallback)
+                            :: pending
+                    | None -> completed <- fallback :: completed
+                | List (Atom name :: operands) ->
+                    // Prefer a real binding over CLR call sugar (same rule as Eval).
+                    match getVar' env name with
+                    | Some _ -> completed <- COperate(CVar name, operands) :: completed
+                    | None ->
+                        match tryRewrite name operands with
+                        | Some rewritten -> pending <- AnalyzeGuardedForm rewritten :: pending
+                        | None -> completed <- COperate(CVar name, operands) :: completed
+                | List (op :: operands) ->
+                    pending <- AnalyzeGuardedForm op :: BuildGuardedOperate operands :: pending
+                | other -> completed <- analyze other :: completed
+            | BuildGuardedIf (guard, fallback) ->
+                match takeCompleted 3 with
+                | [condition; consequent; alternative] ->
+                    completed <-
+                        CGuarded(guard, CIf(condition, consequent, alternative), fallback)
+                        :: completed
+                | _ -> invalidOp "Guarded conditional analysis is incomplete"
+            | BuildGuardedDefine (guard, name, fallback) ->
+                match takeCompleted 1 with
+                | [rhs] ->
+                    completed <- CGuarded(guard, CDefine(CVar name, rhs), fallback) :: completed
+                | _ -> invalidOp "Guarded definition analysis is incomplete"
+            | BuildGuardedOperate operands ->
+                match takeCompleted 1 with
+                | [operator] -> completed <- COperate(operator, operands) :: completed
+                | _ -> invalidOp "Guarded operation analysis is incomplete"
+
+        match completed with
+        | [result] -> result
+        | _ -> invalidOp "Guarded analysis did not produce one expression"
 
     let analyzeFormsGuarded env forms =
         List.map (analyzeGuarded env) forms
