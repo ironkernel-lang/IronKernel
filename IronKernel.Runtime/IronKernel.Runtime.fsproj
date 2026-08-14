@@ -8,19 +8,19 @@
     <PackageId>IronKernel.Runtime</PackageId>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\IronKernel\Monads.fs" Link="Monads.fs" />
-    <Compile Include="..\IronKernel\Ast.fs" Link="Ast.fs" />
-    <Compile Include="..\IronKernel\Capabilities.fs" Link="Capabilities.fs" />
-    <Compile Include="..\IronKernel\Errors.fs" Link="Errors.fs" />
-    <Compile Include="..\IronKernel\SymbolTable.fs" Link="SymbolTable.fs" />
-    <Compile Include="..\IronKernel\Contracts.fs" Link="Contracts.fs" />
-    <Compile Include="..\IronKernel\ClrSugar.fs" Link="ClrSugar.fs" />
-    <Compile Include="..\IronKernel\Eval.fs" Link="Eval.fs" />
-    <Compile Include="..\IronKernel\RuntimeDispatch.fs" Link="RuntimeDispatch.fs" />
-    <Compile Include="..\IronKernel\ClrBindings.fs" Link="ClrBindings.fs" />
-    <Compile Include="..\IronKernel\Arithmetic.fs" Link="Arithmetic.fs" />
-    <Compile Include="..\IronKernel\Interop.fs" Link="Interop.fs" />
-    <Compile Include="..\IronKernel\Generated\Bindings.Safe.fs" Link="Generated\Bindings.Safe.fs" />
-    <Compile Include="..\IronKernel\Runtime.fs" Link="Runtime.fs" />
+    <Compile Include="Monads.fs" />
+    <Compile Include="Ast.fs" />
+    <Compile Include="Capabilities.fs" />
+    <Compile Include="Errors.fs" />
+    <Compile Include="SymbolTable.fs" />
+    <Compile Include="Contracts.fs" />
+    <Compile Include="ClrSugar.fs" />
+    <Compile Include="Eval.fs" />
+    <Compile Include="RuntimeDispatch.fs" />
+    <Compile Include="ClrBindings.fs" />
+    <Compile Include="Arithmetic.fs" />
+    <Compile Include="Interop.fs" />
+    <Compile Include="Generated\Bindings.Safe.fs" />
+    <Compile Include="Runtime.fs" />
   </ItemGroup>
 </Project>

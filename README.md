@@ -229,7 +229,7 @@ path:
 
 ```bash
 dotnet fsi tools/generate-clr-bindings.fsx \
-  manifests/safe-clr-bindings.json IronKernel/Generated/Bindings.Safe.fs
+  manifests/safe-clr-bindings.json IronKernel.Runtime/Generated/Bindings.Safe.fs
 ```
 
 Child environments intersect their parents' capability sets. Imported or stolen
@@ -350,6 +350,11 @@ parentheses and brackets inside strings or comments do not count toward the limi
 | `Emit.fs` | IKC package emit / load |
 | `Runtime.fs` | Primitive operatives & applicatives |
 | `kernel.ikr` | Stdlib (`lambda`, `let`, modules, …) |
+
+`Eval.fs`, `Runtime.fs`, and the other shared core modules live in the
+`IronKernel.Runtime` project; `Parser.fs`, `Ir.fs`, `Analyze.fs`, `Compiler.fs`,
+and `Emit.fs` live in the `IronKernel` (`ik`) project, which references
+`IronKernel.Runtime`.
 
 Compiler fast paths are guarded by stable binding-cell identity and version.
 Rebinding or shadowing a primitive invalidates its guard before any specialized

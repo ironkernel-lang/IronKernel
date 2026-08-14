@@ -31,7 +31,7 @@ only environments and closures whose authority they intend to grant.
 
 `manifests/safe-clr-bindings.json` names one exact public static method signature
 for every guest-visible binding. `tools/generate-clr-bindings.fsx` validates each
-signature and emits direct typed F# calls in `IronKernel/Generated/Bindings.Safe.fs`.
+signature and emits direct typed F# calls in `IronKernel.Runtime/Generated/Bindings.Safe.fs`.
 
 Generation rejects duplicate guest names, unknown types, unsupported conversion
 types, missing overloads, and return-type mismatches. Runtime argument conversion

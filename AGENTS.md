@@ -3,9 +3,17 @@
 ## Cursor Cloud specific instructions
 
 IronKernel is a single product: an F#/.NET 10 hybrid CLR compiler + REPL for the
-Kernel language (`IronKernel.sln`, projects `IronKernel`, `IronKernel.Tests`,
-`Mono.Terminal`). The `website/` directory is only a static promo site
-(`python3 -m http.server -d website 8080`) and is not part of the app.
+Kernel language (`IronKernel.sln`, projects `IronKernel`, `IronKernel.Runtime`,
+`IronKernel.Tests`, `Mono.Terminal`). The `website/` directory is only a static
+promo site (`python3 -m http.server -d website 8080`) and is not part of the app.
+
+### Source layout
+- `IronKernel.Runtime/` owns the shared core: `Monads.fs`, `Ast.fs`,
+  `Capabilities.fs`, `Errors.fs`, `SymbolTable.fs`, `Contracts.fs`, `ClrSugar.fs`,
+  `Eval.fs`, `RuntimeDispatch.fs`, `ClrBindings.fs`, `Arithmetic.fs`, `Interop.fs`,
+  `Generated/Bindings.Safe.fs`, `Runtime.fs`.
+- `IronKernel/` owns the parser, analyzer, compiler, REPL, and CLI (`ik`) and
+  consumes the core through a `ProjectReference` to `IronKernel.Runtime`.
 
 ### Environment
 - The .NET 10 SDK lives at `~/.dotnet` and is added to `PATH`/`DOTNET_ROOT` via
