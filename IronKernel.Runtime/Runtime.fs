@@ -1294,6 +1294,17 @@
         let isInert env cont args =
             typePredicate (function Inert -> true | _ -> false) env cont args
 
+        /// R-1RK 4.7.2. The result must have an immutable evaluation structure and be
+        /// initially equal? to the argument. Every IronKernel pair is already immutable,
+        /// and the report is explicit that in that case the result "may or may not be
+        /// eq? to object at the discretion of the implementation" -- so returning the
+        /// argument satisfies it exactly rather than approximately. Contrast copy-es
+        /// (6.4.2), which the report requires to return a *fresh* pair.
+        let copyEsImmutable env cont args =
+            match args with
+            | [object'] -> bounceContinue env cont object'
+            | _ -> fail (NumArgs(1, args))
+
         /// R-1RK 7.2.1: the primitive type predicate for type continuation.
         let isContinuation env cont args =
             typePredicate (function Continuation _ -> true | _ -> false) env cont args
@@ -1884,6 +1895,7 @@
                   ("apply-continuation", applyContinuation);
                   ("extend-continuation", extendContinuation);
                   ("continuation?", isContinuation);
+                  ("copy-es-immutable", copyEsImmutable);
                   ("guard-continuation", guardContinuation);
                   ("guard-dynamic-extent", guardDynamicExtent);
                   ("+", plus);
