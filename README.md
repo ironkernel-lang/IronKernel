@@ -10,15 +10,15 @@ This tree is a **hybrid CLR runtime**: programs are analyzed to a Core IR and co
 
 [`docs/kernel-conformance.md`](docs/kernel-conformance.md) tracks IronKernel against
 the [Revised-1 Report on the Kernel Programming Language](https://ftp.cs.wpi.edu/pub/techreports/pdf/05-07.pdf)
-(R-1RK), feature by feature. Of the report's 135 feature entries, **105 are verified
-by a behavioural check and 30 are absent**; nothing is merely bound-but-unchecked.
+(R-1RK), feature by feature. Of the report's 135 feature entries, **106 are verified
+by a behavioural check and 29 are absent**; nothing is merely bound-but-unchecked.
 34 entries belong to modules the report marks optional. The matrix also reports
-status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **32 of 44
+status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **33 of 44
 modules are complete**.
 
-Every entry of chapter 12's **Numbers** (12.5), **Inexact** (12.6), **Rational**
-(12.8), **Real** (12.9) and **Complex** (12.10) modules has a passing check, and
-exact arithmetic meets what R-1RK 12.3.2 requires: exact integers are of arbitrary
+**Every entry of chapter 12 now has a passing check** — Numbers (12.5), Inexact
+(12.6), Narrow inexact (12.7), Rational (12.8), Real (12.9) and Complex (12.10).
+Exact arithmetic meets what R-1RK 12.3.2 requires: exact integers are of arbitrary
 size and promote rather than wrapping, dividing them gives an exact ratio, so
 `(/ 1 3)` is a third and three of them are exactly one, and both exact real
 infinities exist. Ratios are kept in least terms and read back as `1/3`; `(max)`

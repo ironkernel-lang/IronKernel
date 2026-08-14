@@ -330,6 +330,24 @@ let private behaviouralChecks () : (string * string list) list = [
                 + " (number? (- #e+infinity #e+infinity))))"
                 "(with-strict-arithmetic #f (lambda ()"
                 + " (eqv? (robust? (- #e+infinity #e+infinity)) #f)))" ]
+    // R-1RK 12.7.1. Narrowing is advice, so the checks assert what the report
+    // actually requires: the binder and accessor behave as a keyed dynamic variable,
+    // and the bounding information is no less restrictive when the variable is set
+    // than when it is cleared.
+    "12.7.1", [ "(eqv? (with-narrow-arithmetic #t (lambda () (get-narrow-arithmetic?))) #t)"
+                "(eqv? (with-narrow-arithmetic #f (lambda () (get-narrow-arithmetic?))) #f)"
+                "(eqv? (get-narrow-arithmetic?) #f)"
+                "(eqv? (with-narrow-arithmetic #t (lambda ()"
+                + " (with-narrow-arithmetic #f (lambda () (get-narrow-arithmetic?))))) #f)"
+                // The two arithmetic variables are separate.
+                "(with-narrow-arithmetic #t (lambda () (get-strict-arithmetic?)))"
+                // The report's only hard constraint on what is maintained, besides
+                // correctness: the interval when set is contained in the one when
+                // cleared.
+                "(<=? (car (with-narrow-arithmetic #f (lambda () (get-real-exact-bounds 0.5))))"
+                + " (car (with-narrow-arithmetic #t (lambda () (get-real-exact-bounds 0.5)))))"
+                "(<=? (car (cdr (with-narrow-arithmetic #t (lambda () (get-real-exact-bounds 0.5)))))"
+                + " (car (cdr (with-narrow-arithmetic #f (lambda () (get-real-exact-bounds 0.5))))))" ]
     "12.8.1", [ "(rational? 1)"; "(rational? 1.5)"; "(rational? 1/3)"
                 "(eqv? (rational? 'a) #f)"; "(rational?)"
                 // A ratio is not an integer, and reduces to one when it can.
@@ -435,6 +453,13 @@ let private divergences () = [
             + "above its upper bound, so the report's `undefined` number never arises "
             + "and `undefined?` is always false. Narrowing the bounds is what module "
             + "Narrow inexact (12.7) asks for, and that module is absent."
+    "12.7", "Module Narrow inexact is supported in the sense the report requires -- "
+            + "the variable binds and reads, and the bounding information is no less "
+            + "restrictive when it is set than when it is cleared -- but setting it "
+            + "changes nothing observable. Narrowing is advice (\"the implementation is "
+            + "advised to maintain the most restrictive bounding and robustness "
+            + "information it (correctly) can\"), and IronKernel maintains the "
+            + "infinite bounds of 12.2 either way."
     "12.3.3", "Under strict arithmetic the report signals on numeric overflow and "
               + "underflow as well as on a result with no primary value. IronKernel "
               + "signals only the latter: an overflow still yields an infinity and an "

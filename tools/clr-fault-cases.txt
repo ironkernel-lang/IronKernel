@@ -142,3 +142,6 @@
 (gcd 0)
 (lcm 0 5)
 (max)
+(with-narrow-arithmetic 1 (lambda () 0))
+(get-narrow-arithmetic? 1)
+(with-narrow-arithmetic #t (lambda () (car ())))
