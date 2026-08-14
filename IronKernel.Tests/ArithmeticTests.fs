@@ -294,3 +294,51 @@ let ``simplest-rational rejects an inverted interval`` () =
         match evalIn env "(simplest-rational 0.5 0.2)" with
         | Status message -> Assert.Contains("lower bound exceeds", message)
         | value -> failwithf "expected an error, got %s" (showVal value))
+
+[<Fact>]
+let ``real functions carry their standard meanings`` () =
+    // R-1RK specifies 12.9.2 through 12.9.6 by signature only (Appendix A.2 records
+    // the report as an incomplete draft), so these assert the standard mathematics.
+    [
+        "(real? 1)", Bool true
+        "(real? 1.5)", Bool true
+        "(real? 'a)", Bool false
+        "(<? (abs (- (log (exp 2)) 2)) 0.000001)", Bool true
+        "(<? (abs (- (sin 0) 0)) 0.000001)", Bool true
+        "(<? (abs (- (cos 0) 1)) 0.000001)", Bool true
+        "(<? (abs (- (atan 1 1) 0.7853981633974483)) 0.000001)", Bool true
+        "(<? (abs (- (sqrt 2) 1.4142135623730951)) 0.000001)", Bool true
+        "(<? (abs (- (sqrt (+ (* 3 3) (* 4 4))) 5)) 0.000001)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``expt keeps integer results integral`` () =
+    [
+        "(=? (expt 2 10) 1024)", Bool true
+        "(=? (expt 3 0) 1)", Bool true
+        "(=? (expt 5 2) 25)", Bool true
+        "(integer? (expt 2 10))", Bool true
+        // A negative or fractional exponent leaves the integers.
+        "(<? (abs (- (expt 2 -1) 0.5)) 0.000001)", Bool true
+        "(<? (abs (- (expt 2.0 0.5) 1.4142135623730951)) 0.000001)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``real functions signal domain errors rather than returning NaN`` () =
+    // NaN is a value with no primary value in the report's terms, and 12.2 signals an
+    // error for those. It also stops (sqrt -1) quietly producing a non-number while
+    // the Complex module (12.10) is unimplemented.
+    withKernel (fun env ->
+        for expression in [ "(sqrt -1)"; "(log -1)"; "(asin 2)"; "(acos 2)" ] do
+            match evalIn env expression with
+            | Status message -> Assert.Contains("outside the domain", message)
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``infinities are values rather than errors`` () =
+    // Unlike NaN, an infinity is representable and ordered, and finite? reports it.
+    [
+        "(finite? (log 0))", Bool false
+        "(number? (log 0))", Bool true
+        "(<? (log 0) 0)", Bool true
+    ] |> evalSessionKernel
