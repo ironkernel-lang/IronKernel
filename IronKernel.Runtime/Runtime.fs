@@ -401,15 +401,30 @@
                         // caller's `cont` ran the rest of the caller's computation once
                         // per loaded form, and then `bounceContinue` ran it again, so a
                         // nested (load f) evaluated its enclosing form twice.
+                        //
+                        // R-1RK 15.2.2 has load acquire immutable copies of what it
+                        // captures; it captures nothing here. Each form is evaluated and
+                        // discarded, and an operative created along the way acquires its
+                        // own structure through `vau` above (ADR 0005 phase 0).
                         let evaluateForm form = eval env (newContinuation env) form
                         match sequence (List.map evaluateForm lisp) [] with
                         | Choice1Of2 e -> fail e
                         | Choice2Of2 _ -> bounceContinue env cont Inert
             | badform -> fail (NumArgs(1, badform))
 
+        /// R-1RK 4.10.3. The parameter tree and the body are acquired immutably, per
+        /// 4.7.2: an operative must not change under whoever captured it. See ADR 0005
+        /// -- today `acquireImmutable` is the identity, and this is the seam that has to
+        /// start copying when pairs become mutable.
         let vau _env cont xs = 
             match xs with
-            | prms :: Atom e :: body   -> bounceContinue _env cont (Operative{ prms = prms; envarg = e; body = body; closure = _env; compiledBody = None} ) 
+            | prms :: Atom e :: body   ->
+                bounceContinue _env cont (
+                    Operative{ prms = acquireImmutable prms
+                               envarg = e
+                               body = acquireImmutableForms body
+                               closure = _env
+                               compiledBody = None } ) 
             | _ -> fail (Default("invalid arguments"))
 
         let define env cont xs = 
@@ -1302,7 +1317,7 @@
         /// (6.4.2), which the report requires to return a *fresh* pair.
         let copyEsImmutable env cont args =
             match args with
-            | [object'] -> bounceContinue env cont object'
+            | [object'] -> bounceContinue env cont (acquireImmutable object')
             | _ -> fail (NumArgs(1, args))
 
         /// R-1RK 7.2.1: the primitive type predicate for type continuation.

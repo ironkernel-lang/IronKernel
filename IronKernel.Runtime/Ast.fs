@@ -277,6 +277,25 @@ module Ast =
 
     and ThrowsError<'a> = Choice<LispError,'a>
 
+    /// R-1RK 4.7.2's operation at the value level: the object with an immutable
+    /// evaluation structure -- the set of pairs reachable from it without passing
+    /// through a non-pair. `$vau` (4.10.3) acquires immutable copies of the structures
+    /// it captures, which is what keeps an algorithm from changing under the combiner
+    /// that captured it.
+    ///
+    /// Every IronKernel pair is already immutable, so this returns its argument and
+    /// costs nothing. It exists as a named seam because that stops being true when
+    /// pairs become mutable cells (ADR 0005). `OperativeRecord.compiledBody` memoises
+    /// a compiled body and is sound only while the body cannot change after capture,
+    /// so the capture sites route through here *before* mutation exists rather than
+    /// being found again afterwards.
+    let acquireImmutable (value: LispVal) = value
+
+    /// The same, for a body held as a list of forms rather than as one structure.
+    /// Identity today, and deliberately not `List.map acquireImmutable`: that would
+    /// allocate a new list on every operative construction to no effect.
+    let acquireImmutableForms (forms: LispVal list) = forms
+
     let makeObj = (fun x -> x :> obj  |> Obj)
 
     let allHostCapabilities : CapabilitySet =

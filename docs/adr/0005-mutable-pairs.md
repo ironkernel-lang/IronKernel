@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Proposed
+Status: Accepted — phase 0 done, phases 1-6 outstanding
 
 ## Decision
 
@@ -146,11 +146,19 @@ Two further caveats, both real:
 
 ## Plan
 
-**Phase 0 — `$vau` and `load` copy their captured structure.** Add
-`copy-es-immutable` behaviour to operative construction and to `load`. Today this
-is a no-op, because every pair is already immutable, so it lands with no
-observable change and no risk. It is what makes the `compiledBody` memo sound
-later, and doing it first means the later phases cannot silently invalidate it.
+**Phase 0 — capture goes through an immutable-acquisition seam.** *Done.* Both
+operative construction sites — the `vau` primitive and the compiler's `CVau` —
+route the parameter tree and body through `acquireImmutable` /
+`acquireImmutableForms`, which are the identity today because every pair is
+already immutable. It lands with no observable change and no risk, and it is what
+makes the `compiledBody` memo sound later; doing it first means the later phases
+cannot silently invalidate it.
+
+`load` needed no seam, contrary to the first draft of this plan. R-1RK 15.2.2 has
+it acquire immutable copies of what it captures, and IronKernel's `load` captures
+nothing: each parsed form is evaluated and discarded, and an operative created
+along the way acquires its own structure through `vau`. That is recorded as a
+comment there rather than as a call that would do nothing.
 
 **Phase 1 — introduce the cell.** Replace the two union cases with `Pair of
 PairCell` plus `Nil`, keep `List`/`DottedList` as the active patterns described

@@ -73,3 +73,30 @@ let ``copy-es-immutable and copy-es take exactly one argument`` () =
             match evalIn env expression with
             | Status _ -> ()
             | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``a memoised body keeps answering as the body that was captured`` () =
+    // OperativeRecord.compiledBody memoises the compiled form of a body after first
+    // application, so the second call runs the memo rather than the captured forms.
+    // That is sound only while the body cannot change after $vau captured it, which
+    // is what immutable acquisition guarantees (R-1RK 4.10.3 / 4.7.2, ADR 0005
+    // phase 0). Applying an operative repeatedly, and through both the interpreted
+    // and the compiled construction paths, has to keep giving the captured answer.
+    [
+        "(define f (vau (x) _ (+ 1 2)))", Inert
+        "(=? (f 0) 3)", Bool true
+        "(=? (f 0) 3)", Bool true
+        "(=? (f 0) 3)", Bool true
+        // A wrapped one, whose body runs through the same memo.
+        "(define g (wrap (vau (x) _ (* x 2))))", Inert
+        "(=? (g 21) 42)", Bool true
+        "(=? (g 21) 42)", Bool true
+        // Rebinding a name the body mentions is lexical, not a change to the body:
+        // the operative keeps its closure and the memo stays correct.
+        "(define n 1)", Inert
+        "(define h (wrap (vau () _ n)))", Inert
+        "(=? (h) 1)", Bool true
+        "(set! (get-current-environment) n 2)", Inert
+        "(=? (h) 2)", Bool true
+        "(=? (h) 2)", Bool true
+    ] |> evalSessionKernel
