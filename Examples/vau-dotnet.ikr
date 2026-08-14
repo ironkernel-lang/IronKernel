@@ -18,9 +18,9 @@
 ; ---------------------------------------------------------------------------
 (define unless
   (vau (test & body) env
-    (if (eval env test)
+    (if (eval test env)
       #inert
-      (eval env (cons sequence body)))))
+      (eval (cons sequence body) env))))
 
 ; ---------------------------------------------------------------------------
 ; 2. `trace` — print the *source form*, then run it in the caller's env.
@@ -32,7 +32,7 @@
       (write "  >> ")
       (show exp)
       (writeln "")
-      (eval env exp))))
+      (eval exp env))))
 
 ; ---------------------------------------------------------------------------
 ; 3. `timed` — time any expression via System.DateTime, no thunks required:
@@ -41,7 +41,7 @@
 (define timed
   (vau (label exp) env
     (let* ((start (.get System.DateTime Now))
-           (result (eval env exp))
+           (result (eval exp env))
            (ms (.get (- (.get System.DateTime Now) start) TotalMilliseconds)))
       (printf "  [{0}] {1} ms\n" label ms)
       result)))
@@ -55,9 +55,9 @@
     (if (null? operands)
       #t
       (if (null? (cdr operands))
-        (eval env (car operands))
-        (if (eval env (car operands))
-          (eval env (cons and* (cdr operands)))
+        (eval (car operands) env)
+        (if (eval (car operands) env)
+          (eval (cons and* (cdr operands)) env)
           #f)))))
 
 ; ---------------------------------------------------------------------------

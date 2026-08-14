@@ -25,8 +25,8 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 41 | 30% |
-| `bound` | 14 | 10% |
+| `verified` | 43 | 32% |
+| `bound` | 12 | 9% |
 | `partial` | 0 | 0% |
 | `absent` | 80 | 59% |
 | **total** | **135** | |
@@ -42,10 +42,6 @@ exercised, not that IronKernel matches the report exactly.
 | Report | Divergence |
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. |
-| 4.8.3 | `eval` takes its arguments in the opposite order to the report: IronKernel is `(eval environment expression)`, the report is `(eval expression environment)`. |
-| 6.1.2 | `and?` short-circuits in IronKernel, so it behaves as the report's operative `$and?` (6.1.4) rather than the applicative `and?`, which must evaluate every argument. |
-| 6.1.3 | `or?` short-circuits, matching `$or?` (6.1.5) rather than the applicative `or?`. |
-| 1.3.7 | IronKernel drops the `$` sigil the report uses for operatives, so `$if` is `if` and `$define!` is `define`. See the alias column. |
 
 ## 4 Core types and primitive features
 
@@ -56,7 +52,7 @@ exercised, not that IronKernel matches the report exactly.
 | 4.3.1 | `equal?` | Equivalence up to mutation | `absent` |  |
 | 4.4.1 | `symbol?` | Symbols | `absent` |  |
 | 4.5.1 | `inert?` | Control | `absent` |  |
-| 4.5.2 | `$if` | Control | `verified` | `$if` as `if`; 3 behavioural check(s) |
+| 4.5.2 | `$if` | Control | `verified` | 3 behavioural check(s) |
 | 4.6.1 | `pair?` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 4.6.2 | `null?` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 4.6.3 | `cons` | Pairs and lists | `verified` | 2 behavioural check(s) |
@@ -66,10 +62,10 @@ exercised, not that IronKernel matches the report exactly.
 | 4.8.2 | `ignore?` | Environments | `absent` |  |
 | 4.8.3 | `eval` | Environments | `verified` | 1 behavioural check(s) |
 | 4.8.4 | `make-environment` | Environments | `verified` | 1 behavioural check(s) |
-| 4.9.1 | `$define!` | Environment mutation (optional) | `bound` | optional module; `$define!` as `define` |
+| 4.9.1 | `$define!` | Environment mutation (optional) | `bound` | optional module |
 | 4.10.1 | `operative?` | Combiners | `absent` |  |
 | 4.10.2 | `applicative?` | Combiners | `absent` |  |
-| 4.10.3 | `$vau` | Combiners | `verified` | `$vau` as `vau`; 1 behavioural check(s) |
+| 4.10.3 | `$vau` | Combiners | `verified` | 1 behavioural check(s) |
 | 4.10.4 | `wrap` | Combiners | `verified` | 1 behavioural check(s) |
 | 4.10.5 | `unwrap` | Combiners | `verified` | 1 behavioural check(s) |
 
@@ -77,29 +73,29 @@ exercised, not that IronKernel matches the report exactly.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 5.1.1 | `$sequence` | Control | `verified` | `$sequence` as `sequence`; 1 behavioural check(s) |
+| 5.1.1 | `$sequence` | Control | `verified` | 1 behavioural check(s) |
 | 5.2.1 | `list` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.2.2 | `list*` | Pairs and lists | `verified` | 1 behavioural check(s) |
-| 5.3.1 | `$vau` | Combiners | `verified` | `$vau` as `vau`; 1 behavioural check(s) |
-| 5.3.2 | `$lambda` | Combiners | `verified` | `$lambda` as `lambda`; 1 behavioural check(s) |
+| 5.3.1 | `$vau` | Combiners | `verified` | 1 behavioural check(s) |
+| 5.3.2 | `$lambda` | Combiners | `verified` | 1 behavioural check(s) |
 | 5.4.1 | `car, cdr` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.5.1 | `apply` | Combiners | `verified` | 1 behavioural check(s) |
-| 5.6.1 | `$cond` | Control | `verified` | `$cond` as `cond`; 1 behavioural check(s) |
+| 5.6.1 | `$cond` | Control | `verified` | 1 behavioural check(s) |
 | 5.7.1 | `get-list-metrics` | Pairs and lists | `absent` |  |
 | 5.7.2 | `list-tail` | Pairs and lists | `absent` |  |
 | 5.8.1 | `encycle!` | Pair mutation (optional) | `absent` | optional module |
 | 5.9.1 | `map` | Combiners | `verified` | 1 behavioural check(s) |
-| 5.10.1 | `$let` | Environments | `verified` | `$let` as `let`; 1 behavioural check(s) |
+| 5.10.1 | `$let` | Environments | `verified` | 1 behavioural check(s) |
 
 ## 6 Core library features (II)
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
 | 6.1.1 | `not?` | Booleans | `verified` | 2 behavioural check(s) |
-| 6.1.2 | `and?` | Booleans | `bound` |  |
-| 6.1.3 | `or?` | Booleans | `bound` |  |
-| 6.1.4 | `$and?` | Booleans | `verified` | `$and?` as `and?`; 3 behavioural check(s) |
-| 6.1.5 | `$or?` | Booleans | `verified` | `$or?` as `or?`; 3 behavioural check(s) |
+| 6.1.2 | `and?` | Booleans | `verified` | 4 behavioural check(s) |
+| 6.1.3 | `or?` | Booleans | `verified` | 4 behavioural check(s) |
+| 6.1.4 | `$and?` | Booleans | `verified` | 4 behavioural check(s) |
+| 6.1.5 | `$or?` | Booleans | `verified` | 4 behavioural check(s) |
 | 6.2.1 | `combiner?` | Combiners | `absent` |  |
 | 6.3.1 | `length` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 6.3.2 | `list-ref` | Pairs and lists | `absent` |  |
@@ -120,16 +116,16 @@ exercised, not that IronKernel matches the report exactly.
 | 6.7.1 | `$binds?` | Environments | `absent` |  |
 | 6.7.2 | `get-current-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.3 | `make-kernel-standard-environment` | Environments | `absent` |  |
-| 6.7.4 | `$let*` | Environments | `verified` | `$let*` as `let*`; 1 behavioural check(s) |
-| 6.7.5 | `$letrec` | Environments | `verified` | `$letrec` as `letrec`; 1 behavioural check(s) |
-| 6.7.6 | `$letrec*` | Environments | `bound` | `$letrec*` as `letrec*` |
-| 6.7.7 | `$let-redirect` | Environments | `bound` | `$let-redirect` as `let-redirect` |
+| 6.7.4 | `$let*` | Environments | `verified` | 1 behavioural check(s) |
+| 6.7.5 | `$letrec` | Environments | `verified` | 1 behavioural check(s) |
+| 6.7.6 | `$letrec*` | Environments | `bound` |  |
+| 6.7.7 | `$let-redirect` | Environments | `bound` |  |
 | 6.7.8 | `$let-safe` | Environments | `absent` |  |
-| 6.7.9 | `$remote-eval` | Environments | `verified` | `$remote-eval` as `remote-eval`; 1 behavioural check(s) |
-| 6.7.10 | `$bindings->environment` | Environments | `bound` | `$bindings->environment` as `bindings->environment` |
-| 6.8.1 | `$set!` | Environment mutation (optional) | `verified` | optional module; `$set!` as `set!`; 1 behavioural check(s) |
-| 6.8.2 | `$provide!` | Environment mutation (optional) | `bound` | optional module; `$provide!` as `provide!` |
-| 6.8.3 | `$import!` | Environment mutation (optional) | `bound` | optional module; `$import!` as `import!` |
+| 6.7.9 | `$remote-eval` | Environments | `verified` | 1 behavioural check(s) |
+| 6.7.10 | `$bindings->environment` | Environments | `bound` |  |
+| 6.8.1 | `$set!` | Environment mutation (optional) | `verified` | optional module; 1 behavioural check(s) |
+| 6.8.2 | `$provide!` | Environment mutation (optional) | `bound` | optional module |
+| 6.8.3 | `$import!` | Environment mutation (optional) | `bound` | optional module |
 | 6.9.1 | `for-each` | Control | `verified` | 1 behavioural check(s) |
 
 ## 7 Continuations
@@ -144,7 +140,7 @@ exercised, not that IronKernel matches the report exactly.
 | 7.2.6 | `root-continuation` | Primitive features | `absent` |  |
 | 7.2.7 | `error-continuation` | Primitive features | `absent` |  |
 | 7.3.1 | `apply-continuation` | Library features | `absent` |  |
-| 7.3.2 | `$let/cc` | Library features | `verified` | `$let/cc` as `let/cc`; 1 behavioural check(s) |
+| 7.3.2 | `$let/cc` | Library features | `verified` | 1 behavioural check(s) |
 | 7.3.3 | `guard-dynamic-extent` | Library features | `absent` |  |
 | 7.3.4 | `exit` | Library features | `absent` |  |
 

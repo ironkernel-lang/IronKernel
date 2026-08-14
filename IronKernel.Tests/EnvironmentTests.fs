@@ -55,8 +55,8 @@ let ``get-current-environment is reified`` () =
 let ``eval with explicit environment`` () =
     evalSessionKernel [
         "(define e (make-environment (get-current-environment)))", Inert
-        "(eval e '(define x 99))", Inert
-        "(eval e 'x)", Obj 99
+        "(eval '(define x 99) e)", Inert
+        "(eval 'x e)", Obj 99
     ]
 
 [<Fact>]

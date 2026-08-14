@@ -18,10 +18,14 @@ let ``let let-star letrec`` () =
 let ``cond and logic`` () =
     evalSessionKernel [
         "(cond ((<= 1 0) 'no) ((eqv? 1 1) 'hello))", Atom "hello"
-        "(and? #f (/ 1 0))", Bool false
-        "(or? #t (/ 1 0))", Bool true
+        // R-1RK 6.1.4/6.1.5: $and? and $or? are the short-circuiting operatives.
+        "($and? #f (/ 1 0))", Bool false
+        "($or? #t (/ 1 0))", Bool true
+        // R-1RK 6.1.2/6.1.3: and? and or? are applicatives over evaluated arguments.
         "(and? #t #t #t)", Bool true
         "(or? #f #f #t)", Bool true
+        "(and?)", Bool true
+        "(or?)", Bool false
         "(not? #f)", Bool true
         "(not? #t)", Bool false
     ]
@@ -56,4 +60,27 @@ let ``caar cadr helpers`` () =
     evalSessionKernel [
         "(caar '((a b) (c d)))", Atom "a"
         "(cadr '(a b c))", Atom "b"
+    ]
+
+[<Fact>]
+let ``and? and or? evaluate every argument`` () =
+    // The applicatives must not short-circuit: an argument after a decided result is
+    // still evaluated. Proven by a side effect rather than by an error, because
+    // (/ 1 0) currently faults the process rather than raising a Kernel error.
+    evalSessionKernel [
+        "(define trace (vector 0 0))", Inert
+        "(and? #f (sequence (vector-set! trace 0 1) #t))", Bool false
+        "(vector-ref trace 0)", Obj 1
+        "(or? #t (sequence (vector-set! trace 1 1) #f))", Bool true
+        "(vector-ref trace 1)", Obj 1
+    ]
+
+[<Fact>]
+let ``$and? and $or? stop as soon as the result is decided`` () =
+    evalSessionKernel [
+        "(define trace (vector 0 0))", Inert
+        "($and? #f (sequence (vector-set! trace 0 1) #t))", Bool false
+        "(vector-ref trace 0)", Obj 0
+        "($or? #t (sequence (vector-set! trace 1 1) #f))", Bool true
+        "(vector-ref trace 1)", Obj 0
     ]

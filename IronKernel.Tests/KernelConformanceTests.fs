@@ -61,28 +61,12 @@ let private features () =
 /// operatives, and spells `$define!` as `define`. These are deliberate renamings,
 /// listed explicitly rather than derived by stripping `$`, so that a coincidental
 /// name match can never be mistaken for the report's feature.
-let private aliases () =
-    dict [
-        "$and?", "and?"
-        "$bindings->environment", "bindings->environment"
-        "$cond", "cond"
-        "$define!", "define"
-        "$if", "if"
-        "$import!", "import!"
-        "$lambda", "lambda"
-        "$let", "let"
-        "$let*", "let*"
-        "$let-redirect", "let-redirect"
-        "$let/cc", "let/cc"
-        "$letrec", "letrec"
-        "$letrec*", "letrec*"
-        "$or?", "or?"
-        "$provide!", "provide!"
-        "$remote-eval", "remote-eval"
-        "$sequence", "sequence"
-        "$set!", "set!"
-        "$vau", "vau"
-    ]
+/// R-1RK spells operatives with a leading `$`; IronKernel also binds the shorter
+/// names as an extension (R-1RK 1.3.2). Both spellings denote the same combiner, so
+/// the report's names resolve exactly and nothing needs aliasing. The table is kept
+/// so that a future divergence can be recorded rather than hidden.
+let private aliases () : System.Collections.Generic.IDictionary<string, string> =
+    dict []
 
 /// Behavioural checks keyed by report entry. Each is an expression that must
 /// evaluate to true. Comparing against a boolean rather than against printed output
@@ -100,7 +84,7 @@ let private behaviouralChecks () : (string * string list) list = [
     "4.6.2", [ "(null? ())"; "(eqv? (null? (cons 1 2)) #f)" ]
     "4.6.3", [ "(eqv? (car (cons 1 2)) 1)"; "(eqv? (cdr (cons 1 2)) 2)" ]
     "4.8.1", [ "(environment? (get-current-environment))" ]
-    "4.8.3", [ "(eqv? (eval (get-current-environment) (list + 1 2)) 3)" ]
+    "4.8.3", [ "(eqv? (eval (list + 1 2) (get-current-environment)) 3)" ]
     "4.8.4", [ "(environment? (make-environment))" ]
     "4.10.3", [ // An operative receives its operands unevaluated.
                 "(eqv? (car ((vau xs _ xs) foo)) 'foo)" ]
@@ -117,10 +101,16 @@ let private behaviouralChecks () : (string * string list) list = [
     "5.9.1", [ "(eqv? (car (map (lambda (x) (* x 2)) (list 3))) 6)" ]
     "5.10.1", [ "(eqv? (let ((x 5)) x) 5)" ]
     "6.1.1", [ "(not? #f)"; "(eqv? (not? #t) #f)" ]
-    "6.1.4", [ "(and? #t #t)"; "(eqv? (and? #t #f) #f)"
+    "6.1.2", [ "(and? #t #t)"; "(eqv? (and? #t #f) #f)"; "(and?)"
+               // Applicative: an argument after a decided result is still evaluated.
+               "(let ((t (vector 0))) (sequence (and? #f (sequence (vector-set! t 0 1) #t)) (eqv? (vector-ref t 0) 1)))" ]
+    "6.1.3", [ "(or? #f #t)"; "(eqv? (or? #f #f) #f)"; "(eqv? (or?) #f)"
+               "(let ((t (vector 0))) (sequence (or? #t (sequence (vector-set! t 0 1) #f)) (eqv? (vector-ref t 0) 1)))" ]
+    "6.1.4", [ "($and? #t #t)"; "(eqv? ($and? #t #f) #f)"; "($and?)"
                // Operative short-circuit: the second operand must not be evaluated.
-               "(eqv? (and? #f (/ 1 0)) #f)" ]
-    "6.1.5", [ "(or? #f #t)"; "(eqv? (or? #f #f) #f)"; "(or? #t (/ 1 0))" ]
+               "(eqv? ($and? #f (/ 1 0)) #f)" ]
+    "6.1.5", [ "($or? #f #t)"; "(eqv? ($or? #f #f) #f)"; "(eqv? ($or?) #f)"
+               "($or? #t (/ 1 0))" ]
     "6.3.1", [ "(eqv? (length (list 1 2 3)) 3)"; "(eqv? (length ()) 0)" ]
     "6.7.2", [ "(environment? (get-current-environment))" ]
     "6.7.4", [ "(eqv? (let* ((x 1) (y (+ x 1))) y) 2)" ]
@@ -146,16 +136,6 @@ let private behaviouralChecks () : (string * string list) list = [
 let private divergences () = [
     "3.6", "External representations differ: IronKernel prints a number as "
            + "`<obj 3 : Int32>` rather than `3`."
-    "4.8.3", "`eval` takes its arguments in the opposite order to the report: "
-             + "IronKernel is `(eval environment expression)`, the report is "
-             + "`(eval expression environment)`."
-    "6.1.2", "`and?` short-circuits in IronKernel, so it behaves as the report's "
-             + "operative `$and?` (6.1.4) rather than the applicative `and?`, which "
-             + "must evaluate every argument."
-    "6.1.3", "`or?` short-circuits, matching `$or?` (6.1.5) rather than the "
-             + "applicative `or?`."
-    "1.3.7", "IronKernel drops the `$` sigil the report uses for operatives, so "
-             + "`$if` is `if` and `$define!` is `define`. See the alias column."
 ]
 
 let private conformanceEnv () =

@@ -135,7 +135,7 @@ let ``operative uses lexical scope and can explicitly evaluate in caller scope``
         [ "(define list (wrap (vau xs _ xs)))"
           "(define x 1)"
           "(define lexical (vau () _ x))"
-          "(define caller-value (vau (form) caller (eval caller form)))"
+          "(define caller-value (vau (form) caller (eval form caller)))"
           "(define exercise (wrap (vau (x) _ (list (lexical) (caller-value x)))))"
           "(exercise 2)" ]
         (List [Obj (1 :> obj); Obj (2 :> obj)])

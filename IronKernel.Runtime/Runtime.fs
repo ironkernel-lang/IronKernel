@@ -255,8 +255,9 @@
             | a :: _ -> fail (TypeMismatch("applicative",a))
             | [] -> fail (NumArgs(1, []))
 
-        let evaluate _ cont = function 
-            | (a::b::_) -> bounceEval a cont b 
+        /// R-1RK 4.8.3: (eval expression environment).
+        let evaluate _ cont = function
+            | (expression::environment::_) -> bounceEval environment cont expression
             | badArgList -> fail (NumArgs(2, badArgList))
 
         let makeEnvironment env cont parents =

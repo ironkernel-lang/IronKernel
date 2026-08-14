@@ -32,4 +32,4 @@
       (lambda (path _k)
         (make-response 404 "text/plain; charset=utf-8"
           (str "No lantern at " path "\n")))
-      (eval env body))))
+      (eval body env))))

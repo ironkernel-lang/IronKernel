@@ -126,12 +126,12 @@
             <h3 class="op-name">eval</h3>
             <span class="op-kind">applicative</span>
           </div>
-          <p class="op-sig">(eval environment expression)</p>
+          <p class="op-sig">(eval expression environment)</p>
           <p>Evaluates <code>expression</code> in the given environment value.</p>
           <div class="example">
             <pre><code>(define e (make-environment (get-current-environment)))
-(eval e '(define x 7))
-(eval e 'x)  ; ⇒ 7</code></pre>
+(eval '(define x 7) e)
+(eval 'x e)  ; ⇒ 7</code></pre>
           </div>
         </section>
 
