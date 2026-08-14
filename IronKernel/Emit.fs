@@ -13,6 +13,15 @@ module Emit =
     open Choice
     open Eval
 
+    /// R-1RK 7.2.6: an abnormal pass reached root-continuation, so the session ends.
+    /// The signal travels the error channel and picks up source locations on the way
+    /// out like any other, so the wrappers are stripped to find it.
+    let rec private sessionExit error =
+        match error with
+        | SessionExit value -> Some value
+        | LocatedError(_, _, inner) -> sessionExit inner
+        | _ -> None
+
     let runCompiledForms (env: LispVal) (forms: KernelFunc list) : ThrowsError<LispVal> =
         let cont = newContinuation env
         let rec loop (fs: KernelFunc list) (last: LispVal) =
@@ -20,7 +29,12 @@ module Emit =
             | [] -> returnM last
             | f :: rest ->
                 match run (f.Invoke(env, cont)) with
-                | Choice1Of2 e -> throwError e
+                | Choice1Of2 e ->
+                    // Reaching root-continuation ends the session, so the remaining
+                    // forms are not run and the value is not an error.
+                    match sessionExit e with
+                    | Some value -> returnM value
+                    | None -> throwError e
                 | Choice2Of2 v -> loop rest v
         loop forms Inert
 
@@ -31,6 +45,8 @@ module Emit =
             | [] -> returnM last
             | form :: rest ->
                 match run (form.func.Invoke(env, cont)) with
+                | Choice1Of2 error when (sessionExit error).IsSome ->
+                    returnM (sessionExit error).Value
                 | Choice1Of2 (LocatedError _ as error) -> throwError error
                 | Choice1Of2 error ->
                     throwError (LocatedError(form.span, form.sourceLine, error))

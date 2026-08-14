@@ -130,6 +130,35 @@ module Eval =
             | _ -> searching <- false
         found
 
+    /// The records a continuation would return through, innermost first. R-1RK 7.1
+    /// fixes a continuation's ancestors at the moment it is created, and this chain is
+    /// exactly that set: walked the way the evaluator walks it, along nextCont and then
+    /// into the metacontinuation's parent when a segment runs out.
+    let continuationAncestry continuation =
+        let records = System.Collections.Generic.List<ContinuationRecord>()
+        let mutable current = continuation
+        let mutable walking = true
+        while walking do
+            match current with
+            | Continuation (record, metaCont, ct) ->
+                records.Add record
+                match record.nextCont with
+                | Some (Continuation (next, None, _)) ->
+                    current <- Continuation (next, metaCont, ct)
+                | _ ->
+                    match metaCont with
+                    | Some frame -> current <- frame.parentCont
+                    | None -> walking <- false
+            | _ -> walking <- false
+        List.ofSeq records
+
+    /// Whether `record` is an ancestor of the continuation whose ancestry is `chain`,
+    /// which is R-1RK 7.1's "the continuation is within the dynamic extent of record".
+    /// Records are compared by identity: two continuations are the same continuation
+    /// only if they are the same object.
+    let withinExtent (chain: ContinuationRecord list) (record: ContinuationRecord) =
+        chain |> List.exists (fun candidate -> obj.ReferenceEquals(candidate, record))
+
     let promptContinuation env parent tag handler =
         Continuation(
             { closure = env
@@ -181,6 +210,11 @@ module Eval =
         // is what ends the binder's dynamic extent, so it simply hands the value
         // outward exactly as an exhausted body does.
         | Continuation ({ closure = e; currentCont = Some (DynamicBinding _); nextCont = nextCont }, metaCont, ct) ->
+            finishDeferredBody e nextCont metaCont ct value
+        // R-1RK 7.2.4: "in the absence of abnormal passing, the inner and outer
+        // continuations each have the same behavior as continuation". Guards only
+        // affect abnormal passes, so a normal receipt here is a pass-through.
+        | Continuation ({ closure = e; currentCont = Some (GuardBarrier _); nextCont = nextCont }, metaCont, ct) ->
             finishDeferredBody e nextCont metaCont ct value
         | _ -> fail (TypeMismatch ("continuation", cont))
 

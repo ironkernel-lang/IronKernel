@@ -560,6 +560,9 @@
 (define $letrec* letrec*)
 (define $let-redirect let-redirect)
 (define $let/cc let/cc)
+
+; 7.3.4: (exit) is an abnormal transfer of #inert to root-continuation.
+(define exit (lambda () (apply-continuation root-continuation #inert)))
 (define $set! set!)
 (define $provide! provide!)
 (define $import! import!)

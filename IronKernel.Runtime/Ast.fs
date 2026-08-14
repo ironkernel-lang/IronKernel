@@ -158,6 +158,28 @@ module Ast =
         /// binding with it, and resuming that continuation from outside re-enters
         /// the binding, where a push/pop discipline would already have popped it.
         | DynamicBinding of System.Guid * LispVal
+        /// The entry/exit guards of R-1RK 7.2.4, carried on the *outer* continuation
+        /// that guard-continuation builds. Like a dynamic binding it holds no code --
+        /// receiving a value normally just passes it onward -- but living in the chain
+        /// is what makes the extent tests of 7.1 mean what the report says: whether a
+        /// guard applies to an abnormal pass is decided by whether its continuation is
+        /// an ancestor of the source or of the destination.
+        | GuardBarrier of GuardBarrierRecord
+    and GuardBarrierRecord = {
+        /// Each clause is a selector continuation and an interceptor applicative,
+        /// already taken apart and copied, so later mutation of the argument lists
+        /// cannot change them (7.2.4).
+        entryClauses : (LispVal * LispVal) list
+        exitClauses  : (LispVal * LispVal) list
+        /// The dynamic environment of the guard-continuation call, which interceptors
+        /// are called in.
+        guardEnv     : LispVal
+        /// The inner continuation, a child of the outer one holding this record. Exit
+        /// guards are about leaving *its* extent, which is what keeps an interceptor
+        /// calling its second argument from re-triggering the guard it came from.
+        /// Assigned once, immediately after both continuations are built.
+        mutable inner : ContinuationRecord option
+    }
     and ContinuationRecord = {
         closure     : LispVal
         currentCont : DeferredCode option
@@ -247,6 +269,11 @@ module Ast =
        | LocatedError of SourceSpan * string option * LispError
        | CapabilityDenied of string
        | ContractViolation of string
+       /// Not an error: an abnormal pass reached root-continuation (R-1RK 7.2.6), so
+       /// the Kernel session ends with this value. It travels the error channel
+       /// because that is the one path that unwinds a computation without a
+       /// continuation to receive the result, and the drivers recognise it.
+       | SessionExit of LispVal
 
     and ThrowsError<'a> = Choice<LispError,'a>
 
