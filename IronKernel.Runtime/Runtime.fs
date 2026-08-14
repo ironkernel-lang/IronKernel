@@ -1063,18 +1063,34 @@
         let vector env cont args =
             Vector(List.toArray args) |> bounceContinue env cont
 
+        /// An index outside the vector is reported as a Kernel error. Indexing the
+        /// array directly raised IndexOutOfRangeException, which escaped the evaluator
+        /// and aborted the process, the same way division by zero and file errors
+        /// used to.
+        let private checkedIndex (arr: LispVal array) (index: int) name =
+            if index < 0 || index >= arr.Length then
+                Some(Default(sprintf "%s: index %d is outside a vector of length %d" name index arr.Length))
+            else None
+
         let vector_set env cont args =
-            match args with 
+            match args with
             | [Vector arr; Obj pos'; value] when typeof<int> = pos'.GetType() ->
-                arr.[pos' :?> int] <- value
-                bounceContinue env cont Inert
+                let index = pos' :?> int
+                match checkedIndex arr index "vector-set!" with
+                | Some error -> fail error
+                | None ->
+                    arr.[index] <- value
+                    bounceContinue env cont Inert
             | [_; pos; _] -> fail (TypeMismatch("vector/int", pos))
             | _ -> fail (NumArgs(3, args))
 
         let vector_ref env cont args =
-            match args with 
+            match args with
             | [Vector arr; Obj pos'] when typeof<int> = pos'.GetType() ->
-                arr.[pos' :?> int] |> bounceContinue env cont
+                let index = pos' :?> int
+                match checkedIndex arr index "vector-ref" with
+                | Some error -> fail error
+                | None -> arr.[index] |> bounceContinue env cont
             | [_; pos] -> fail (TypeMismatch("vector/int", pos))
             | _ -> fail (NumArgs(2, args))
 
