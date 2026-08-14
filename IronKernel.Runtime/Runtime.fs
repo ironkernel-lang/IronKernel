@@ -231,12 +231,13 @@
         let private isNumberValue (value: obj) =
             match value with
             | :? byte | :? int | :? int64 | :? float32 | :? float -> true
+            | :? Numerics.BigInteger -> true
             | :? Numerics.Complex -> true
             | _ -> false
 
         let private isIntegerValue (value: obj) =
             match value with
-            | :? byte | :? int | :? int64 -> true
+            | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> true
             | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f) && Math.Floor(float f) = float f
             | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d) && Math.Floor d = d
             // R-1RK 12.5.1: a complex is an integer iff its real part is an integer and
@@ -248,7 +249,7 @@
 
         let private isFiniteValue (value: obj) =
             match value with
-            | :? byte | :? int | :? int64 -> Some true
+            | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> Some true
             | :? float32 as f -> Some(not (Single.IsNaN f) && not (Single.IsInfinity f))
             | :? float as d -> Some(not (Double.IsNaN d) && not (Double.IsInfinity d))
             // R-1RK 12.5.1: a complex is finite iff its components all are.
@@ -307,6 +308,7 @@
                         | :? int64 as x -> x = 0L
                         | :? float32 as x -> x = 0.0f
                         | :? float as x -> x = 0.0
+                        | :? Numerics.BigInteger as x -> x = Numerics.BigInteger.Zero
                         // R-1RK 12.5.7: a complex is zero when all its components are.
                         | :? Numerics.Complex as c -> c = Numerics.Complex.Zero
                         | _ -> false
@@ -759,6 +761,7 @@
         /// correctly, so (log 0) is negative infinity rather than an error.
         let private toFloat (value: obj) =
             match value with
+            | :? Numerics.BigInteger as v -> Some(float v)
             | :? byte as b -> Some(float b)
             | :? int as i -> Some(float i)
             | :? int64 as l -> Some(float l)
@@ -769,6 +772,7 @@
         let private asComplex (value: obj) =
             match value with
             | :? Numerics.Complex as c -> Some c
+            | :? Numerics.BigInteger as v -> Some(Numerics.Complex(float v, 0.0))
             | :? byte as b -> Some(Numerics.Complex(float b, 0.0))
             | :? int as i -> Some(Numerics.Complex(float i, 0.0))
             | :? int64 as l -> Some(Numerics.Complex(float l, 0.0))
@@ -817,6 +821,7 @@
                     let real =
                         match value with
                         | :? byte | :? int | :? int64 | :? float32 | :? float -> true
+                        | :? Numerics.BigInteger -> true
                         | :? Numerics.Complex as c -> c.Imaginary = 0.0
                         | _ -> false
                     if real then loop rest else bounceContinue env cont (Bool false)
@@ -979,7 +984,7 @@
                 | Obj value :: rest ->
                     let rational =
                         match value with
-                        | :? byte | :? int | :? int64 -> true
+                        | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> true
                         | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f)
                         | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d)
                         // R-1RK 12.8.1: a complex is rational iff its real part is and
@@ -999,7 +1004,8 @@
             match args with
             | [Obj value] ->
                 match value with
-                | :? byte | :? int | :? int64 -> bounceContinue env cont (Obj value)
+                | :? byte | :? int | :? int64 | :? Numerics.BigInteger ->
+                    bounceContinue env cont (Obj value)
                 | :? float32 as f -> bounceContinue env cont (Obj(box (float32 (apply (float f)))))
                 | :? float as d -> bounceContinue env cont (Obj(box (apply d)))
                 | _ -> fail (TypeMismatch("number", Obj value))
@@ -1038,30 +1044,34 @@
                     let divisor = if divisor = 0L then 1L else divisor
                     Some(n / divisor, denominator / divisor)
 
-        let private ratioPart name pick env cont args =
+        let private ratioPart name wantNumerator env cont args =
+            let pick (numerator: int64, denominator: int64) =
+                Obj(box (if wantNumerator then numerator else denominator))
             match args with
             | [Obj value] ->
                 match value with
-                | :? byte as b -> bounceContinue env cont (Obj(pick (int64 b, 1L)))
-                | :? int as i -> bounceContinue env cont (Obj(pick (int64 i, 1L)))
-                | :? int64 as l -> bounceContinue env cont (Obj(pick (l, 1L)))
+                | :? byte as b -> bounceContinue env cont (pick (int64 b, 1L))
+                | :? int as i -> bounceContinue env cont (pick (int64 i, 1L))
+                | :? int64 as l -> bounceContinue env cont (pick (l, 1L))
+                // An exact integer has denominator one whatever its size, and its
+                // numerator is itself -- returned unchanged rather than narrowed.
+                | :? Numerics.BigInteger as v ->
+                    bounceContinue env cont (Obj(if wantNumerator then box v else box 1L))
                 | :? float32 as f ->
                     match exactRatio (float f) with
-                    | Some ratio -> bounceContinue env cont (Obj(pick ratio))
+                    | Some ratio -> bounceContinue env cont (pick ratio)
                     | None -> fail (Default(name + ": no exact ratio is representable"))
                 | :? float as d ->
                     match exactRatio d with
-                    | Some ratio -> bounceContinue env cont (Obj(pick ratio))
+                    | Some ratio -> bounceContinue env cont (pick ratio)
                     | None -> fail (Default(name + ": no exact ratio is representable"))
                 | _ -> fail (TypeMismatch("number", Obj value))
             | [found] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(1, args))
 
-        let numeratorOf env cont args =
-            ratioPart "numerator" (fun (n, _) -> box n) env cont args
+        let numeratorOf env cont args = ratioPart "numerator" true env cont args
 
-        let denominatorOf env cont args =
-            ratioPart "denominator" (fun (_, d) -> box d) env cont args
+        let denominatorOf env cont args = ratioPart "denominator" false env cont args
 
         /// R-1RK 12.5.8: a freshly allocated list of the quotient and the remainder.
         let divAndMod env cont args =

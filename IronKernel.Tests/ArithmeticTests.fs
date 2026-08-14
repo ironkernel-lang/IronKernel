@@ -382,3 +382,39 @@ let ``div and mod stay on the reals`` () =
         match evalIn env "(div (make-rectangular 0 1) 2)" with
         | Status message -> Assert.Contains("defined on reals", message)
         | value -> failwithf "expected an error, got %s" (showVal value))
+
+[<Fact>]
+let ``exact integer arithmetic promotes instead of wrapping`` () =
+    // R-1RK 12.3.2 requires exact integers of arbitrary size. These used to wrap
+    // silently: (* 2147483647 2147483647) was 1 and (+ 2147483647 2147483647) was -2.
+    [
+        "(=? (* 2147483647 2147483647) 4611686014132420609)", Bool true
+        "(=? (+ 2147483647 2147483647) 4294967294)", Bool true
+        "(=? (+ 9223372036854775807 1) 9223372036854775808)", Bool true
+        "(=? (* 1000000000000 1000000000000) 1000000000000000000000000)", Bool true
+        // A result that fits again narrows back, so ordinary arithmetic is unaffected.
+        "(=? (- (+ 2147483647 1) 1) 2147483647)", Bool true
+        "(=? (+ 1 2) 3)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``big integers work with the rest of the numeric tower`` () =
+    [
+        "(define big 123456789012345678901234567890)", Inert
+        "(number? big)", Bool true
+        "(integer? big)", Bool true
+        "(finite? big)", Bool true
+        "(rational? big)", Bool true
+        "(real? big)", Bool true
+        "(positive? big)", Bool true
+        "(zero? (- big big))", Bool true
+        "(=? (abs (- 0 big)) big)", Bool true
+        "(=? (max 1 big) big)", Bool true
+        "(=? (gcd big big) big)", Bool true
+        "(=? (numerator big) big)", Bool true
+        "(=? (denominator big) 1)", Bool true
+        "(<? 1 big)", Bool true
+        // Exact division stays exact; div and mod keep their identity.
+        "(=? (/ 100000000000000000000 10000000000) 10000000000)", Bool true
+        "(=? 100000000000000000000 (+ (* 7 (div 100000000000000000000 7)) (mod 100000000000000000000 7)))", Bool true
+    ] |> evalSessionKernel
