@@ -617,18 +617,36 @@
             | [found; _] -> fail (TypeMismatch("resumption", found))
             | bad -> fail (NumArgs(2, bad))
 
+        /// The result type has to be found by walking the base types, not by testing
+        /// the concrete one. An F# `task { ... return v }` is an
+        /// AsyncTaskMethodBuilder`1+AsyncStateMachineBox`1, which *derives from*
+        /// Task<T> but whose own generic definition is not Task<>. Testing the
+        /// concrete type therefore always failed, and every awaited value was
+        /// discarded and reported as #inert.
+        let rec private taskResultType (candidate: Type) =
+            // `isNull` is shadowed in this module by the `null?` primitive.
+            if obj.ReferenceEquals(candidate, null) then None
+            elif candidate.IsGenericType
+                 && candidate.GetGenericTypeDefinition() = typedefof<Task<_>> then
+                Some candidate
+            else taskResultType candidate.BaseType
+
         let private taskOutcome (completed: Task) =
             try
                 completed.GetAwaiter().GetResult()
-                let taskType = completed.GetType()
-                if taskType.IsGenericType
-                   && taskType.GetGenericTypeDefinition() = typedefof<Task<_>> then
-                    match taskType.GetProperty("Result").GetValue(completed) with
-                    | null -> returnM Inert
-                    | :? LispVal as value -> returnM value
-                    | other -> returnM (Obj other)
-                else
-                    returnM Inert
+                match taskResultType (completed.GetType()) with
+                | Some taskType ->
+                    // `task { do! ... }` with no value is Task<VoidTaskResult>; that
+                    // carries no result and is inert.
+                    let resultType = taskType.GetGenericArguments().[0]
+                    if resultType.FullName = "System.Threading.Tasks.VoidTaskResult" then
+                        returnM Inert
+                    else
+                        match taskType.GetProperty("Result").GetValue(completed) with
+                        | null -> returnM Inert
+                        | :? LispVal as value -> returnM value
+                        | other -> returnM (Obj other)
+                | None -> returnM Inert
             with
             | :? OperationCanceledException as error -> throwError (ClrException error)
             | error -> throwError (ClrException error)

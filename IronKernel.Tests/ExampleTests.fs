@@ -81,3 +81,11 @@ let ``coroutines.ikr interleaves both computations and terminates`` () =
         [| "Hefty computation: 5"; "Hefty computation: 4"; "Hefty computation: 3"
            "Hefty computation: 2"; "Hefty computation: 1"; "Hefty computation: 0" |],
         hefty)
+
+[<Fact>]
+let ``effects-async.ikr resolves its handler and its awaited value`` () =
+    // Only packaged, never executed, so a broken awaited value went unnoticed here
+    // too -- the same coverage gap that hid the coroutines example.
+    let output = runExampleCapturingOutput "effects-async.ikr"
+    Assert.Contains("handled=42", output)
+    Assert.Contains("async complete", output)
