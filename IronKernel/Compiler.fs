@@ -129,7 +129,16 @@ module Compiler =
                     let bodyLv = List.map toLispVal body
                     completed <-
                         KernelFunc(fun env cont ->
-                            let op = Operative { prms = formals; envarg = envarg; body = bodyLv; closure = env; compiledBody = None }
+                            // The same immutable acquisition the `vau` primitive
+                            // performs (R-1RK 4.10.3 / 4.7.2, ADR 0005 phase 0): a
+                            // compiled $vau captures structure exactly as an
+                            // interpreted one does.
+                            let op =
+                                Operative { prms = acquireImmutable formals
+                                            envarg = envarg
+                                            body = acquireImmutableForms bodyLv
+                                            closure = env
+                                            compiledBody = None }
                             bounceContinue env cont op)
                         :: completed
                 | CEval (environmentExpression, valueExpression) ->
