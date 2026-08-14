@@ -126,6 +126,37 @@ namespace IronKernel
         /// a handler would guard against nothing while sitting on the hottest operation
         /// in the language; division is the only arithmetic that can raise, and it is
         /// implemented separately below with its own checks.
+        /// R-1RK 12.3.2's exact infinities sit outside the widening tower: an infinity
+        /// paired with a finite number has no common representation, so each operation
+        /// takes the infinite cases apart first and widens only what is left.
+        ///
+        /// A combination with no answer -- infinity minus infinity, zero times
+        /// infinity, infinity over infinity -- produces a result with no primary value
+        /// (12.2), which is NaN here. Whether that signals is not arithmetic's
+        /// decision: it depends on the strict-arithmetic keyed dynamic variable
+        /// (12.6.6), which needs the continuation, so the primitives resolve it.
+        let private noPrimaryValue : obj = box System.Double.NaN
+
+        let private signOf = function
+            | ExactPositiveInfinity -> 1
+            | ExactNegativeInfinity -> -1
+
+        let private infinityOfSign sign =
+            if sign >= 0 then ExactPositiveInfinity else ExactNegativeInfinity
+
+        /// The sign of a finite real, or None when it is not a real at all. Complex
+        /// numbers have no order, so they have no sign for an infinity to combine with.
+        let private finiteSign (value: obj) =
+            match value with
+            | :? byte as v -> Some(compare v 0uy)
+            | :? int32 as v -> Some(compare v 0)
+            | :? int64 as v -> Some(compare v 0L)
+            | :? Numerics.BigInteger as v -> Some v.Sign
+            | :? ExactRatio as v -> Some v.Numerator.Sign
+            | :? float32 as v -> if Single.IsNaN v then None else Some(compare v 0.0f)
+            | :? double as v -> if Double.IsNaN v then None else Some(compare v 0.0)
+            | _ -> None
+
         let private numericBinaryOp apply (a': LispVal) (b': LispVal) =
             match a', b' with
             | Obj a, Obj b ->
@@ -301,13 +332,70 @@ namespace IronKernel
             | Doubles(x, y) -> Some(x <= y)
             | Complexes _ -> None
 
+        /// Dispatches a binary operation when either operand is an exact infinity.
+        /// `combine` gets the two signs when both are infinite, `mixed` gets the
+        /// infinity's sign and the finite operand. Returns None when neither is
+        /// infinite, leaving the caller on its ordinary path.
+        let private withInfinities combine mixed (a: obj) (b: obj) : obj option option =
+            match a, b with
+            | (:? ExactInfinity as x), (:? ExactInfinity as y) ->
+                Some(Some(combine (signOf x) (signOf y)))
+            | (:? ExactInfinity as x), finite ->
+                match finiteSign finite with
+                // A NaN or complex operand has no sign to combine with; NaN already
+                // means "no primary value", so the result has none either.
+                | None -> Some(Some noPrimaryValue)
+                | Some sign -> Some(mixed (signOf x) sign false finite)
+            | finite, (:? ExactInfinity as y) ->
+                match finiteSign finite with
+                | None -> Some(Some noPrimaryValue)
+                | Some sign -> Some(mixed (signOf y) sign true finite)
+            | _ -> None
+
+
+        /// Adding like infinities gives that infinity; adding opposite ones has no
+        /// answer. An infinity plus any finite real is that infinity.
+        let private addCombine x y = if x = y then box (infinityOfSign x) else noPrimaryValue
+        let private addMixed infinite _ _ _ = Some(box (infinityOfSign infinite))
+
+        // a - b with both infinite: opposite signs keep a's, like signs cancel.
+        let private subtractCombine x y =
+            if x = y then noPrimaryValue else box (infinityOfSign x)
+        // finite - infinity flips the sign; infinity - finite keeps it.
+        let private subtractMixed infinite _ finiteIsFirst _ =
+            Some(box (infinityOfSign (if finiteIsFirst then -infinite else infinite)))
+
+        /// Multiplying by an infinity keeps the sign product, except that zero times
+        /// infinity has no answer: no finite multiple of zero is infinite.
+        let private multiplyCombine x y = box (infinityOfSign (x * y))
+        let private multiplyMixed infinite finite _ _ =
+            if finite = 0 then Some noPrimaryValue
+            else Some(box (infinityOfSign (infinite * finite)))
+
+        /// The infinite cases are checked inline rather than by handing the finite path
+        /// to a combinator: partially applying it allocated a closure on every
+        /// arithmetic operation, which showed up as a tenth of the cost of a call.
+        let inline private dispatchInfinities combine mixed (a: obj) (b: obj) onFinite =
+            // Two type tests settle the common case. Sorting out *which* operand is
+            // infinite costs more, and only runs when one of them actually is.
+            if not (a :? ExactInfinity) && not (b :? ExactInfinity) then onFinite ()
+            else
+                match withInfinities combine mixed a b with
+                | None -> onFinite ()
+                | Some (Some result) -> returnM (Obj result)
+                | Some None -> throwError (Default "division by zero")
+
         let opAdd a' b' =
             match a', b' with
             | Obj (:? DateTime as date), Obj b ->
                 match b with
                 | :? TimeSpan as span -> returnM (Obj(date + span))
                 | _ -> throwError (ClrTypeMismatch("TimeSpan", b.GetType().Name))
-            | _ -> numericBinaryOp addWidened a' b'
+            | Obj a, Obj b ->
+                dispatchInfinities addCombine addMixed a b (fun () ->
+                    numericBinaryOp addWidened a' b')
+            | Obj _, found -> throwError (TypeMismatch("object", found))
+            | found, _ -> throwError (TypeMismatch("object", found))
 
         let opMinus a' b' =
             match a', b' with
@@ -315,9 +403,19 @@ namespace IronKernel
                 match b with
                 | :? DateTime as other -> returnM (Obj(date - other))
                 | _ -> throwError (ClrTypeMismatch("DateTime", b.GetType().Name))
-            | _ -> numericBinaryOp subtractWidened a' b'
+            | Obj a, Obj b ->
+                dispatchInfinities subtractCombine subtractMixed a b (fun () ->
+                    numericBinaryOp subtractWidened a' b')
+            | Obj _, found -> throwError (TypeMismatch("object", found))
+            | found, _ -> throwError (TypeMismatch("object", found))
 
-        let opMultiply a' b' = numericBinaryOp multiplyWidened a' b'
+        let opMultiply a' b' =
+            match a', b' with
+            | Obj a, Obj b ->
+                dispatchInfinities multiplyCombine multiplyMixed a b (fun () ->
+                    numericBinaryOp multiplyWidened a' b')
+            | Obj _, found -> throwError (TypeMismatch("object", found))
+            | found, _ -> throwError (TypeMismatch("object", found))
 
         let private divisorIsZero = function
             | Bytes(_, y) -> y = 0uy
@@ -341,7 +439,17 @@ namespace IronKernel
             try Choice2Of2(divideWidened widened)
             with ex -> Choice1Of2 ex
 
-        let opDivide a' b' =
+        /// Infinity over infinity has no answer. An infinity over a finite real is an
+        /// infinity of the sign product, except over zero, which R-1RK 12.8.2 makes an
+        /// error like any other division by zero. A finite real over an infinity is
+        /// exact zero -- the one case where an infinite operand gives a finite result.
+        let private divideCombine _ _ = noPrimaryValue
+        let private divideMixed infinite finite finiteIsFirst _ =
+            if finiteIsFirst then Some(box 0)
+            elif finite = 0 then None
+            else Some(box (infinityOfSign (infinite * finite)))
+
+        let private opDivideFinite a' b' =
             match a', b' with
             | Obj a, Obj b ->
                 match widen a b with
@@ -355,6 +463,14 @@ namespace IronKernel
                     throwError (ClrTypeMismatch("number", a.GetType().Name))
                 | Choice1Of2 SecondOperand ->
                     throwError (ClrTypeMismatch(rankName (rankOf a), b.GetType().Name))
+            | Obj _, found -> throwError (TypeMismatch("object", found))
+            | found, _ -> throwError (TypeMismatch("object", found))
+
+        let opDivide a' b' =
+            match a', b' with
+            | Obj a, Obj b ->
+                dispatchInfinities divideCombine divideMixed a b (fun () ->
+                    opDivideFinite a' b')
             | Obj _, found -> throwError (TypeMismatch("object", found))
             | found, _ -> throwError (TypeMismatch("object", found))
 
@@ -441,7 +557,37 @@ namespace IronKernel
             | Obj _, found -> throwError (TypeMismatch("object", found))
             | found, _ -> throwError (TypeMismatch("object", found))
 
-        let opLessThan a' b' = comparisonBinaryOp lessThanWidened a' b'
-        let opLessThanOrEqual a' b' = comparisonBinaryOp lessThanOrEqualWidened a' b'
+        /// Every finite real lies strictly between the two infinities, and each
+        /// infinity is equal to itself. A NaN operand has no primary value, so R-1RK
+        /// 12.2 makes ordering it an error rather than a guess -- the same rule that
+        /// already rejects ordering a complex.
+        let private compareWithInfinity strict (a: obj) (b: obj) =
+            match a, b with
+            | (:? ExactInfinity as x), (:? ExactInfinity as y) ->
+                Some(if strict then signOf x < signOf y else signOf x <= signOf y)
+            | (:? ExactInfinity as x), finite ->
+                match finiteSign finite with
+                | None -> None
+                | Some _ -> Some(signOf x < 0)
+            | finite, (:? ExactInfinity as y) ->
+                match finiteSign finite with
+                | None -> None
+                | Some _ -> Some(signOf y > 0)
+            | _ -> None
+
+        let private comparisonWithInfinities strict finite (a': LispVal) (b': LispVal) =
+            match a', b' with
+            | Obj ((:? ExactInfinity) as a), Obj b
+            | Obj a, Obj ((:? ExactInfinity) as b) ->
+                match compareWithInfinity strict a b with
+                | Some result -> returnM (Bool result)
+                | None -> throwError (Default "a number with no primary value is not ordered")
+            | _ -> finite a' b'
+
+        let opLessThan a' b' =
+            comparisonWithInfinities true (comparisonBinaryOp lessThanWidened) a' b'
+
+        let opLessThanOrEqual a' b' =
+            comparisonWithInfinities false (comparisonBinaryOp lessThanOrEqualWidened) a' b'
         let opGreaterThan a b = opLessThan b a
         let opGreaterThanOrEqual a b = opLessThanOrEqual b a

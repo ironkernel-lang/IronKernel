@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 99 | 73% |
+| `verified` | 105 | 78% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 36 | 27% |
+| `absent` | 30 | 22% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -42,10 +42,9 @@ exercised, not that IronKernel matches the report exactly.
 | Report | Divergence |
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a number written to a port cannot be read back by `read`; symbols, lists and booleans round-trip. |
-| 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
-| 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
-| 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
-| 12.9 | The report specifies 12.9.2 through 12.9.6 by signature only. Appendix A.2 records that it is an incomplete draft whose unwritten portions were "only planned in rough outline", so `verified` there means the binding exists with its standard mathematical meaning, and the choices the report leaves open are IronKernel's: an argument outside a function's real domain takes its complex value now that 12.10 is supported, so `(sqrt -1)` is `i`; a NaN result still signals an error; and infinities are returned as values. |
+| 12.9 | The report specifies 12.9.2 through 12.9.6 by signature only. Appendix A.2 records that it is an incomplete draft whose unwritten portions were "only planned in rough outline", so `verified` there means the binding exists with its standard mathematical meaning, and the choices the report leaves open are IronKernel's: an argument outside a function's real domain takes its complex value now that 12.10 is supported, so `(sqrt -1)` is `i`; a result with no primary value follows 12.2's rule and so signals under strict arithmetic and is returned without it; and infinities are returned as values. |
+| 12.2 | Inexact reals are non-robust with bounds of exact negative and positive infinity, which 12.2 sanctions explicitly ("an implementation can fully support module Inexact without making any effort to maintain finite bounds or robustness"). Two things follow. `robust?` is exactly "every argument is exact". And no number is ever created with its lower bound above its upper bound, so the report's `undefined` number never arises and `undefined?` is always false. Narrowing the bounds is what module Narrow inexact (12.7) asks for, and that module is absent. |
+| 12.3.3 | Under strict arithmetic the report signals on numeric overflow and underflow as well as on a result with no primary value. IronKernel signals only the latter: an overflow still yields an infinity and an underflow a zero, which is the report's behaviour for *cleared* strict-arithmetic. Its initial value here is true, which the report leaves open. |
 | 4.2.1 | `eq?` is bound to the same structural comparison as `eqv?`, so it is coarser than the report's, which distinguishes objects that `equal?` does not. |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
@@ -100,7 +99,7 @@ divergences before taking any row as a claim of conformance.
 | 10.1 Keyed dynamic variables — Primitive features | **required** | 1 | 1 | yes |
 | 11.1 Keyed static variables — Primitive features | **required** | 1 | 1 | yes |
 | 12.5 Numbers — Number features | **required** | 14 | 14 | yes |
-| 12.6 Numbers — Inexact features | optional | 6 | 0 | no |
+| 12.6 Numbers — Inexact features | optional | 6 | 6 | yes |
 | 12.7 Numbers — Narrow inexact features | optional | 1 | 0 | no |
 | 12.8 Numbers — Rational features | optional | 5 | 5 | yes |
 | 12.9 Numbers — Real features | optional | 6 | 6 | yes |
@@ -253,14 +252,14 @@ divergences before taking any row as a claim of conformance.
 | 12.5.10 | `positive?, negative?` | Number features | `verified` | 4 behavioural check(s) |
 | 12.5.11 | `odd?, even?` | Number features | `verified` | 5 behavioural check(s) |
 | 12.5.12 | `abs` | Number features | `verified` | 3 behavioural check(s) |
-| 12.5.13 | `max, min` | Number features | `verified` | 3 behavioural check(s) |
-| 12.5.14 | `lcm, gcd` | Number features | `verified` | 3 behavioural check(s) |
-| 12.6.1 | `exact?, inexact?, robust?, undefined?` | Inexact features | `absent` | optional module; `exact?` absent; `inexact?` absent; `robust?` absent; `undefined?` absent |
-| 12.6.2 | `get-real-internal-bounds, get-real-exact-bounds` | Inexact features | `absent` | optional module; `get-real-internal-bounds` absent; `get-real-exact-bounds` absent |
-| 12.6.3 | `get-real-internal-primary, get-real-exact-primary` | Inexact features | `absent` | optional module; `get-real-internal-primary` absent; `get-real-exact-primary` absent |
-| 12.6.4 | `make-inexact` | Inexact features | `absent` | optional module |
-| 12.6.5 | `real->inexact, real->exact` | Inexact features | `absent` | optional module; `real->inexact` absent; `real->exact` absent |
-| 12.6.6 | `with-strict-arithmetic, get-strict-arithmetic?` | Inexact features | `absent` | optional module; `with-strict-arithmetic` absent; `get-strict-arithmetic?` absent |
+| 12.5.13 | `max, min` | Number features | `verified` | 5 behavioural check(s) |
+| 12.5.14 | `lcm, gcd` | Number features | `verified` | 7 behavioural check(s) |
+| 12.6.1 | `exact?, inexact?, robust?, undefined?` | Inexact features | `verified` | optional module; 14 behavioural check(s) |
+| 12.6.2 | `get-real-internal-bounds, get-real-exact-bounds` | Inexact features | `verified` | optional module; 9 behavioural check(s) |
+| 12.6.3 | `get-real-internal-primary, get-real-exact-primary` | Inexact features | `verified` | optional module; 6 behavioural check(s) |
+| 12.6.4 | `make-inexact` | Inexact features | `verified` | optional module; 4 behavioural check(s) |
+| 12.6.5 | `real->inexact, real->exact` | Inexact features | `verified` | optional module; 6 behavioural check(s) |
+| 12.6.6 | `with-strict-arithmetic, get-strict-arithmetic?` | Inexact features | `verified` | optional module; 6 behavioural check(s) |
 | 12.7.1 | `with-narrow-arithmetic, get-narrow-arithmetic?` | Narrow inexact features | `absent` | optional module; `with-narrow-arithmetic` absent; `get-narrow-arithmetic?` absent |
 | 12.8.1 | `rational?` | Rational features | `verified` | optional module; 7 behavioural check(s) |
 | 12.8.2 | `/` | Rational features | `verified` | optional module; 7 behavioural check(s) |

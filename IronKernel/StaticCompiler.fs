@@ -63,6 +63,12 @@ module StaticCompiler =
         // text, which is exact for both and avoids depending on a literal syntax.
         | Obj (:? System.Numerics.BigInteger as value) ->
             Some("Obj(box (System.Numerics.BigInteger.Parse " + quote (string value) + "))")
+        | Obj (:? ExactInfinity as value) ->
+            Some(
+                "Obj(box "
+                + (if value = ExactPositiveInfinity then "ExactPositiveInfinity"
+                   else "ExactNegativeInfinity")
+                + ")")
         | Obj (:? ExactRatio as value) ->
             Some(
                 "Obj(box (makeExactRatio (System.Numerics.BigInteger.Parse "

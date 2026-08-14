@@ -231,7 +231,7 @@
         let private isNumberValue (value: obj) =
             match value with
             | :? byte | :? int | :? int64 | :? float32 | :? float -> true
-            | :? Numerics.BigInteger | :? ExactRatio -> true
+            | :? Numerics.BigInteger | :? ExactRatio | :? ExactInfinity -> true
             | :? Numerics.Complex -> true
             | _ -> false
 
@@ -239,6 +239,9 @@
             match value with
             | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> true
             | :? ExactRatio as ratio -> ratio.Denominator.IsOne
+            // R-1RK 12.5.14 calls an integer-or-infinity an *improper* integer, so an
+            // infinity is not an integer.
+            | :? ExactInfinity -> false
             | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f) && Math.Floor(float f) = float f
             | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d) && Math.Floor d = d
             // R-1RK 12.5.1: a complex is an integer iff its real part is an integer and
@@ -251,6 +254,7 @@
         let private isFiniteValue (value: obj) =
             match value with
             | :? byte | :? int | :? int64 | :? Numerics.BigInteger | :? ExactRatio -> Some true
+            | :? ExactInfinity -> Some false
             | :? float32 as f -> Some(not (Single.IsNaN f) && not (Single.IsInfinity f))
             | :? float as d -> Some(not (Double.IsNaN d) && not (Double.IsInfinity d))
             // R-1RK 12.5.1: a complex is finite iff its components all are.
@@ -311,6 +315,7 @@
                         | :? float as x -> x = 0.0
                         | :? Numerics.BigInteger as x -> x = Numerics.BigInteger.Zero
                         | :? ExactRatio as x -> x.Numerator.IsZero
+                        | :? ExactInfinity -> false
                         // R-1RK 12.5.7: a complex is zero when all its components are.
                         | :? Numerics.Complex as c -> c = Numerics.Complex.Zero
                         | _ -> false
@@ -688,6 +693,50 @@
             | [found; _] -> fail (TypeMismatch("non-negative int", found))
             | bad -> fail (NumArgs(2, bad))
 
+        /// R-1RK 12.6.6. strict-arithmetic is a keyed dynamic variable like any other
+        /// (chapter 10), except that its accessor answers even with no binder in scope.
+        /// The key is fixed rather than freshly generated so that the arithmetic
+        /// primitives and the two applicatives share it; nothing can forge it, because
+        /// make-keyed-dynamic-variable only ever mints new ones.
+        ///
+        /// It is a function rather than a module-level value because a module-level
+        /// binding is null until the module initialiser has run, which is not
+        /// guaranteed at the point a primitive first reads it.
+        let private strictArithmeticKey () = Guid "9d2f5a10-7c3e-4b58-9a61-2f7c1d4e8b03"
+
+        /// The report leaves the initial value open. True is what IronKernel has always
+        /// done: a result with no primary value has been an error here rather than a
+        /// NaN that propagates silently into later arithmetic.
+        let private isStrictArithmetic cont =
+            match findDynamicBinding (strictArithmeticKey ()) cont with
+            | Some (Bool value) -> value
+            | _ -> true
+
+        /// R-1RK 12.2: a real with no primary value is NaN here. That is where the
+        /// indeterminate infinity combinations land -- infinity minus infinity, zero
+        /// times infinity, infinity over infinity -- as well as inexact arithmetic's
+        /// own NaN.
+        let private hasNoPrimaryValue (value: obj) =
+            match value with
+            // An exact result always has a primary value. int is much the commonest
+            // result of all, so it short-circuits the tests below rather than falling
+            // through every one of them on the hottest path in the language.
+            | :? int -> false
+            | :? double as d -> Double.IsNaN d
+            | :? Numerics.Complex as c -> Double.IsNaN c.Real || Double.IsNaN c.Imaginary
+            | :? float32 as f -> Single.IsNaN f
+            | _ -> false
+
+        /// R-1RK 12.2: "an error is or is not signaled depending on the current value
+        /// of the strict-arithmetic keyed dynamic variable". The variable is only read
+        /// when the result actually has no primary value, so the ordinary path pays a
+        /// type test rather than a walk of the continuation.
+        let private continueNumeric env cont value =
+            match value with
+            | Obj result when hasNoPrimaryValue result && isStrictArithmetic cont ->
+                fail (Default "arithmetic result has no primary value")
+            | _ -> bounceContinue env cont value
+
         /// R-1RK 12.5.4 / 12.5.5: (+ . numbers) and (* . numbers) are variadic, with
         /// the empty sum zero and the empty product one. Folding left keeps the CLR
         /// extensions working -- (+ date timespan) is still a DateTime -- because each
@@ -697,7 +746,7 @@
             | [] -> bounceContinue env cont (Obj identity)
             | first :: rest ->
                 let rec loop acc = function
-                    | [] -> bounceContinue env cont acc
+                    | [] -> continueNumeric env cont acc
                     | next :: remaining ->
                         match op acc next with
                         | Choice2Of2 result -> loop result remaining
@@ -711,7 +760,7 @@
             match args with
             | [a; b] ->
                 match op a b with
-                | Choice2Of2 result -> bounceContinue env cont result
+                | Choice2Of2 result -> continueNumeric env cont result
                 | Choice1Of2 error -> fail error
             | _ -> foldNumeric op identity env cont args
 
@@ -734,7 +783,7 @@
             match args with
             | [a; b] ->
                 match opDivide a b with
-                | Choice2Of2 result -> bounceContinue env cont result
+                | Choice2Of2 result -> continueNumeric env cont result
                 | Choice1Of2 error -> fail error
             | numerator :: (_ :: _ as divisors) ->
                 let rec product acc = function
@@ -747,7 +796,7 @@
                 | Choice1Of2 error -> fail error
                 | Choice2Of2 divisor ->
                     match opDivide numerator divisor with
-                    | Choice2Of2 result -> bounceContinue env cont result
+                    | Choice2Of2 result -> continueNumeric env cont result
                     | Choice1Of2 error -> fail error
             | _ -> fail (NumArgs(2, args))
         /// R-1RK 12.9. The report gives these entries signatures only: Appendix A.2
@@ -765,6 +814,9 @@
             match value with
             | :? Numerics.BigInteger as v -> Some(float v)
             | :? ExactRatio as r -> Some(float r.Numerator / float r.Denominator)
+            | :? ExactInfinity as i ->
+                Some(if i = ExactPositiveInfinity then Double.PositiveInfinity
+                     else Double.NegativeInfinity)
             | :? byte as b -> Some(float b)
             | :? int as i -> Some(float i)
             | :? int64 as l -> Some(float l)
@@ -778,6 +830,10 @@
             | :? Numerics.BigInteger as v -> Some(Numerics.Complex(float v, 0.0))
             | :? ExactRatio as r ->
                 Some(Numerics.Complex(float r.Numerator / float r.Denominator, 0.0))
+            | :? ExactInfinity as i ->
+                Some(Numerics.Complex(
+                        (if i = ExactPositiveInfinity then Double.PositiveInfinity
+                         else Double.NegativeInfinity), 0.0))
             | :? byte as b -> Some(Numerics.Complex(float b, 0.0))
             | :? int as i -> Some(Numerics.Complex(float i, 0.0))
             | :? int64 as l -> Some(Numerics.Complex(float l, 0.0))
@@ -810,7 +866,12 @@
                         if Double.IsNaN result && not (Double.IsNaN input) then
                             let complex = applyComplex (Numerics.Complex(input, 0.0))
                             if Double.IsNaN complex.Real || Double.IsNaN complex.Imaginary then
-                                fail (Default(name + ": argument is outside the domain"))
+                                // No primary value even in the complex plane, so R-1RK
+                                // 12.2's rule applies here as it does to arithmetic:
+                                // strict signals, non-strict returns the NaN.
+                                if isStrictArithmetic cont then
+                                    fail (Default(name + ": argument is outside the domain"))
+                                else bounceContinue env cont (Obj(box result))
                             else bounceContinue env cont (ofComplexValue complex)
                         else bounceContinue env cont (Obj(box result))
             | [found] -> fail (TypeMismatch("number", found))
@@ -826,7 +887,7 @@
                     let real =
                         match value with
                         | :? byte | :? int | :? int64 | :? float32 | :? float -> true
-                        | :? Numerics.BigInteger | :? ExactRatio -> true
+                        | :? Numerics.BigInteger | :? ExactRatio | :? ExactInfinity -> true
                         | :? Numerics.Complex as c -> c.Imaginary = 0.0
                         | _ -> false
                     if real then loop rest else bounceContinue env cont (Bool false)
@@ -1022,6 +1083,9 @@
                         match value with
                         | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> true
                         | :? ExactRatio -> true
+                        // R-1RK 12.8.1: a rational is a ratio of integers, which an
+                        // infinity is not.
+                        | :? ExactInfinity -> false
                         | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f)
                         | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d)
                         // R-1RK 12.8.1: a complex is rational iff its real part is and
@@ -1078,6 +1142,8 @@
                     bounceContinue env cont (Obj value)
                 | :? ExactRatio as ratio ->
                     bounceContinue env cont (Obj(ofBig (applyExact ratio.Numerator ratio.Denominator)))
+                // Rounding an infinity leaves it where it is.
+                | :? ExactInfinity -> bounceContinue env cont (Obj value)
                 | :? float32 as f -> bounceContinue env cont (Obj(box (float32 (apply (float f)))))
                 | :? float as d -> bounceContinue env cont (Obj(box (apply d)))
                 | _ -> fail (TypeMismatch("number", Obj value))
@@ -1122,6 +1188,8 @@
                 | :? int64 as l -> bounceContinue env cont (ofInteger (Numerics.BigInteger l))
                 | :? Numerics.BigInteger as v -> bounceContinue env cont (ofInteger v)
                 | :? ExactRatio as ratio -> bounceContinue env cont (pick ratio)
+                // R-1RK 12.8.3 is defined on rationals, which an infinity is not.
+                | :? ExactInfinity -> fail (TypeMismatch("rational", Obj value))
                 | :? float32 as f ->
                     match exactRatioOf (float f) with
                     | Some ratio -> bounceContinue env cont (pick ratio)
@@ -1133,6 +1201,182 @@
                 | _ -> fail (TypeMismatch("number", Obj value))
             | [found] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(1, args))
+
+        // --- R-1RK 12.6, module Inexact -----------------------------------------
+        //
+        // The report sanctions this implementation directly (12.2): "An implementation
+        // can fully support module Inexact without making any effort to maintain finite
+        // bounds or robustness on inexact real numbers... The implementation might
+        // simply take all inexact real numbers to be non-robust with upper bound
+        // positive infinity and lower bound negative infinity, and describe each
+        // inexact real number by a single internal real number and a tag indicating
+        // that it is inexact." IronKernel's tag is the CLR type: float32 and double are
+        // inexact, every other real is exact. Maintaining tighter bounds is what module
+        // Narrow inexact (12.7) asks for, and that module stays absent.
+        //
+        // Two consequences follow and are worth naming. Every inexact real is
+        // non-robust, so `robust?` is exactly "every argument is exact". And bounds are
+        // never crossed, so no number is ever created with its lower bound above its
+        // upper bound -- the report's `undefined` number (12.2) never arises, and
+        // `undefined?` is correspondingly always false.
+
+        let private isExactValue (value: obj) =
+            match value with
+            | :? byte | :? int | :? int64 | :? Numerics.BigInteger
+            | :? ExactRatio | :? ExactInfinity -> true
+            | _ -> false
+
+        /// R-1RK 12.6.1. None of these are type predicates -- they take numbers, not
+        /// arbitrary objects -- but none depend on a primary value either, so a NaN
+        /// argument is answered rather than signalled.
+        let private numberPredicate test env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest when isNumberValue value ->
+                    if test value then loop rest else bounceContinue env cont (Bool false)
+                | found :: _ -> fail (TypeMismatch("number", found))
+            loop args
+
+        let isExact env cont args = numberPredicate isExactValue env cont args
+
+        /// A complex is inexact if any rectangular component is; IronKernel's complex
+        /// components are always double, so every complex is inexact and none is exact.
+        let isInexact env cont args = numberPredicate (isExactValue >> not) env cont args
+
+        /// R-1RK 12.2: "an exact real is considered to be robust". Inexact reals here
+        /// claim no bounds, so none of them is robust.
+        let isRobust env cont args = numberPredicate isExactValue env cont args
+
+        /// The undefined number arises only from an inexact real created with its lower
+        /// bound above its upper bound, which infinite bounds never allow.
+        let isUndefined env cont args = numberPredicate (fun _ -> false) env cont args
+
+        /// The infinity of the same internal format as `value`, for the bounds of an
+        /// inexact real (12.6.2). float32 keeps float32 so that the returned bounds
+        /// carry the format the report asks for.
+        let private internalInfinity (value: obj) positive =
+            match value with
+            | :? float32 ->
+                box (if positive then Single.PositiveInfinity else Single.NegativeInfinity)
+            | _ ->
+                box (if positive then Double.PositiveInfinity else Double.NegativeInfinity)
+
+        /// The 12.6.2 and 12.6.3 applicatives take a real, so a complex -- which the
+        /// report leaves out pending "deeper analysis of the complex-representation
+        /// issues involved" -- is a type error rather than a component-wise answer.
+        let private realArgument args (apply: obj -> Step) =
+            match args with
+            | [Obj value] when isNumberValue value && not (value :? Numerics.Complex) ->
+                apply value
+            | [found] -> fail (TypeMismatch("real", found))
+            | _ -> fail (NumArgs(1, args))
+
+        /// R-1RK 12.6.2. An exact real is its own bounds. An inexact real is bounded
+        /// only by the infinities, in the internal format of its primary value here and
+        /// by the exact infinities of 12.3.2 for the exact form.
+        let getRealInternalBounds env cont args =
+            realArgument args (fun value ->
+                if isExactValue value then
+                    bounceContinue env cont (List [Obj value; Obj value])
+                else
+                    bounceContinue env cont (
+                        List [Obj(internalInfinity value false); Obj(internalInfinity value true)]))
+
+        let getRealExactBounds env cont args =
+            realArgument args (fun value ->
+                if isExactValue value then
+                    bounceContinue env cont (List [Obj value; Obj value])
+                else
+                    bounceContinue env cont (
+                        List [Obj(box ExactNegativeInfinity); Obj(box ExactPositiveInfinity)]))
+
+        /// R-1RK 12.6.3. Both signal an error when there is no primary value, which
+        /// keeps get-real-exact-primary's promise to return an exact real and
+        /// get-real-internal-primary's to return a real whose primary is within its
+        /// bounds.
+        let getRealInternalPrimary env cont args =
+            realArgument args (fun value ->
+                if hasNoPrimaryValue value then
+                    fail (Default "get-real-internal-primary: no primary value")
+                else bounceContinue env cont (Obj value))
+
+        /// The exact value of a double is exact: a finite one is a dyadic rational, and
+        /// an infinite one is an exact infinity. That is stronger than the report
+        /// requires -- with infinite bounds any exact real would be permissible -- but
+        /// it is the closest to the primary value, which the report prefers.
+        let private exactValueOf (value: obj) =
+            if isExactValue value then Some value
+            else
+                match toFloat value with
+                | None -> None
+                | Some primary when Double.IsNaN primary -> None
+                | Some primary when Double.IsPositiveInfinity primary ->
+                    Some(box ExactPositiveInfinity)
+                | Some primary when Double.IsNegativeInfinity primary ->
+                    Some(box ExactNegativeInfinity)
+                | Some primary ->
+                    exactRatioOf primary
+                    |> Option.map (fun ratio -> ofRatio ratio.Numerator ratio.Denominator)
+
+        let getRealExactPrimary env cont args =
+            realArgument args (fun value ->
+                match exactValueOf value with
+                | Some exact -> bounceContinue env cont (Obj exact)
+                | None -> fail (Default "get-real-exact-primary: no primary value"))
+
+        /// R-1RK 12.6.5. real->exact behaves just as get-real-exact-primary.
+        let realToExact env cont args = getRealExactPrimary env cont args
+
+        let private inexactValueOf (value: obj) =
+            if isExactValue value then
+                match value with
+                | :? ExactInfinity as infinity ->
+                    box (if infinity = ExactPositiveInfinity then Double.PositiveInfinity
+                         else Double.NegativeInfinity)
+                | _ ->
+                    match toFloat value with
+                    | Some primary -> box primary
+                    | None -> box Double.NaN
+            else value
+
+        let realToInexact env cont args =
+            realArgument args (fun value ->
+                bounceContinue env cont (Obj(inexactValueOf value)))
+
+        /// R-1RK 12.6.4. The result takes its primary value and robustness from real2;
+        /// real1 and real3 are required to be reals but cannot narrow the result, since
+        /// bounds here are always infinite. Constraining them is what module Narrow
+        /// inexact (12.7) would ask for.
+        let makeInexact env cont args =
+            match args with
+            | [Obj lower; Obj primary; Obj upper] when
+                    [lower; primary; upper]
+                    |> List.forall (fun v -> isNumberValue v && not (v :? Numerics.Complex)) ->
+                bounceContinue env cont (Obj(inexactValueOf primary))
+            | [_; _; _] -> fail (TypeMismatch("real", List args))
+            | _ -> fail (NumArgs(3, args))
+
+        /// R-1RK 12.6.6: the binder and accessor of the strict-arithmetic keyed dynamic
+        /// variable. The binder is a keyed dynamic binder like any other (10.1.1), so
+        /// the setting follows the dynamic extent of the call including across captured
+        /// continuations; the accessor differs from a plain one only in answering with
+        /// the default when no binder encloses it.
+        let withStrictArithmetic env cont args =
+            match args with
+            | [Bool _ as flag; combiner] ->
+                let isolated = newEnvWithClr (ofEnvironment env) [] []
+                bounceOperate
+                    isolated
+                    (makeDynamicBinding env cont (strictArithmeticKey ()) flag)
+                    combiner
+                    []
+            | [found; _] -> fail (TypeMismatch("boolean", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let getStrictArithmetic env cont args =
+            match args with
+            | [] -> bounceContinue env cont (Bool(isStrictArithmetic cont))
+            | _ -> fail (NumArgs(0, args))
 
         let numeratorOf env cont args = ratioPart true env cont args
 
@@ -1386,6 +1630,19 @@
                   ("make-encapsulation-type", make_encapsulation_type);
                   ("make-keyed-dynamic-variable", make_keyed_dynamic_variable);
                   ("make-keyed-static-variable", make_keyed_static_variable);
+                  ("exact?", isExact);
+                  ("inexact?", isInexact);
+                  ("robust?", isRobust);
+                  ("undefined?", isUndefined);
+                  ("get-real-internal-bounds", getRealInternalBounds);
+                  ("get-real-exact-bounds", getRealExactBounds);
+                  ("get-real-internal-primary", getRealInternalPrimary);
+                  ("get-real-exact-primary", getRealExactPrimary);
+                  ("make-inexact", makeInexact);
+                  ("real->inexact", realToInexact);
+                  ("real->exact", realToExact);
+                  ("with-strict-arithmetic", withStrictArithmetic);
+                  ("get-strict-arithmetic?", getStrictArithmetic);
                   ("clr-opens", clr_opens);
                   ]
 

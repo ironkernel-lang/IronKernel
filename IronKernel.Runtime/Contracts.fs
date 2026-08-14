@@ -45,7 +45,10 @@ module Contracts =
         | NumberShape, Obj (:? System.Numerics.BigInteger)
         // An exact ratio (R-1RK 12.8) is a number but never an integer: a ratio whose
         // denominator reduces to one is collapsed back to an integer on construction.
-        | NumberShape, Obj (:? ExactRatio) -> true
+        | NumberShape, Obj (:? ExactRatio)
+        // The exact infinities (R-1RK 12.3.2) are numbers, and reals, but not
+        // integers: the report calls an integer-or-infinity an *improper* integer.
+        | NumberShape, Obj (:? ExactInfinity) -> true
         | IntegerShape, Obj (:? byte)
         | IntegerShape, Obj (:? int)
         | IntegerShape, Obj (:? int64)
