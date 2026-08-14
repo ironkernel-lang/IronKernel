@@ -61,26 +61,12 @@ let private features () =
 /// operatives, and spells `$define!` as `define`. These are deliberate renamings,
 /// listed explicitly rather than derived by stripping `$`, so that a coincidental
 /// name match can never be mistaken for the report's feature.
-let private aliases () =
-    dict [
-        "$bindings->environment", "bindings->environment"
-        "$cond", "cond"
-        "$define!", "define"
-        "$if", "if"
-        "$import!", "import!"
-        "$lambda", "lambda"
-        "$let", "let"
-        "$let*", "let*"
-        "$let-redirect", "let-redirect"
-        "$let/cc", "let/cc"
-        "$letrec", "letrec"
-        "$letrec*", "letrec*"
-        "$provide!", "provide!"
-        "$remote-eval", "remote-eval"
-        "$sequence", "sequence"
-        "$set!", "set!"
-        "$vau", "vau"
-    ]
+/// R-1RK spells operatives with a leading `$`; IronKernel also binds the shorter
+/// names as an extension (R-1RK 1.3.2). Both spellings denote the same combiner, so
+/// the report's names resolve exactly and nothing needs aliasing. The table is kept
+/// so that a future divergence can be recorded rather than hidden.
+let private aliases () : System.Collections.Generic.IDictionary<string, string> =
+    dict []
 
 /// Behavioural checks keyed by report entry. Each is an expression that must
 /// evaluate to true. Comparing against a boolean rather than against printed output
@@ -150,8 +136,6 @@ let private behaviouralChecks () : (string * string list) list = [
 let private divergences () = [
     "3.6", "External representations differ: IronKernel prints a number as "
            + "`<obj 3 : Int32>` rather than `3`."
-    "1.3.7", "IronKernel drops the `$` sigil the report uses for operatives, so "
-             + "`$if` is `if` and `$define!` is `define`. See the alias column."
 ]
 
 let private conformanceEnv () =

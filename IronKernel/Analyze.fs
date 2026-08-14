@@ -111,9 +111,11 @@ module Analyze =
             match work with
             | AnalyzeGuardedForm form ->
                 match form with
-                | List (Atom "if" :: [condition; consequent; alternative] as whole) ->
-                    let fallback = COperate(CVar "if", List.tail whole)
-                    match tryCreateBindingGuard env "if" PrimitiveIf with
+                // Both spellings: `$if` is the report's name (R-1RK 4.5.2), `if` the
+                // dialect's. They denote one combiner, so both deserve the guard.
+                | List (Atom ("if" | "$if" as name) :: [condition; consequent; alternative] as whole) ->
+                    let fallback = COperate(CVar name, List.tail whole)
+                    match tryCreateBindingGuard env name PrimitiveIf with
                     | Some guard ->
                         pending <-
                             AnalyzeGuardedForm condition
@@ -122,9 +124,9 @@ module Analyze =
                             :: BuildGuardedIf(guard, fallback)
                             :: pending
                     | None -> completed <- fallback :: completed
-                | List (Atom "define" :: [Atom name; rhs] as whole) ->
-                    let fallback = COperate(CVar "define", List.tail whole)
-                    match tryCreateBindingGuard env "define" PrimitiveDefine with
+                | List (Atom ("define" | "$define!" as definer) :: [Atom name; rhs] as whole) ->
+                    let fallback = COperate(CVar definer, List.tail whole)
+                    match tryCreateBindingGuard env definer PrimitiveDefine with
                     | Some guard ->
                         pending <-
                             AnalyzeGuardedForm rhs

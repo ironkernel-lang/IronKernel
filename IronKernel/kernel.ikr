@@ -256,3 +256,32 @@
                       #f
                       (if (car ys) #t (aux (cdr ys)))))))
       (aux xs))))
+
+; --- R-1RK canonical names ---------------------------------------------------
+; The report spells operatives with a leading `$`, and the primitive definer as
+; `$define!`. IronKernel's own spelling drops the sigil; these bind the report's
+; names to the same combiners so a program written against R-1RK runs unchanged.
+;
+; This is an extension in the sense of R-1RK 1.3.2 ("Implementations are permitted
+; to add extensions, provided the extensions are consistent with the language
+; presented here"): the short names are the extension, the `$` names are the
+; report's features, and both denote one combiner, so they cannot disagree.
+
+(define $if if)
+(define $define! define)
+(define $vau vau)
+(define $lambda lambda)
+(define $sequence sequence)
+(define $cond cond)
+(define $let let)
+(define $let* let*)
+(define $letrec letrec)
+(define $letrec* letrec*)
+(define $let-redirect let-redirect)
+(define $let/cc let/cc)
+(define $set! set!)
+(define $provide! provide!)
+(define $import! import!)
+(define $remote-eval remote-eval)
+(define $bindings->environment bindings->environment)
+
