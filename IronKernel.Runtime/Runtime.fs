@@ -1222,6 +1222,46 @@
                 List [encapsulator; predicate; decapsulator] |> bounceContinue env cont
             | bad -> fail(NumArgs(0, bad))
 
+        /// R-1RK 10.1.1. Each call returns a fresh `(binder accessor)` pair sharing a
+        /// private key. The binder takes an object and a combiner, and calls the
+        /// combiner with no operands in a fresh empty environment; within that call's
+        /// dynamic extent the accessor, called with no operands, returns the object.
+        ///
+        /// The binding is a continuation frame rather than an entry on a side stack,
+        /// so the extent is exactly right under first-class continuations: escaping
+        /// the binder's call leaves the binding behind, and resuming a continuation
+        /// captured inside the call re-enters it.
+        let make_keyed_dynamic_variable env cont = function
+            | [] ->
+                let key = Guid.NewGuid()
+                let primitive f =
+                    PrimitiveOperative { identity = None; invoke = f }
+                let binder =
+                    Applicative(
+                        primitive (fun e c -> function
+                            | [value; combiner] ->
+                                // "A fresh empty environment": no bindings and no
+                                // parents, so the combiner sees nothing of the binder's
+                                // caller. Capabilities are inherited rather than granted
+                                // afresh -- an environment with no parents would
+                                // otherwise carry every host capability, and the binder
+                                // must not be a way to widen what its caller may do.
+                                let isolated = newEnvWithClr (ofEnvironment e) [] []
+                                bounceOperate isolated (makeDynamicBinding e c key value) combiner []
+                            | bad -> fail (NumArgs(2, bad))))
+                let accessor =
+                    Applicative(
+                        primitive (fun e c -> function
+                            | [] ->
+                                match findDynamicBinding key c with
+                                | Some value -> bounceContinue e c value
+                                | None ->
+                                    fail (Default "keyed dynamic variable is unbound here")
+                            | bad -> fail (NumArgs(0, bad))))
+
+                List [binder; accessor] |> bounceContinue env cont
+            | bad -> fail(NumArgs(0, bad))
+
         let primitiveApplicatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [
                   ("eval", evaluate);
@@ -1300,6 +1340,7 @@
                   ("vector-ref", vector_ref);
                   ("vector-set!", vector_set);
                   ("make-encapsulation-type", make_encapsulation_type);
+                  ("make-keyed-dynamic-variable", make_keyed_dynamic_variable);
                   ("clr-opens", clr_opens);
                   ]
 

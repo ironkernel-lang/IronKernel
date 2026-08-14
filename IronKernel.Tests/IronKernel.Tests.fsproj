@@ -31,6 +31,7 @@
     <Compile Include="EffectTests.fs" />
     <Compile Include="StdlibTests.fs" />
     <Compile Include="ExampleTests.fs" />
+    <Compile Include="KeyedDynamicVariableTests.fs" />
     <Compile Include="KernelConformanceTests.fs" />
   </ItemGroup>
   <ItemGroup>
