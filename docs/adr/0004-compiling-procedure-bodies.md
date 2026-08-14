@@ -36,8 +36,11 @@ compiled form is therefore a nested trampoline. For one-shot top-level forms thi
 is harmless. For procedure bodies it breaks three guarantees:
 
 - **Proper tail calls.** A tail-recursive procedure one million calls deep runs in
-  constant stack today. Nested trampolines would turn each Kernel tail call into
-  CLR stack growth.
+  constant stack today. Each nested `run` is a loop entered from inside another
+  loop's thunk, so compiling bodies against collapsing functions would turn each
+  Kernel tail call into CLR stack growth. Note this is specific to *nested
+  trampolines*. Once compiled code returns `Step` there is a second, independent
+  tail-call obligation that costs heap rather than stack; see phase 2.
 - **First-class continuations.** `run` collapses `Step` into a value, so a
   continuation captured inside a compiled body cannot escape past that boundary
   or be resumed back into the middle of the body.
@@ -57,16 +60,31 @@ mechanical, and the type checker locates every site. It alters no observable
 behaviour and is validated by the existing suite plus deep tail recursion.
 
 **Phase 2 — represent compiled bodies in continuations.** Add
-`CompiledCode of KernelFunc list` beside `KernelCode` in `DeferredCode` and
-mirror the existing stepping in `continueEvalValidStep`: evaluate the head form,
-retain the remaining forms in `currentCont`, and let the final form inherit
-`nextCont`. Keeping the body a list rather than one opaque delegate is what
-preserves proper tail calls structurally, exactly as the interpreter does.
-`DeferredCode` appears in only ten places across `Ast.fs` and `Eval.fs`, two of
-them its own declaration. `appendContinuationRecord` and
-`findPrompt` manipulate only the `nextCont` chain and never inspect the payload
+`CompiledCode` beside `KernelCode` in `DeferredCode`, holding the body as a list
+of compiled forms. It is typed as a plain function rather than the compiler's
+`KernelFunc` so `IronKernel.Runtime` stays free of a compiler dependency. Mirror
+the existing stepping in `continueEvalValidStep`: evaluate the head form, retain
+the remaining forms in `currentCont`, and let the final form inherit `nextCont`.
+Keeping the body a list rather than one opaque delegate is what preserves proper
+tail calls structurally, exactly as the interpreter does. `appendContinuationRecord`
+and `findPrompt` manipulate only the `nextCont` chain and never inspect the payload
 of `currentCont`, so continuation splicing, `call/cc`, `shift`/`reset`, and
 `prompt`/`perform`/`resume` require no changes.
+
+Operative application detects a tail call by observing that the caller's body is
+exhausted, and matches `KernelCode []` to do it. A compiled caller reports an
+exhausted body as `CompiledCode []`, so that case must be added or a frame is
+retained on every tail call out of compiled code.
+
+This second tail-call obligation costs heap, not stack, and the distinction
+matters for how it is tested. Once compiled code returns `Step`, the trampoline
+keeps the CLR stack flat whether or not the tail call is recognised, and the
+program still computes the right answer; what grows is the retained continuation
+chain. A test that merely runs many iterations and checks the result therefore
+passes either way. The property is only visible structurally: capture a
+continuation at the deepest point of a self-recursive compiled body and measure
+its `nextCont` depth, which stays bounded when the tail call is recognised and
+grows with the iteration count when it is not.
 
 **Phase 3 — compile bodies lazily.** Give `OperativeRecord` a mutable memo and
 compile on first application with `analyzeFormsGuarded` against the closure
@@ -88,7 +106,19 @@ once bodies are compiled, and guards measured 12% faster there, so extending
 ## Consequences
 
 Phases 1 and 2 change no observable behaviour and land independently; the
-performance benefit arrives only with Phase 3. Until then, adding
+performance benefit arrives only with Phase 3. Phase 1 is a measured cost until
+then: threading continuations where nested trampolines previously ran tight inner
+loops costs about 7% on `CompiledGeneric` and 15% on `CompiledFolded`, at 10-27%
+more allocation. If phases 2 and 3 do not land, phase 1 should be reverted rather
+than left in place.
+
+Phase 1 also constrains how a located span may be applied. Errors short-circuit
+the trampoline as `Done` and bypass continuations, so `runLocated` has to inspect
+the step chain. Under CPS that chain also covers everything that runs after the
+form, so a span applied naively reaches past its own form and an operator's span
+swallows errors raised by the operands evaluated after it. Interpreting bounded
+each sub-evaluation with a fresh continuation; the compiled path has to restore
+that boundary explicitly by recording when control passes out of the form. Until then, adding
 `PrimitiveIdentity` cases is a measured pessimization rather than an
 optimization: guards re-resolve the binding by name on every invocation, whereas
 the `COperate` fallback's call-site cache validates by environment reference
