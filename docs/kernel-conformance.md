@@ -25,13 +25,13 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 43 | 32% |
+| `verified` | 53 | 39% |
 | `bound` | 12 | 9% |
 | `partial` | 0 | 0% |
-| `absent` | 80 | 59% |
+| `absent` | 70 | 52% |
 | **total** | **135** | |
 
-13 of 135 entries belong to modules the report marks optional; an
+34 of 135 entries belong to modules the report marks optional; an
 implementation may omit them and still conform.
 
 ## Known divergences
@@ -42,6 +42,10 @@ exercised, not that IronKernel matches the report exactly.
 | Report | Divergence |
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. |
+| 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
+| 12.5.4 | `+`, `*` and `-` are binary. The report makes them variadic, with `(+)` exact zero and `(*)` exact one. |
+| 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
+| 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
 
 ## 4 Core types and primitive features
 
@@ -175,41 +179,41 @@ exercised, not that IronKernel matches the report exactly.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 12.5.1 | `number?, finite?, integer?` | Number features | `absent` | `number?` absent; `finite?` absent; `integer?` absent |
-| 12.5.2 | `=?` | Number features | `absent` |  |
-| 12.5.3 | `<?, <=?, >=?, >?` | Number features | `absent` | `<?` absent; `<=?` absent; `>=?` absent; `>?` absent |
+| 12.5.1 | `number?, finite?, integer?` | Number features | `verified` | 10 behavioural check(s) |
+| 12.5.2 | `=?` | Number features | `verified` | 5 behavioural check(s) |
+| 12.5.3 | `<?, <=?, >=?, >?` | Number features | `verified` | 8 behavioural check(s) |
 | 12.5.4 | `+` | Number features | `verified` | 1 behavioural check(s) |
 | 12.5.5 | `*` | Number features | `verified` | 1 behavioural check(s) |
 | 12.5.6 | `-` | Number features | `verified` | 1 behavioural check(s) |
-| 12.5.7 | `zero?` | Number features | `verified` | 2 behavioural check(s) |
-| 12.5.8 | `div, mod, div-and-mod` | Number features | `absent` | `div` absent; `mod` absent; `div-and-mod` absent |
-| 12.5.9 | `div0, mod0, div0-and-mod0` | Number features | `absent` | `div0` absent; `mod0` absent; `div0-and-mod0` absent |
-| 12.5.10 | `positive?, negative?` | Number features | `absent` | `positive?` absent; `negative?` absent |
-| 12.5.11 | `odd?, even?` | Number features | `absent` | `odd?` absent; `even?` absent |
-| 12.5.12 | `abs` | Number features | `absent` |  |
-| 12.5.13 | `max, min` | Number features | `absent` | `max` absent; `min` absent |
-| 12.5.14 | `lcm, gcd` | Number features | `absent` | `lcm` absent; `gcd` absent |
-| 12.6.1 | `exact?, inexact?, robust?, undefined?` | Inexact features | `absent` | `exact?` absent; `inexact?` absent; `robust?` absent; `undefined?` absent |
-| 12.6.2 | `get-real-internal-bounds, get-real-exact-bounds` | Inexact features | `absent` | `get-real-internal-bounds` absent; `get-real-exact-bounds` absent |
-| 12.6.3 | `get-real-internal-primary, get-real-exact-primary` | Inexact features | `absent` | `get-real-internal-primary` absent; `get-real-exact-primary` absent |
-| 12.6.4 | `make-inexact` | Inexact features | `absent` |  |
-| 12.6.5 | `real->inexact, real->exact` | Inexact features | `absent` | `real->inexact` absent; `real->exact` absent |
-| 12.6.6 | `with-strict-arithmetic, get-strict-arithmetic?` | Inexact features | `absent` | `with-strict-arithmetic` absent; `get-strict-arithmetic?` absent |
-| 12.7.1 | `with-narrow-arithmetic, get-narrow-arithmetic?` | Narrow inexact features | `absent` | `with-narrow-arithmetic` absent; `get-narrow-arithmetic?` absent |
-| 12.8.1 | `rational?` | Rational features | `absent` |  |
-| 12.8.2 | `/` | Rational features | `verified` | 1 behavioural check(s) |
-| 12.8.3 | `numerator, denominator` | Rational features | `absent` | `numerator` absent; `denominator` absent |
-| 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `absent` | `floor` absent; `ceiling` absent; `truncate` absent; `round` absent |
-| 12.8.5 | `rationalize, simplest-rational` | Rational features | `absent` | `rationalize` absent; `simplest-rational` absent |
-| 12.9.1 | `real?` | Real features | `absent` |  |
-| 12.9.2 | `exp, log` | Real features | `absent` | `exp` absent; `log` absent |
-| 12.9.3 | `sin, cos, tan` | Real features | `absent` | `sin` absent; `cos` absent; `tan` absent |
-| 12.9.4 | `asin, acos, atan` | Real features | `absent` | `asin` absent; `acos` absent; `atan` absent |
-| 12.9.5 | `sqrt` | Real features | `absent` |  |
-| 12.9.6 | `expt` | Real features | `absent` |  |
-| 12.10.1 | `complex?` | Complex features | `absent` |  |
-| 12.10.2 | `make-rectangular, real-part, imag-part` | Complex features | `absent` | `make-rectangular` absent; `real-part` absent; `imag-part` absent |
-| 12.10.3 | `make-polar, magnitude, angle` | Complex features | `absent` | `make-polar` absent; `magnitude` absent; `angle` absent |
+| 12.5.7 | `zero?` | Number features | `verified` | 4 behavioural check(s) |
+| 12.5.8 | `div, mod, div-and-mod` | Number features | `verified` | 8 behavioural check(s) |
+| 12.5.9 | `div0, mod0, div0-and-mod0` | Number features | `verified` | 7 behavioural check(s) |
+| 12.5.10 | `positive?, negative?` | Number features | `verified` | 4 behavioural check(s) |
+| 12.5.11 | `odd?, even?` | Number features | `verified` | 5 behavioural check(s) |
+| 12.5.12 | `abs` | Number features | `verified` | 3 behavioural check(s) |
+| 12.5.13 | `max, min` | Number features | `verified` | 3 behavioural check(s) |
+| 12.5.14 | `lcm, gcd` | Number features | `verified` | 3 behavioural check(s) |
+| 12.6.1 | `exact?, inexact?, robust?, undefined?` | Inexact features | `absent` | optional module; `exact?` absent; `inexact?` absent; `robust?` absent; `undefined?` absent |
+| 12.6.2 | `get-real-internal-bounds, get-real-exact-bounds` | Inexact features | `absent` | optional module; `get-real-internal-bounds` absent; `get-real-exact-bounds` absent |
+| 12.6.3 | `get-real-internal-primary, get-real-exact-primary` | Inexact features | `absent` | optional module; `get-real-internal-primary` absent; `get-real-exact-primary` absent |
+| 12.6.4 | `make-inexact` | Inexact features | `absent` | optional module |
+| 12.6.5 | `real->inexact, real->exact` | Inexact features | `absent` | optional module; `real->inexact` absent; `real->exact` absent |
+| 12.6.6 | `with-strict-arithmetic, get-strict-arithmetic?` | Inexact features | `absent` | optional module; `with-strict-arithmetic` absent; `get-strict-arithmetic?` absent |
+| 12.7.1 | `with-narrow-arithmetic, get-narrow-arithmetic?` | Narrow inexact features | `absent` | optional module; `with-narrow-arithmetic` absent; `get-narrow-arithmetic?` absent |
+| 12.8.1 | `rational?` | Rational features | `absent` | optional module |
+| 12.8.2 | `/` | Rational features | `verified` | optional module; 1 behavioural check(s) |
+| 12.8.3 | `numerator, denominator` | Rational features | `absent` | optional module; `numerator` absent; `denominator` absent |
+| 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `absent` | optional module; `floor` absent; `ceiling` absent; `truncate` absent; `round` absent |
+| 12.8.5 | `rationalize, simplest-rational` | Rational features | `absent` | optional module; `rationalize` absent; `simplest-rational` absent |
+| 12.9.1 | `real?` | Real features | `absent` | optional module |
+| 12.9.2 | `exp, log` | Real features | `absent` | optional module; `exp` absent; `log` absent |
+| 12.9.3 | `sin, cos, tan` | Real features | `absent` | optional module; `sin` absent; `cos` absent; `tan` absent |
+| 12.9.4 | `asin, acos, atan` | Real features | `absent` | optional module; `asin` absent; `acos` absent; `atan` absent |
+| 12.9.5 | `sqrt` | Real features | `absent` | optional module |
+| 12.9.6 | `expt` | Real features | `absent` | optional module |
+| 12.10.1 | `complex?` | Complex features | `absent` | optional module |
+| 12.10.2 | `make-rectangular, real-part, imag-part` | Complex features | `absent` | optional module; `make-rectangular` absent; `real-part` absent; `imag-part` absent |
+| 12.10.3 | `make-polar, magnitude, angle` | Complex features | `absent` | optional module; `make-polar` absent; `magnitude` absent; `angle` absent |
 
 ## 13 Strings
 

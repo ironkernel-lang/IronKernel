@@ -124,10 +124,35 @@ let private behaviouralChecks () : (string * string list) list = [
     "9.1.1", [ "(promise? (memoize 1))" ]
     "9.1.2", [ "(eqv? (force (memoize 5)) 5)" ]
     "9.1.4", [ "(eqv? (force (memoize 5)) 5)" ]
+    "12.5.1", [ "(number? 1)"; "(number? 1.5)"; "(eqv? (number? 'a) #f)"; "(number?)"
+                "(integer? 3)"; "(integer? 3.0)"; "(eqv? (integer? 3.5) #f)"
+                "(eqv? (integer? 'a) #f)"; "(finite? 1)"; "(finite?)" ]
+    "12.5.2", [ "(=?)"; "(=? 1)"; "(=? 1 1 1)"
+                // Numeric equality, not structural: 1 and 1.0 are equal.
+                "(=? 1 1.0)"; "(eqv? (=? 1 2) #f)" ]
+    "12.5.3", [ "(<=?)"; "(<=? 1)"; "(<=? 1 3 7 15)"; "(eqv? (<=? 1 7 3 15) #f)"
+                "(<? 1 2 3)"; "(eqv? (<? 1 1) #f)"; "(>? 3 2 1)"; "(>=? 3 3 1)" ]
     "12.5.4", [ "(eqv? (+ 1 2) 3)" ]
     "12.5.5", [ "(eqv? (* 3 4) 12)" ]
     "12.5.6", [ "(eqv? (- 5 2) 3)" ]
-    "12.5.7", [ "(zero? 0)"; "(eqv? (zero? 1) #f)" ]
+    "12.5.7", [ "(zero? 0)"; "(zero? 0 0)"; "(eqv? (zero? 1) #f)"; "(zero?)" ]
+    "12.5.8", [ "(=? (div 7 3) 2)"; "(=? (mod 7 3) 1)"
+                // Negative operands: the defining property is 0 <= mod < |divisor|.
+                "(=? (div -7 3) -3)"; "(=? (mod -7 3) 2)"
+                "(=? (div 7 -3) -2)"; "(=? (mod 7 -3) 1)"
+                "(=? (car (cdr (div-and-mod -7 3))) 2)"
+                "(=? -7 (+ (* 3 (div -7 3)) (mod -7 3)))" ]
+    "12.5.9", [ "(=? (div0 7 3) 2)"; "(=? (mod0 7 3) 1)"
+                "(=? (div0 8 3) 3)"; "(=? (mod0 8 3) -1)"
+                "(=? (mod0 -7 3) -1)"; "(=? (mod0 8 -3) -1)"
+                "(=? 8 (+ (* 3 (div0 8 3)) (mod0 8 3)))" ]
+    "12.5.10", [ "(positive? 1 2)"; "(eqv? (positive? 0) #f)"
+                 "(negative? -1 -2)"; "(eqv? (negative? 0) #f)" ]
+    "12.5.11", [ "(even? 4)"; "(even? -4)"; "(eqv? (even? 3) #f)"
+                 "(odd? 3)"; "(eqv? (odd? 4) #f)" ]
+    "12.5.12", [ "(=? (abs -5) 5)"; "(=? (abs 5) 5)"; "(=? (abs 0) 0)" ]
+    "12.5.13", [ "(=? (max 1 7 3) 7)"; "(=? (min 1 7 3) 1)"; "(=? (max 5) 5)" ]
+    "12.5.14", [ "(=? (gcd 12 18) 6)"; "(=? (lcm 4 6) 12)"; "(=? (gcd 0 5) 5)" ]
     "12.8.2", [ "(eqv? (/ 8 2) 4)" ]
 ]
 
@@ -136,6 +161,16 @@ let private behaviouralChecks () : (string * string list) list = [
 let private divergences () = [
     "3.6", "External representations differ: IronKernel prints a number as "
            + "`<obj 3 : Int32>` rather than `3`."
+    "12.2", "There is no exact/inexact distinction. Numbers are CLR primitives, so "
+            + "exactness, bounds and robustness (module Inexact, 12.6) are absent and "
+            + "no number can be an exact infinity."
+    "12.5.4", "`+`, `*` and `-` are binary. The report makes them variadic, with "
+              + "`(+)` exact zero and `(*)` exact one."
+    "12.5.13", "`(max)` and `(min)` with no arguments signal an error. The report "
+               + "returns exact negative and positive infinity, which IronKernel "
+               + "cannot represent."
+    "12.5.14", "`(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact "
+               + "positive infinity for `(gcd)`."
 ]
 
 let private conformanceEnv () =

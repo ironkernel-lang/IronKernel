@@ -21,6 +21,19 @@ import re
 import sys
 
 
+# Optionality is usually visible in a section title ("Pair mutation (optional)"),
+# but chapter 12 declares it in prose instead: "This section describes the required
+# Numbers module and five optional modules that define subtypes of number." Those
+# five cannot be detected from the table of contents, so they are listed here.
+PROSE_OPTIONAL_SECTIONS = {
+    "12.6",   # Inexact
+    "12.7",   # Narrow inexact
+    "12.8",   # Rational
+    "12.9",   # Real
+    "12.10",  # Complex
+}
+
+
 def extract(text):
     lines = text.split("\n")
     start = next(i for i, l in enumerate(lines) if re.match(r"^0 Introduction", l.strip()))
@@ -66,7 +79,8 @@ def extract(text):
             "sectionTitle": section_title,
             "title": e["title"],
             "bindings": e["bindings"],
-            "optional": "(optional)" in section_title.lower(),
+            "optional": ("(optional)" in section_title.lower()
+                         or section in PROSE_OPTIONAL_SECTIONS),
         })
     return manifest
 
