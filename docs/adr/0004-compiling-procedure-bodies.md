@@ -98,7 +98,31 @@ managed artifacts to exclude the compiler and FParsec. The body compiler is
 therefore injected the way `RuntimeSourceServices` already injects the parser.
 Artifacts that do not install it fall back to interpretation.
 
-**Phase 4 — revisit analyzer specialization.** Re-measure with
+**Phase 3 outcome.** Bodies are compiled and memoised as designed, but the gain
+is about 1.3% on a body-heavy workload, not the 2.3x-4.0x projected above. The
+projection came from `CompilerBenchmarks` measuring a single flat form, which is
+not representative of a procedure body.
+
+The reason is structural: the compiler never descends into operand position. Every
+combination case in `compileToFunc` converts its operands back to raw `LispVal`
+and hands them to the runtime, because `COperate` deliberately retains operand
+syntax so combiner dispatch can tell operatives from applicatives. Compiling a
+body therefore compiles only the shell of each form; all nested evaluation stays
+interpreted, and nested evaluation is where the time goes.
+
+Across `ControlFlowBenchmarks`, repeated named procedure calls are 15-16% faster
+with 17% less allocation, and continuation-heavy paths are 4-6% slower. That does
+not repay phase 1's cost, so the premise that phase 3 pays for phase 1 does not
+hold as stated.
+
+**Phase 4 — compile operand trees.** The remaining lever is teaching the compiler
+to descend into operands while preserving Kernel's operative/applicative
+distinction: operands may only be pre-compiled once the combiner in operator
+position is known to be applicative, which the binding guards and call-site cache
+already establish. This is a larger change than phases 1-3 and should be measured
+against the same body-heavy workload before being adopted.
+
+**Phase 5 — revisit analyzer specialization.** Re-measure with
 `GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
 once bodies are compiled, and guards measured 12% faster there, so extending
 `PrimitiveIdentity` should be reconsidered then, with evidence.

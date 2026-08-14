@@ -315,6 +315,18 @@ module Compiler =
     let evalCompiled env cont (v: LispVal) =
         compileLispValGuarded env v |> fun f -> run (f.Invoke(env, cont))
 
+    /// Installs body compilation for operative application (ADR 0004 phase 3).
+    /// The runtime cannot reference this assembly, so the tool injects it, exactly
+    /// as `RuntimeSourceServices` injects the parser. Bodies are compiled against
+    /// the operative's closure environment; guards and call-site caches revalidate
+    /// per call, so the child frame each application creates is handled already.
+    let installBodyCompiler () =
+        Eval.configureBodyCompiler (fun closure body ->
+            body
+            |> List.map (fun form ->
+                let compiled = compileLispValGuarded closure form
+                fun (env: LispVal) (cont: LispVal) -> compiled.Invoke(env, cont)))
+
     let analyzeAndCompile (source: string) : ThrowsError<KernelFunc list> =
         match Parser.readExprList source with
         | Choice1Of2 e -> throwError e

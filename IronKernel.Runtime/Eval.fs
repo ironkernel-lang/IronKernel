@@ -12,6 +12,15 @@ module Eval =
     open Contracts
     open ClrSugar
 
+    /// Compiles an operative body to a list of compiled forms, one per body form.
+    /// Installed by the tool: ADR 0002 keeps the compiler out of
+    /// `IronKernel.Runtime`, so artifacts published without it simply keep
+    /// interpreting bodies. Takes the operative's closure environment and its body.
+    let mutable private bodyCompiler
+        : (LispVal -> LispVal list -> (LispVal -> LispVal -> Step) list) option = None
+
+    let configureBodyCompiler compile = bodyCompiler <- Some compile
+
     let inline ok (x: LispVal) : Step = Done (returnM x)
     let inline fail (e: LispError) : Step = Done (throwError e)
     let inline ofResult (r: ThrowsError<LispVal>) : Step = Done r
@@ -283,7 +292,11 @@ module Eval =
                 More (fun () -> operateStep _env resumeCont resumption.continuation [argument])
             | [_] -> fail (Default "resumption has already been consumed")
             | _ -> fail (NumArgs(1, args))
-        | Operative { prms = prms; envarg = envarg; body = body; closure = closure; compiledBody = compiledBody } ->
+        | Operative operative ->
+            let prms = operative.prms
+            let envarg = operative.envarg
+            let body = operative.body
+            let closure = operative.closure
             let evalBody env =
                 let continuationAfterBody =
                     match cpr with
@@ -295,10 +308,22 @@ module Eval =
                     | { currentCont = Some (KernelCode []); nextCont = nextCont }
                     | { currentCont = Some (CompiledCode []); nextCont = nextCont } -> nextCont
                     | _ -> Some (Continuation (cpr, None, Full))
+                // Compile the body on first application and memoise it. Compiling a
+                // form costs less than interpreting it once, so there is nothing to
+                // gain from a hotness heuristic. A compiler failure falls back to
+                // interpretation rather than failing the call.
                 let deferredBody =
-                    match compiledBody with
+                    match operative.compiledBody with
                     | Some forms -> CompiledCode forms
-                    | None -> KernelCode body
+                    | None ->
+                        match bodyCompiler with
+                        | None -> KernelCode body
+                        | Some compile ->
+                            match (try Some(compile closure body) with _ -> None) with
+                            | Some forms ->
+                                operative.compiledBody <- Some forms
+                                CompiledCode forms
+                            | None -> KernelCode body
                 More (fun () ->
                     continueEvalStep env
                         (Continuation ({ closure = env; currentCont = Some deferredBody; nextCont = continuationAfterBody; args = None }, metaCont, ct))

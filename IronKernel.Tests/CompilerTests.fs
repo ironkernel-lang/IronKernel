@@ -720,3 +720,22 @@ let ``continuation captured inside a compiled body resumes the remaining forms``
         assertEval env "(record)" (Obj (1 :> obj))
         ignore (evalIn env "((vector-ref saved 0) 0)")
         assertEval env "(vector-ref store 0)" (Obj (2 :> obj)))
+
+[<Fact>]
+let ``operative bodies are compiled on first application`` () =
+    withKernel (fun env ->
+        ignore (evalIn env "(define twice (lambda (n) (+ n n)))")
+        let operativeOf name =
+            match getVar' env name with
+            | Some (Applicative (Operative record)) -> record
+            | other -> failwithf "expected an applicative operative, got %A" other
+
+        // Nothing is compiled until the combiner is actually applied.
+        Assert.True((operativeOf "twice").compiledBody.IsNone)
+        assertEval env "(twice 21)" (Obj (42 :> obj))
+        Assert.True((operativeOf "twice").compiledBody.IsSome)
+
+        // The memo is reused rather than recompiled per call.
+        let compiled = (operativeOf "twice").compiledBody
+        assertEval env "(twice 1)" (Obj (2 :> obj))
+        Assert.Same(Option.get compiled, Option.get (operativeOf "twice").compiledBody))

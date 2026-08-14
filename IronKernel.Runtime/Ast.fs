@@ -84,11 +84,12 @@ module Ast =
         envarg  : string;
         body    : LispVal list;
         closure : LispVal
-        /// Compiled form of `body`, used in preference to interpreting it. Always
-        /// `None` today: ADR 0004 phase 3 fills it in lazily on first application.
-        /// `body` stays authoritative so anything reading a combiner's source, and
-        /// any artifact built without the compiler, keeps working.
-        compiledBody : ((LispVal -> LispVal -> Step) list) option
+        /// Compiled form of `body`, used in preference to interpreting it. Filled in
+        /// lazily on first application (ADR 0004). `body` stays authoritative so
+        /// anything reading a combiner's source, and any artifact built without the
+        /// compiler, keeps working. The write is a single reference assignment and
+        /// recompiling is pure, so a race can only duplicate work, never corrupt.
+        mutable compiledBody : ((LispVal -> LispVal -> Step) list) option
     }
     and NativeFuncRecord = { 
         cont : LispVal -> LispVal -> LispVal -> (LispVal list) option -> Step
