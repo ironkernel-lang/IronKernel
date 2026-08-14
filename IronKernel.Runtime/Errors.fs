@@ -38,6 +38,10 @@ module Errors =
             | ClrException ex -> ex.Message
             | CapabilityDenied text -> "Capability denied: " + text
             | ContractViolation text -> "Contract violation: " + text
+            // Never rendered in practice: the drivers recognise a session exit and end
+            // the session rather than reporting it. Spelled out so that one escaping to
+            // a diagnostic says what it is.
+            | SessionExit value -> "session exited with " + showVal value
             | LocatedError _ -> invalidOp "Located error traversal is incomplete"
 
         let output = Text.StringBuilder()

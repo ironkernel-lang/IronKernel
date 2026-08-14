@@ -191,6 +191,52 @@ let private behaviouralChecks () : (string * string list) list = [
                "(null? (call/cc (lambda (k) ((continuation->applicative k)) 99)))" ]
     "7.3.1", [ "(=? (call/cc (lambda (k) (apply-continuation k 5) 99)) 5)"
                "(=? (car (call/cc (lambda (k) (apply-continuation k (list 1 2)) 99))) 1)" ]
+    "7.2.4", [ "(call/cc (lambda (k) (continuation? (guard-continuation (list) k (list)))))"
+               // Normal receipt behaves as the guarded continuation does.
+               "(=? (call/cc (lambda (k) (apply-continuation (guard-continuation (list) k (list)) 5))) 5)"
+               // An abnormal pass out of the extent is intercepted, and the
+               // interceptor's result is what continues to the destination.
+               "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
+               + " (apply-continuation out 1) 99)"
+               + " (list (list root-continuation (lambda (v d) (* v 10))))))) 10)"
+               // At most one interceptor is selected from each list.
+               "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
+               + " (apply-continuation out 1) 99)"
+               + " (list (list root-continuation (lambda (v d) (+ v 1)))"
+               + " (list root-continuation (lambda (v d) (* v 100))))))) 2)" ]
+    "7.2.6", [ "(continuation? root-continuation)"
+               // Its extent contains everything, so a clause selecting on it always
+               // applies -- the report's stated reason for exposing it.
+               "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
+               + " (apply-continuation out 3) 99)"
+               + " (list (list root-continuation (lambda (v d) v)))))) 3)" ]
+    "7.2.7", [ "(continuation? error-continuation)" ]
+    "7.3.3", [ // Exit guards fire outward, smallest extent first.
+               "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
+               + " (guard-dynamic-extent (list) (lambda () (apply-continuation out 1))"
+               + " (list (list root-continuation (lambda (v d) (+ v 1))))))"
+               + " (list (list root-continuation (lambda (v d) (* v 100))))))) 200)"
+               // A normal return is not an abnormal pass, so nothing intercepts it.
+               "(=? (guard-dynamic-extent (list) (lambda () 7)"
+               + " (list (list root-continuation (lambda (v d) (* v 10))))) 7)"
+               // Entry guards fire on an abnormal pass into the extent.
+               "(=? (let ((flag (vector 0)))"
+               + " (let ((k (call/cc (lambda (return) (guard-dynamic-extent"
+               + " (list (list root-continuation (lambda (v d) (+ v 1000))))"
+               + " (lambda () (call/cc (lambda (c) (return c)))) (list))))))"
+               + " (if (zero? (vector-ref flag 0))"
+               + " (begin (vector-set! flag 0 1) (apply-continuation k 5)) k))) 1005)"
+               // The combiner is called with no operands and the dynamic environment
+               // of the guard-dynamic-extent call.
+               "(=? ((lambda (n) (guard-dynamic-extent (list)"
+               + " (wrap (vau () d (eval (quote n) d))) (list))) 4) 4)" ]
+    "7.3.4", [ "(applicative? exit)"
+               // That it is an abnormal transfer of #inert to root-continuation: an
+               // exit guard selecting on root catches the pass on its way there, and
+               // diverts so that the session does not actually end.
+               "(call/cc (lambda (out) (guard-dynamic-extent (list) (lambda () (exit) 99)"
+               + " (list (list root-continuation"
+               + " (lambda (v d) (apply-continuation out (inert? v))))))))" ]
     "7.3.2", [ "(eqv? (let/cc k (k 9)) 9)" ]
     "8.1.1", [ "(let ((t (make-encapsulation-type))) (let ((e ((car t) 1)) (p (car (cdr t)))) (p e)))" ]
     "9.1.1", [ "(promise? (memoize 1))" ]
@@ -484,15 +530,19 @@ let private divergences () = [
               + "underflow a zero, which is the report's behaviour for *cleared* "
               + "strict-arithmetic. Its initial value here is true, which the report "
               + "leaves open."
-    "7.2", "The continuation hierarchy carries no entry/exit guards, so an abnormal "
-           + "pass is a normal receipt at its destination. That is not an "
-           + "approximation of 7.2.5's selection and interception: with "
-           + "`guard-continuation` absent no guards can exist, so no interceptor is "
-           + "ever selectable. `root-continuation` and `error-continuation` are absent "
-           + "with it -- the report's rationale gives `root-continuation`'s purpose as "
-           + "being a guard selector that is always selected, and `error-continuation` "
-           + "is where an exit guard for a signalled error would attach, so all three "
-           + "belong to the same piece of machinery."
+    "7.2.7", "Signalling an error is not an abnormal pass to `error-continuation`. "
+             + "IronKernel reports errors on a separate channel that unwinds the "
+             + "computation directly, so an exit guard is *not* selected when an error "
+             + "is signalled within the guarded extent -- passing to the continuation "
+             + "explicitly does work, and provides the diagnostic. One consequence is "
+             + "that the report's derivation of `$binds?` from an error exit-guard "
+             + "would not work here."
+    "7.2.6", "`root-continuation` is not literally at the end of every continuation "
+             + "chain: IronKernel's drivers give each top-level form its own "
+             + "continuation. Its extent is instead defined to contain everything, "
+             + "which is what \"the ancestor of all other continuations\" means for the "
+             + "selection algorithm, so a clause selecting on it is always selected. "
+             + "Receiving a value ends the session, and the process exit status is 0."
     "4.2.1", "`eq?` is bound to the same structural comparison as `eqv?`, so it is "
              + "coarser than the report's, which distinguishes objects that `equal?` "
              + "does not."

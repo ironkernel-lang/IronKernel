@@ -560,20 +560,152 @@
                   ("contract", attachContract);
                   ]
         
+        /// R-1RK 7.2.6. The ancestor of all other continuations. IronKernel's drivers
+        /// give each top-level form its own continuation rather than threading one root
+        /// through the session, so root is not literally at the end of every chain;
+        /// instead the extent test below reports it as containing everything, which is
+        /// what "ancestor of all other continuations" means and is the only thing the
+        /// selection algorithm asks of it. A guard clause selecting on it is therefore
+        /// always selected, which the report's rationale gives as its whole purpose.
+        ///
+        /// Receiving a value normally ends the session (7.2.6), which travels out as
+        /// SessionExit rather than as a result, because there is no continuation left
+        /// below it to receive one.
+        /// The terminal record a native frame needs below it: the evaluator invokes a
+        /// native frame only when one follows, and these frames never pass anything on.
+        let private terminalRecord () =
+            { closure = Nil; currentCont = None; nextCont = None; args = None }
+
+        let private distinguishedContinuation receive =
+            Continuation(
+                { closure = Nil
+                  currentCont = Some(NativeCode { cont = receive; args = None })
+                  nextCont = Some(Continuation(terminalRecord (), None, Full))
+                  args = None },
+                None, Full)
+
+        let private rootRecord () =
+            distinguishedContinuation (fun _ _ value _ -> Done(Choice1Of2(SessionExit value)))
+
+        let private theRoot = lazy (rootRecord ())
+
+        let rootContinuation () = theRoot.Force()
+
+        /// R-1RK 7.2.7. Receiving a value provides a diagnostic and resumes the system
+        /// outside all user computation, which is what aborting the computation with an
+        /// error does here. Its extent is disjoint from ordinary computation because it
+        /// has no ancestors and is nobody's ancestor.
+        let private theErrorContinuation =
+            lazy (distinguishedContinuation (fun _ _ value _ -> Done(Choice1Of2(Default(showVal value)))))
+
+        let errorContinuation () = theErrorContinuation.Force()
+
+        let private isRoot (record: ContinuationRecord) =
+            match rootContinuation () with
+            | Continuation(root, _, _) -> obj.ReferenceEquals(record, root)
+            | _ -> false
+
+        /// R-1RK 7.2.5, selection. An exit-guard list is considered iff the pass leaves
+        /// the extent of its inner continuation, and an entry-guard list iff the pass
+        /// enters the extent of its outer continuation. A record is left iff it is an
+        /// ancestor of the source and not of the destination, and entered iff the other
+        /// way round, so the two lists fall straight out of the chains.
+        ///
+        /// Exit lists are considered from smallest extent to largest -- outward from
+        /// the source, which is the order the source chain already has -- and entry
+        /// lists from largest to smallest, inward to the destination, which is the
+        /// destination chain reversed.
+        let private selectInterceptors source destination =
+            let sourceChain = continuationAncestry source
+            let destinationChain = continuationAncestry destination
+            let barrier (record: ContinuationRecord) =
+                match record.currentCont with
+                | Some (GuardBarrier guards) -> Some(record, guards)
+                | _ -> None
+            // The selector's extent has to contain the destination for an exit guard and
+            // the source for an entry guard. root-continuation contains everything.
+            let selectorHolds chain (selector: LispVal) =
+                match selector with
+                | Continuation(record, _, _) -> isRoot record || withinExtent chain record
+                | _ -> false
+            let firstMatch chain clauses =
+                clauses |> List.tryPick (fun (selector, interceptor) ->
+                    if selectorHolds chain selector then Some interceptor else None)
+            let exited =
+                sourceChain
+                |> List.filter (fun record -> not (withinExtent destinationChain record))
+                |> List.choose barrier
+                |> List.choose (fun (record, guards) ->
+                    // Exit guards are about leaving the *inner* extent. Where the inner
+                    // continuation is known, that is the test; an interceptor's own
+                    // continuation sits between inner and outer, which is what keeps it
+                    // from re-triggering the guard it was selected by.
+                    let leavesInner =
+                        match guards.inner with
+                        | Some inner ->
+                            withinExtent sourceChain inner
+                            && not (withinExtent destinationChain inner)
+                        | None -> true
+                    if not leavesInner then None
+                    else firstMatch destinationChain guards.exitClauses
+                         |> Option.map (fun interceptor -> interceptor, record, guards.guardEnv))
+            let entered =
+                destinationChain
+                |> List.filter (fun record -> not (withinExtent sourceChain record))
+                |> List.choose barrier
+                |> List.choose (fun (record, guards) ->
+                    firstMatch sourceChain guards.entryClauses
+                    |> Option.map (fun interceptor -> interceptor, record, guards.guardEnv))
+                |> List.rev
+            exited @ entered
+
         /// R-1RK 7.2.5. The applicative's underlying operative abnormally passes its
-        /// operand tree to `target`. With no guards in the system the report's "series
-        /// of interceptors" is empty for every pass, so the derived continuation is the
-        /// destination itself and the pass is simply a normal receipt there.
+        /// operand tree to `target`.
         ///
         /// The operand tree of a combination is a list, which is what the evaluator
         /// hands a primitive, so it is rebuilt as one here. An *atomic* operand tree,
         /// which the report also allows, has no representation in that list -- use
         /// apply-continuation, which takes the object directly.
-        let private abnormalPass target =
+        let rec private abnormalPass target =
             Applicative(
                 PrimitiveOperative
                     { identity = None
-                      invoke = fun e _ args -> More(fun () -> continueEvalStep e target (List args)) })
+                      invoke = fun e c args -> passAbnormally e c target (List args) })
+
+        /// The whole chain of interceptions is scheduled at once as *normal* passes, so
+        /// that handing the value from one interceptor to the next is not itself subject
+        /// to interception. Each interceptor's result continuation is a child of that
+        /// guard's outer continuation, putting the call inside the outer extent and
+        /// outside the inner one.
+        and private passAbnormally env source target value =
+            let interceptions = selectInterceptors source target
+            let rec chain remaining =
+                match remaining with
+                | [] -> fun v -> More(fun () -> continueEvalStep env target v)
+                | (interceptor, outerRecord: ContinuationRecord, guardEnv) :: rest ->
+                    let next = chain rest
+                    fun v ->
+                        let outer = Continuation(outerRecord, None, Full)
+                        let resultCont =
+                            Continuation(
+                                { closure = guardEnv
+                                  currentCont =
+                                    Some(
+                                        NativeCode
+                                            { cont = fun _ _ result _ -> next result
+                                              args = None })
+                                  nextCont = Some outer
+                                  args = None },
+                                None, Full)
+                        // The interceptor is unwrapped exactly once (7.2.4), so its
+                        // operands -- the value and a route to the outer continuation --
+                        // reach it unevaluated.
+                        match interceptor with
+                        | Applicative underlying ->
+                            More(fun () ->
+                                operateStep guardEnv resultCont underlying [v; abnormalPass outer])
+                        | _ -> fail (TypeMismatch("applicative", interceptor))
+            chain interceptions value
 
         let continuationToApplicative env cont args =
             match args with
@@ -587,9 +719,7 @@
         /// argument list the evaluator would build for it.
         let applyContinuation env cont args =
             match args with
-            | [Continuation _ as target; value] ->
-                ignore cont
-                More(fun () -> continueEvalStep env target value)
+            | [Continuation _ as target; value] -> passAbnormally env cont target value
             | [found; _] -> fail (TypeMismatch("continuation", found))
             | _ -> fail (NumArgs(2, args))
 
@@ -633,6 +763,90 @@
                 extend target applicative (newEnvWithClr (ofEnvironment env) [] [])
             | [_; _; found] -> fail (TypeMismatch("environment", found))
             | _ -> fail (NumArgs(2, args))
+
+        /// R-1RK 7.2.4. Each clause is (selector interceptor): a continuation, and an
+        /// applicative whose underlying combiner is operative. The clauses are taken
+        /// apart here and held as a list, which is the "internal copies ... so that the
+        /// selectors and interceptors ... remain fixed thereafter" the report asks for.
+        let private guardClauses name value =
+            let rec collect acc = function
+                | [] -> Choice2Of2(List.rev acc)
+                | List [selector; interceptor] :: rest ->
+                    match selector, interceptor with
+                    | Continuation _, Applicative underlying ->
+                        // "an applicative whose underlying combiner is operative", so a
+                        // multiply wrapped interceptor is rejected: unwrapping once has
+                        // to reach the operative that receives the value unevaluated.
+                        match underlying with
+                        | Applicative _ ->
+                            Choice1Of2(TypeMismatch(name + " interceptor underlying operative", interceptor))
+                        | _ -> collect ((selector, interceptor) :: acc) rest
+                    | Continuation _, found ->
+                        Choice1Of2(TypeMismatch(name + " interceptor applicative", found))
+                    | found, _ -> Choice1Of2(TypeMismatch(name + " selector continuation", found))
+                | found :: _ -> Choice1Of2(TypeMismatch(name + " clause of length two", found))
+            match value with
+            | List clauses -> collect [] clauses
+            | Nil -> Choice2Of2 []
+            | found -> Choice1Of2(TypeMismatch(name + " list", found))
+
+        /// Builds the outer continuation, a child of `target` carrying the guards, and
+        /// the inner continuation, a child of the outer one, and returns the inner.
+        /// Normal receipt passes straight through both (see Eval), so in the absence of
+        /// abnormal passing they behave exactly as `target` does.
+        let private buildGuarded env target entry exit =
+            match target with
+            | Continuation(targetRecord, metaCont, ct) ->
+                match guardClauses "entry-guard" entry, guardClauses "exit-guard" exit with
+                | Choice1Of2 error, _ | _, Choice1Of2 error -> Choice1Of2 error
+                | Choice2Of2 entryClauses, Choice2Of2 exitClauses ->
+                    let guards =
+                        { entryClauses = entryClauses
+                          exitClauses = exitClauses
+                          guardEnv = env
+                          inner = None }
+                    let outerRecord =
+                        { closure = env
+                          currentCont = Some(GuardBarrier guards)
+                          nextCont = Some(Continuation(targetRecord, None, Full))
+                          args = None }
+                    let innerRecord =
+                        { closure = env
+                          currentCont = None
+                          nextCont = Some(Continuation(outerRecord, None, Full))
+                          args = None }
+                    guards.inner <- Some innerRecord
+                    Choice2Of2(Continuation(innerRecord, metaCont, ct))
+            | found -> Choice1Of2(TypeMismatch("continuation", found))
+
+        let guardContinuation env cont args =
+            match args with
+            | [entry; (Continuation _ as target); exit] ->
+                match buildGuarded env target entry exit with
+                | Choice2Of2 inner -> bounceContinue env cont inner
+                | Choice1Of2 error -> fail error
+            | [_; found; _] -> fail (TypeMismatch("continuation", found))
+            | _ -> fail (NumArgs(3, args))
+
+        /// R-1RK 7.3.3: extends the current continuation with the guards and calls
+        /// combiner in the dynamic extent of the new continuation, with no operands and
+        /// the dynamic environment of this call.
+        ///
+        /// The report derives this from guard-continuation with an elaborate detour: a
+        /// dedicated bypass continuation, and an entry guard prepended to override all
+        /// the client's, so that getting *into* the new extent does not trigger the very
+        /// entry guards being installed. That detour exists because a library definition
+        /// can only reach the new continuation by an abnormal pass. A primitive already
+        /// holds the current continuation, so it can call the combiner with the inner
+        /// continuation directly -- no abnormal entry happens, and no entry guard fires,
+        /// which is the behaviour the derivation goes to that trouble to achieve.
+        let guardDynamicExtent env cont args =
+            match args with
+            | [entry; combiner; exit] ->
+                match buildGuarded env cont entry exit with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 inner -> bounceOperate env inner combiner []
+            | _ -> fail (NumArgs(3, args))
 
         let callcc env cont  = function 
             | [func] -> 
@@ -1670,6 +1884,8 @@
                   ("apply-continuation", applyContinuation);
                   ("extend-continuation", extendContinuation);
                   ("continuation?", isContinuation);
+                  ("guard-continuation", guardContinuation);
+                  ("guard-dynamic-extent", guardDynamicExtent);
                   ("+", plus);
                   ("-", minus);
                   ("*", times);
@@ -1851,7 +2067,12 @@
                 if Set.contains (GeneratedClr "safe") capabilities then
                     SafeBindings.bindings
                 else []
-            io @ operatives @ applicatives @ generated
+            // R-1RK 7.2.6 and 7.2.7 are continuations, not combiners, so they are bound
+            // as values rather than built from the applicative lists.
+            let continuations =
+                [ "root-continuation", rootContinuation ()
+                  "error-continuation", errorContinuation () ]
+            io @ operatives @ applicatives @ generated @ continuations
             |> bindVars (newEnvWithCapabilities capabilities [])
 
         let makePrimitiveBindings () =
