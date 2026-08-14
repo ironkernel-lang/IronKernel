@@ -1,38 +1,55 @@
-﻿
-(define display 
-	(lambda (x) 
+
+(define display
+	(lambda (x)
 	(. System.Console Write x)))
 
-(define newline 
-	(lambda () 
+(define newline
+	(lambda ()
 	(. System.Console WriteLine "")))
 
 
-(defn (hefty-computation do-other-stuff) 
-    (letrec ((loop (lambda (n)  
-      (display "Hefty computation: ") 
-      (display n) 
-      (newline) 
-      (set! (get-current-environment) do-other-stuff (call/cc do-other-stuff)) 
-      (display "Hefty computation (b)")  
-      (newline) 
-      (set! (get-current-environment) do-other-stuff (call/cc do-other-stuff)) 
-      (display "Hefty computation (c)") 
-      (newline) 
-      (set! (get-current-environment) do-other-stuff (call/cc do-other-stuff)) 
-      (if (> n 0) 
-          (loop (- n 1)))))) (loop 5))) 
+; Two coroutines pass control back and forth by exchanging continuations.
+; Each captures the continuation of its own `call/cc` and hands it to the other,
+; so `do-other-stuff` always names "resume the partner".
+;
+; `set!` is Kernel's $set!: it *defines* the symbol in the environment given by
+; its first operand. That environment must be the frame where `do-other-stuff`
+; actually lives -- the procedure's own frame, captured once as `home`. Using
+; `(get-current-environment)` from inside the loop instead would define a fresh
+; shadowing binding in each iteration's frame, and the exchanged continuation
+; would be lost on the next pass.
+
+(defn (hefty-computation do-other-stuff)
+    (define home (get-current-environment))
+    (letrec ((loop (lambda (n)
+      (display "Hefty computation: ")
+      (display n)
+      (newline)
+      (set! home do-other-stuff (call/cc do-other-stuff))
+      (display "Hefty computation (b)")
+      (newline)
+      (set! home do-other-stuff (call/cc do-other-stuff))
+      (display "Hefty computation (c)")
+      (newline)
+      (set! home do-other-stuff (call/cc do-other-stuff))
+      (if (> n 0)
+          (loop (- n 1))
+          #inert))))
+      (loop 5)))
 
 
-;; notionally displays a clock 
-(defn (superfluous-computation do-other-stuff) 
-    (letrec ((loop ( lambda () 
-      (for-each (lambda (graphic) 
-                  (display graphic) 
-                  (newline) 
-                  (set! (get-current-environment) do-other-stuff (call/cc do-other-stuff))) 
-                '("Straight up." "Quarter after." "Half past."  "Quarter til.")) 
-      ))) (loop ()))) 
-	  
-	  
-(hefty-computation superfluous-computation) 	  
+;; notionally displays a clock
+(defn (superfluous-computation do-other-stuff)
+    (define home (get-current-environment))
+    (letrec ((loop (lambda ()
+      ; for-each takes the collection first, then the combiner.
+      (for-each '("Straight up." "Quarter after." "Half past."  "Quarter til.")
+                (lambda (graphic)
+                  (display graphic)
+                  (newline)
+                  (set! home do-other-stuff (call/cc do-other-stuff))))
+      (loop))))
+      (loop)))
+
+
+(hefty-computation superfluous-computation)

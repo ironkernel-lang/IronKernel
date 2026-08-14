@@ -24,8 +24,24 @@ module Repl =
     let putStrLn (str:String) =
       Console.WriteLine(str)
 
-    let readPrompt prompt = 
-      fun _ -> lineEditor.Edit(prompt, "")
+    /// The Mono.Terminal line editor drives the cursor directly, so it needs a real
+    /// TTY. With stdin or stdout redirected `Console.WindowWidth` is 0 and rendering
+    /// divides by zero, which used to crash piped and scripted sessions.
+    let isInteractiveConsole () =
+      not Console.IsInputRedirected
+      && not Console.IsOutputRedirected
+      && (try Console.WindowWidth > 0 with :? IO.IOException -> false)
+
+    /// Plain reads keep non-interactive sessions working; `until` already stops on the
+    /// null that `ReadLine` returns at end of input.
+    let readPrompt (prompt: string) =
+      if isInteractiveConsole () then
+        fun _ -> lineEditor.Edit(prompt, "")
+      else
+        fun _ ->
+          Console.Write prompt
+          Console.Out.Flush()
+          Console.ReadLine()
 
     let evalString env cont expr = 
         let evaled = 

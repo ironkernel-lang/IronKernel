@@ -218,6 +218,63 @@ type ControlFlowBenchmarks() =
     member _.EffectHandlerResume() =
         evaluate effectResume
 
+/// Before/after for guarded `vau` specialization. `Unguarded` is the plain
+/// `analyze` path (COperate through the named call-site cache); `Guarded` is the
+/// binding-guarded intrinsic.
+///
+/// Measures when guarded specialization actually pays, which decides whether
+/// extending `PrimitiveIdentity` to further primitives is worthwhile. The two
+/// environment configurations differ sharply:
+///
+///   * Shared `env` (top-level forms): the call-site cache validates by reference
+///     equality and always hits, so the guard's name re-resolution is pure
+///     overhead and the guarded path loses.
+///   * Fresh child frame per call: the call-site cache misses and must re-resolve
+///     and refill, which the guard beats.
+///
+/// Only the shared case occurs today. Procedure bodies are stored as raw
+/// `KernelCode` and interpreted, and `CompiledCombiner` is never constructed, so
+/// no compiled expression is ever invoked against a fresh frame. Until bodies are
+/// compiled, added guards are measured pessimizations rather than wins.
+[<MemoryDiagnoser>]
+type GuardSpecializationBenchmarks() =
+    let env = makePrimitiveBindings ()
+    let form = parse "(if #t 1 2)"
+    let mutable unguarded = Unchecked.defaultof<KernelFunc>
+    let mutable guarded = Unchecked.defaultof<KernelFunc>
+
+    [<GlobalSetup>]
+    member _.Setup() =
+        unguarded <- compileLispVal form
+        guarded <- compileLispValGuarded env form
+        let requireOne (func: KernelFunc) =
+            match func.Invoke(env, newContinuation env) with
+            | Choice2Of2 (Obj (:? int as value)) when value = 1 -> ()
+            | result -> invalidOp (sprintf "Guard benchmark setup failed: %A" result)
+        requireOne unguarded
+        requireOne guarded
+
+    [<Benchmark(Baseline = true)>]
+    member _.Unguarded() =
+        unguarded.Invoke(env, newContinuation env)
+
+    [<Benchmark>]
+    member _.Guarded() =
+        guarded.Invoke(env, newContinuation env)
+
+    // The realistic case for code inside a procedure body: a fresh child frame per
+    // call, so the named call-site cache misses and must re-resolve and refill.
+    // The child-frame allocation is common to both and cancels in the ratio.
+    [<Benchmark>]
+    member _.UnguardedFreshEnv() =
+        let frame = newEnv [env]
+        unguarded.Invoke(frame, newContinuation frame)
+
+    [<Benchmark>]
+    member _.GuardedFreshEnv() =
+        let frame = newEnv [env]
+        guarded.Invoke(frame, newContinuation frame)
+
 [<EntryPoint>]
 let main args =
     BenchmarkSwitcher.FromAssembly(typeof<CompilerBenchmarks>.Assembly).Run(args) |> ignore
