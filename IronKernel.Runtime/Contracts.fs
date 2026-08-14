@@ -40,10 +40,13 @@ module Contracts =
         | NumberShape, Obj (:? float32)
         | NumberShape, Obj (:? double)
         // Every complex is a number (R-1RK 12.10), so arithmetic contracts accept one.
-        | NumberShape, Obj (:? System.Numerics.Complex) -> true
+        | NumberShape, Obj (:? System.Numerics.Complex)
+        // Exact integers of arbitrary size (R-1RK 12.3.2) are numbers and integers.
+        | NumberShape, Obj (:? System.Numerics.BigInteger) -> true
         | IntegerShape, Obj (:? byte)
         | IntegerShape, Obj (:? int)
-        | IntegerShape, Obj (:? int64) -> true
+        | IntegerShape, Obj (:? int64)
+        | IntegerShape, Obj (:? System.Numerics.BigInteger) -> true
         | StringShape, Obj (:? string) -> true
         | BooleanShape, Bool _ -> true
         | AtomShape, Atom _ -> true

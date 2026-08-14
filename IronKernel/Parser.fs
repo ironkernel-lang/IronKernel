@@ -65,19 +65,31 @@ module Parser =
                        && nl.SuffixLength = 1 && nl.SuffixChar1 = 'L')
                 then
                     try
-                        let result = if nl.IsInteger then
-                                         if nl.SuffixLength = 0 then
-                                             int32 nl.String :> obj |> Obj
-                                         else
-                                             int64 nl.String :> obj |> Obj
-                                     else
-                                         if nl.IsHexadecimal then
-                                             float (floatOfHexString nl.String) :> obj |> Obj
-                                         else
-                                             float (float nl.String) :> obj |> Obj
+                        // R-1RK 12.3.2 requires exact integers of arbitrary size, so a
+                        // literal takes the narrowest exact type that holds it and falls
+                        // back to BigInteger rather than failing to parse. The `L`
+                        // suffix still forces at least 64-bit.
+                        let integerLiteral (text: string) forceLong =
+                            match System.Int32.TryParse text with
+                            | true, value when not forceLong -> box value
+                            | _ ->
+                                match System.Int64.TryParse text with
+                                | true, value -> box value
+                                | _ -> box (System.Numerics.BigInteger.Parse text)
+                        let result =
+                            if nl.IsInteger then
+                                Obj(integerLiteral nl.String (nl.SuffixLength > 0))
+                            else
+                                if nl.IsHexadecimal then
+                                    float (floatOfHexString nl.String) :> obj |> Obj
+                                else
+                                    float (float nl.String) :> obj |> Obj
                         Reply(result)
                     with
                     | :? System.OverflowException as e ->
+                        stream.Skip(-nl.String.Length)
+                        Reply(FatalError, messageError e.Message)
+                    | :? System.FormatException as e ->
                         stream.Skip(-nl.String.Length)
                         Reply(FatalError, messageError e.Message)
                 else

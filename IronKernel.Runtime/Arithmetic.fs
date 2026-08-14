@@ -16,6 +16,7 @@ namespace IronKernel
             | Bytes of byte * byte
             | Ints of int32 * int32
             | Longs of int64 * int64
+            | Bigs of Numerics.BigInteger * Numerics.BigInteger
             | Singles of float32 * float32
             | Doubles of double * double
             | Complexes of Numerics.Complex * Numerics.Complex
@@ -29,17 +30,21 @@ namespace IronKernel
             | :? byte -> 0
             | :? int32 -> 1
             | :? int64 -> 2
-            | :? float32 -> 3
-            | :? double -> 4
-            | :? Numerics.Complex -> 5
+            // Exact integers of arbitrary size (R-1RK 12.3.2) rank above the fixed
+            // widths and below the inexact reals.
+            | :? Numerics.BigInteger -> 3
+            | :? float32 -> 4
+            | :? double -> 5
+            | :? Numerics.Complex -> 6
             | _ -> -1
 
         let private rankName = function
             | 0 -> "byte"
             | 1 -> "int32"
             | 2 -> "int64"
-            | 3 -> "float32"
-            | 4 -> "float"
+            | 3 -> "integer"
+            | 4 -> "float32"
+            | 5 -> "float"
             | _ -> "complex"
 
         let private toInt (value: obj) =
@@ -53,10 +58,19 @@ namespace IronKernel
             | :? int32 as v -> int64 v
             | _ -> value :?> int64
 
+        let private toBig (value: obj) =
+            match value with
+            | :? byte as v -> Numerics.BigInteger(int v)
+            | :? int32 as v -> Numerics.BigInteger v
+            | :? int64 as v -> Numerics.BigInteger v
+            | _ -> value :?> Numerics.BigInteger
+
         let private toSingle (value: obj) =
             match value with
             | :? byte as v -> float32 v
             | :? int32 as v -> float32 v
+            | :? int64 as v -> float32 v
+            | :? Numerics.BigInteger as v -> float32 v
             | _ -> value :?> float32
 
         let private toDouble (value: obj) =
@@ -64,6 +78,7 @@ namespace IronKernel
             | :? byte as v -> double v
             | :? int32 as v -> double v
             | :? int64 as v -> double v
+            | :? Numerics.BigInteger as v -> double v
             | :? float32 as v -> double v
             | _ -> value :?> double
 
@@ -79,15 +94,18 @@ namespace IronKernel
             elif rankB < 0 then Choice1Of2 SecondOperand
             else
                 let target =
-                    if min rankA rankB = 2 && max rankA rankB = 3 then 4
+                    // float32 cannot represent every int64 or big integer, so pairing
+                    // one with an exact integer wider than its mantissa widens to double.
+                    if min rankA rankB >= 2 && min rankA rankB <= 3 && max rankA rankB = 4 then 5
                     else max rankA rankB
                 Choice2Of2(
                     match target with
                     | 0 -> Bytes(a :?> byte, b :?> byte)
                     | 1 -> Ints(toInt a, toInt b)
                     | 2 -> Longs(toLong a, toLong b)
-                    | 3 -> Singles(toSingle a, toSingle b)
-                    | 4 -> Doubles(toDouble a, toDouble b)
+                    | 3 -> Bigs(toBig a, toBig b)
+                    | 4 -> Singles(toSingle a, toSingle b)
+                    | 5 -> Doubles(toDouble a, toDouble b)
                     | _ -> Complexes(toComplex a, toComplex b))
 
         /// No exception handler and no validation hook on this path. F# addition,
@@ -131,26 +149,63 @@ namespace IronKernel
         let private ofComplex (value: Numerics.Complex) : obj =
             if value.Imaginary = 0.0 then box value.Real else box value
 
+        /// An exact integer result that no longer fits its fixed width promotes to
+        /// BigInteger instead of wrapping. R-1RK 12.3.2 requires exact integers of
+        /// arbitrary size, and silent wraparound returns a wrong answer:
+        /// (* 2147483647 2147483647) used to be 1.
+        ///
+        /// The narrow cases compute in the next width up and only allocate a
+        /// BigInteger when that overflows too, so ordinary arithmetic stays on the
+        /// fixed-width path.
+        let private ofBig (value: Numerics.BigInteger) : obj =
+            if value >= Numerics.BigInteger(System.Int32.MinValue)
+               && value <= Numerics.BigInteger(System.Int32.MaxValue) then box (int value)
+            elif value >= Numerics.BigInteger(System.Int64.MinValue)
+                 && value <= Numerics.BigInteger(System.Int64.MaxValue) then box (int64 value)
+            else box value
+
+        let private ofLong (value: int64) : obj =
+            if value >= int64 System.Int32.MinValue && value <= int64 System.Int32.MaxValue then
+                box (int value)
+            else box value
+
+        /// Byte arithmetic widens like the other exact integers rather than wrapping
+        /// at 255, so (+ 200uy 100uy) is 300 and not 44.
+        let private ofByteResult (value: int) : obj =
+            if value >= 0 && value <= 255 then box (byte value) else box value
+
+        let private longChecked operation (x: int64) (y: int64) fallback =
+            try ofLong (operation x y) with :? System.OverflowException -> fallback ()
+
         let private addWidened = function
-            | Bytes(x, y) -> box (x + y)
-            | Ints(x, y) -> box (x + y)
-            | Longs(x, y) -> box (x + y)
+            | Bytes(x, y) -> ofByteResult (int x + int y)
+            | Ints(x, y) -> ofLong (int64 x + int64 y)
+            | Longs(x, y) ->
+                longChecked (Microsoft.FSharp.Core.Operators.Checked.(+)) x y
+                    (fun () -> ofBig (Numerics.BigInteger x + Numerics.BigInteger y))
+            | Bigs(x, y) -> ofBig (x + y)
             | Singles(x, y) -> box (x + y)
             | Doubles(x, y) -> box (x + y)
             | Complexes(x, y) -> ofComplex (x + y)
 
         let private subtractWidened = function
-            | Bytes(x, y) -> box (x - y)
-            | Ints(x, y) -> box (x - y)
-            | Longs(x, y) -> box (x - y)
+            | Bytes(x, y) -> ofByteResult (int x - int y)
+            | Ints(x, y) -> ofLong (int64 x - int64 y)
+            | Longs(x, y) ->
+                longChecked (Microsoft.FSharp.Core.Operators.Checked.(-)) x y
+                    (fun () -> ofBig (Numerics.BigInteger x - Numerics.BigInteger y))
+            | Bigs(x, y) -> ofBig (x - y)
             | Singles(x, y) -> box (x - y)
             | Doubles(x, y) -> box (x - y)
             | Complexes(x, y) -> ofComplex (x - y)
 
         let private multiplyWidened = function
-            | Bytes(x, y) -> box (x * y)
-            | Ints(x, y) -> box (x * y)
-            | Longs(x, y) -> box (x * y)
+            | Bytes(x, y) -> ofByteResult (int x * int y)
+            | Ints(x, y) -> ofLong (int64 x * int64 y)
+            | Longs(x, y) ->
+                longChecked (Microsoft.FSharp.Core.Operators.Checked.(*)) x y
+                    (fun () -> ofBig (Numerics.BigInteger x * Numerics.BigInteger y))
+            | Bigs(x, y) -> ofBig (x * y)
             | Singles(x, y) -> box (x * y)
             | Doubles(x, y) -> box (x * y)
             | Complexes(x, y) -> ofComplex (x * y)
@@ -163,7 +218,11 @@ namespace IronKernel
         let private divideWidened = function
             | Bytes(x, y) -> if x % y = 0uy then box (x / y) else box (float x / float y)
             | Ints(x, y) -> if x % y = 0 then box (x / y) else box (float x / float y)
-            | Longs(x, y) -> if x % y = 0L then box (x / y) else box (float x / float y)
+            | Longs(x, y) -> if x % y = 0L then ofLong (x / y) else box (float x / float y)
+            | Bigs(x, y) ->
+                if Numerics.BigInteger.Remainder(x, y) = Numerics.BigInteger.Zero then
+                    ofBig (Numerics.BigInteger.Divide(x, y))
+                else box (double x / double y)
             | Singles(x, y) -> box (x / y)
             | Doubles(x, y) -> box (x / y)
             | Complexes(x, y) -> ofComplex (x / y)
@@ -173,6 +232,7 @@ namespace IronKernel
             | Ints(x, y) -> Some(x < y)
             | Longs(x, y) -> Some(x < y)
             | Singles(x, y) -> Some(x < y)
+            | Bigs(x, y) -> Some(x < y)
             | Doubles(x, y) -> Some(x < y)
             | Complexes _ -> None
 
@@ -181,6 +241,7 @@ namespace IronKernel
             | Ints(x, y) -> Some(x <= y)
             | Longs(x, y) -> Some(x <= y)
             | Singles(x, y) -> Some(x <= y)
+            | Bigs(x, y) -> Some(x <= y)
             | Doubles(x, y) -> Some(x <= y)
             | Complexes _ -> None
 
@@ -206,6 +267,7 @@ namespace IronKernel
             | Bytes(_, y) -> y = 0uy
             | Ints(_, y) -> y = 0
             | Longs(_, y) -> y = 0L
+            | Bigs(_, y) -> y = Numerics.BigInteger.Zero
             | Singles(_, y) -> y = 0.0f
             | Doubles(_, y) -> y = 0.0
             | Complexes(_, y) -> y = Numerics.Complex.Zero
@@ -262,6 +324,15 @@ namespace IronKernel
                 let r0 = x - y * q0
                 let q, r = if r0 < 0L then (if y > 0L then (q0 - 1L, r0 + y) else (q0 + 1L, r0 - y)) else (q0, r0)
                 box q, box r
+            | Bigs(x, y) ->
+                let q0 = Numerics.BigInteger.Divide(x, y)
+                let r0 = x - y * q0
+                let q, r =
+                    if r0.Sign < 0 then
+                        if y.Sign > 0 then (q0 - Numerics.BigInteger.One, r0 + y)
+                        else (q0 + Numerics.BigInteger.One, r0 - y)
+                    else (q0, r0)
+                ofBig q, ofBig r
             | Singles(x, y) ->
                 let q0 = System.Math.Truncate(float x / float y)
                 let q, r = adjust q0 (float x - float y * q0) (float y)

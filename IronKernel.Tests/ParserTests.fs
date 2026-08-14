@@ -99,7 +99,9 @@ let ``generated malformed datums return located parser errors`` () =
             | 3 -> $"({inner} & {inner} {inner})"
             | 4 -> $"'{inner})"
             | 5 -> "\"unterminated"
-            | 6 -> "999999999999999999999999999999999999999999L"
+            // A decimal integer of any width is well formed now that exact integers
+            // are arbitrary-size (R-1RK 12.3.2); these remain malformed.
+            | 6 -> "1.2.3"
             | _ -> "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFL"
         let sourceName = $"malformed-{index}.ikr"
         match readExprFromSource sourceName source with
@@ -261,3 +263,18 @@ let ``named parse diagnostics include position source and caret`` () =
         Assert.Contains("broken.ikr:2:", diagnostic)
         Assert.Contains("(* 2 3)", diagnostic)
         Assert.Contains("^", diagnostic)
+
+[<Fact>]
+let ``integer literals are exact at any width`` () =
+    // R-1RK 12.3.2 requires exact integers of arbitrary size. A literal takes the
+    // narrowest exact type that holds it, so small values stay Int32 and only the
+    // genuinely large ones become BigInteger.
+    let parsed source =
+        match readExpr source with
+        | Choice2Of2 (Obj value) -> value
+        | other -> failwithf "%s did not parse to a number: %A" source other
+    Assert.IsType<int>(parsed "42") |> ignore
+    Assert.IsType<int64>(parsed "9999999999") |> ignore
+    Assert.IsType<System.Numerics.BigInteger>(parsed "123456789012345678901234567890") |> ignore
+    // The L suffix still forces at least 64-bit.
+    Assert.IsType<int64>(parsed "42L") |> ignore
