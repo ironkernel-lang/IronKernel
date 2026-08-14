@@ -42,12 +42,12 @@
 (defn (superfluous-computation do-other-stuff)
     (define home (get-current-environment))
     (letrec ((loop (lambda ()
-      ; for-each takes the collection first, then the combiner.
-      (for-each '("Straight up." "Quarter after." "Half past."  "Quarter til.")
-                (lambda (graphic)
+      ; R-1RK 6.9.1: (for-each applicative . lists) -- the applicative comes first.
+      (for-each (lambda (graphic)
                   (display graphic)
                   (newline)
-                  (set! home do-other-stuff (call/cc do-other-stuff))))
+                  (set! home do-other-stuff (call/cc do-other-stuff)))
+                '("Straight up." "Quarter after." "Half past."  "Quarter til."))
       (loop))))
       (loop)))
 

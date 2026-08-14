@@ -80,7 +80,41 @@ let private behaviouralChecks () : (string * string list) list = [
                "(eqv? (if #f 1 2) 2)"
                // The unselected branch must not be evaluated.
                "(eqv? (if #t 1 no-such-variable) 1)" ]
+    "4.1.1", [ "(boolean? #t)"; "(boolean? #f)"; "(eqv? (boolean? 1) #f)"; "(boolean?)" ]
+    "4.3.1", [ "(equal? (list 1 2) (list 1 2))"; "(eqv? (equal? 1 2) #f)"
+               "(equal? \"ab\" \"ab\")" ]
+    "4.4.1", [ "(symbol? 'a)"; "(eqv? (symbol? 1) #f)"; "(symbol?)" ]
+    "4.5.1", [ "(inert? #inert)"; "(eqv? (inert? 1) #f)"; "(inert?)" ]
     "4.6.1", [ "(pair? (cons 1 2))"; "(eqv? (pair? ()) #f)" ]
+    "4.10.1", [ "(operative? vau)"; "(eqv? (operative? car) #f)"; "(operative?)" ]
+    "4.10.2", [ "(applicative? car)"; "(eqv? (applicative? vau) #f)"; "(applicative?)" ]
+    "5.7.1", [ "(equal? (get-list-metrics (list 1 2 3)) (list 3 1 3 0))"
+               "(equal? (get-list-metrics ()) (list 0 1 0 0))"
+               // A non-pair is the start of an improper list of just itself.
+               "(equal? (get-list-metrics 5) (list 0 0 0 0))" ]
+    "5.7.2", [ "(equal? (list-tail (list 1 2 3 4) 2) (list 3 4))"
+               "(equal? (list-tail (list 1 2) 0) (list 1 2))" ]
+    "6.2.1", [ "(combiner? car)"; "(combiner? vau)"; "(eqv? (combiner? 1) #f)" ]
+    "6.3.2", [ "(=? (list-ref (list 1 2 3) 1) 2)"; "(=? (list-ref (list 1 2 3) 0) 1)" ]
+    "6.3.3", [ "(equal? (append (list 1 2) (list 3)) (list 1 2 3))"
+               "(equal? (append) ())"; "(equal? (append (list 1)) (list 1))"
+               "(equal? (append () (list 1)) (list 1))" ]
+    "6.3.4", [ "(equal? (list-neighbors (list 1 2 3)) (list (list 1 2) (list 2 3)))"
+               "(equal? (list-neighbors ()) ())"
+               "(equal? (list-neighbors (list 1)) ())" ]
+    // 6.3.5: (filter applicative list) -- the applicative comes first.
+    "6.3.5", [ "(equal? (filter (lambda (x) (positive? x)) (list -1 2 -3 4)) (list 2 4))"
+               "(equal? (filter (lambda (x) #t) ()) ())" ]
+    "6.3.6", [ "(equal? (assoc 'b (list (list 'a 1) (list 'b 2))) (list 'b 2))"
+               "(equal? (assoc 'z (list (list 'a 1))) ())" ]
+    "6.3.7", [ "(member? 2 (list 1 2 3))"; "(eqv? (member? 9 (list 1 2)) #f)" ]
+    "6.3.8", [ "(finite-list? (list 1 2))"; "(finite-list? ())"; "(eqv? (finite-list? 5) #f)" ]
+    "6.3.9", [ "(countable-list? (list 1 2))"; "(eqv? (countable-list? 5) #f)" ]
+    // 6.3.10: (reduce list binary identity) -- the list comes first here.
+    "6.3.10", [ "(=? (reduce (list 1 2 3 4) + 0) 10)"; "(=? (reduce () + 0) 0)"
+                "(=? (reduce (list 5) + 0) 5)" ]
+    "6.6.1", [ "(equal? (list 1 (list 2)) (list 1 (list 2)))"
+               "(eqv? (equal? (list 1) (list 2)) #f)" ]
     "4.6.2", [ "(null? ())"; "(eqv? (null? (cons 1 2)) #f)" ]
     "4.6.3", [ "(eqv? (car (cons 1 2)) 1)"; "(eqv? (cdr (cons 1 2)) 2)" ]
     "4.8.1", [ "(environment? (get-current-environment))" ]
@@ -117,7 +151,8 @@ let private behaviouralChecks () : (string * string list) list = [
     "6.7.5", [ "(eqv? (letrec ((f (lambda (n) (if (eqv? n 0) 0 (f (- n 1)))))) (f 3)) 0)" ]
     "6.7.9", [ "(eqv? (remote-eval (+ 1 2) (get-current-environment)) 3)" ]
     "6.8.1", [ "(let ((e (get-current-environment))) (sequence (set! e zz 7) (eqv? zz 7)))" ]
-    "6.9.1", [ "(eqv? (sequence (for-each (list 1) (lambda (x) x)) 1) 1)" ]
+    // 6.9.1: (for-each applicative . lists) -- applicative first, as for map.
+    "6.9.1", [ "(let ((t (vector 0))) (sequence (for-each (lambda (x) (vector-set! t 0 x)) (list 7)) (=? (vector-ref t 0) 7)))" ]
     "7.2.2", [ "(eqv? (call/cc (lambda (k) (k 42))) 42)" ]
     "7.3.2", [ "(eqv? (let/cc k (k 9)) 9)" ]
     "8.1.1", [ "(let ((t (make-encapsulation-type))) (let ((e ((car t) 1)) (p (car (cdr t)))) (p e)))" ]
@@ -224,6 +259,9 @@ let private divergences () = [
             + "real domain takes its complex value now that 12.10 is supported, so "
             + "`(sqrt -1)` is `i`; a NaN result still signals an error; and infinities "
             + "are returned as values."
+    "4.2.1", "`eq?` is bound to the same structural comparison as `eqv?`, so it is "
+             + "coarser than the report's, which distinguishes objects that `equal?` "
+             + "does not."
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."

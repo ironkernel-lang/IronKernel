@@ -81,7 +81,7 @@
 
 ; Yield each element of xs in turn. `k` is multi-shot and re-delimits, so the
 ; whole remaining computation runs once per alternative.
-(defn (amb xs) (shift (lambda (k) (for-each xs k))))
+(defn (amb xs) (shift (lambda (k) (for-each k xs))))
 
 ; Strategy 1: run body, return the list of everything it emitted.
 (define collect
@@ -236,11 +236,11 @@
   (let* ((n (fig-n f)) (s (fig-squares f)) (m (- (* 2 n) 1))
          (rw (make-vector n 0)) (cl (make-vector n 0))
          (pd (make-vector m 0)) (nd (make-vector m 0)))
-    (for-each s (lambda (p)
+    (for-each (lambda (p)
       (tally! rw (car p))
       (tally! cl (cdr p))
       (tally! pd (+ (car p) (cdr p)))
-      (tally! nd (- (+ n (- (car p) (cdr p))) 1))))
+      (tally! nd (- (+ n (- (car p) (cdr p))) 1))) s)
     ; fold the four families together: every non-zero count must agree
     (letrec ((scan (lambda (v i len w)
                      (if (eq? i len) w
@@ -261,9 +261,9 @@
 (defn (extended? f)
   (let* ((n (fig-n f)) (s (fig-squares f))
          (p (make-vector n 0)) (q (make-vector n 0)))
-    (for-each s (lambda (sq)
+    (for-each (lambda (sq)
       (tally! p (modulo (+ (car sq) (cdr sq)) n))
-      (tally! q (modulo (- (car sq) (cdr sq)) n))))
+      (tally! q (modulo (- (car sq) (cdr sq)) n))) s)
     (let ((t (fig-type f)))
       (if (null? t) #f
         (let ((w (car (cddr t))))
@@ -283,11 +283,11 @@
 ; w1*w2 on a board (n1*n2) wide.
 (defn (compose f1 f2)
   (let ((m (fig-n f1)) (acc (make-vector 1 ())))
-    (for-each (fig-squares f2) (lambda (q)
-      (for-each (fig-squares f1) (lambda (p)
+    (for-each (lambda (q)
+      (for-each (lambda (p)
         (vector-set! acc 0
           (cons (cons (+ (car p) (* m (car q))) (+ (cdr p) (* m (cdr q))))
-                (vector-ref acc 0)))))))
+                (vector-ref acc 0)))) (fig-squares f1))) (fig-squares f2))
     (figure (* m (fig-n f2)) (vector-ref acc 0))))
 
 (defn (same-square? p q) (if (eq? (car p) (car q)) (eq? (cdr p) (cdr q)) #f))
@@ -304,8 +304,8 @@
   (let* ((n (fig-n f)) (s (fig-squares f)) (m (- (* 2 n) 1))
          (byrow (make-vector n ()))
          (uc (make-vector n 0)) (up (make-vector m 0)) (un (make-vector m 0)))
-    (for-each s (lambda (p)
-      (vector-set! byrow (car p) (cons p (vector-ref byrow (car p))))))
+    (for-each (lambda (p)
+      (vector-set! byrow (car p) (cons p (vector-ref byrow (car p))))) s)
     (letrec
       ((pdx (lambda (p) (+ (car p) (cdr p))))
        (ndx (lambda (p) (- (+ n (- (car p) (cdr p))) 1)))
@@ -321,10 +321,10 @@
                 (vector-set! un (ndx p) (+ (vector-ref un (ndx p)) d))))
        (pick (lambda (cands)
                (shift (lambda (k)
-                 (for-each cands (lambda (p)
+                 (for-each (lambda (p)
                    (if (avail? p)
                      (begin (mark! p 1) (k p) (mark! p -1))
-                     #inert)))))))
+                     #inert)) cands)))))
        (go (lambda (r acc)
              (if (eq? r n)
                (emit (reverse acc))
@@ -338,10 +338,10 @@
 ; constant width w-1.
 (defn (fig-remove f t)
   (let ((acc (make-vector 1 ())))
-    (for-each (fig-squares f) (lambda (p)
+    (for-each (lambda (p)
       (if (member-of? p t)
         #inert
-        (vector-set! acc 0 (cons p (vector-ref acc 0))))))
+        (vector-set! acc 0 (cons p (vector-ref acc 0))))) (fig-squares f))
     (figure (fig-n f) (vector-ref acc 0))))
 
 (defn (peel f)
