@@ -107,9 +107,9 @@
             <p class="example-caption">vau invents unless</p>
             <pre><code>(define unless
   (vau (test &amp; body) env
-    (if (eval env test)
+    (if (eval test env)
       #inert
-      (eval env (cons sequence body)))))
+      (eval (cons sequence body) env))))
 
 (unless #f
   (. System.Console WriteLine "fires only when test is false"))</code></pre>

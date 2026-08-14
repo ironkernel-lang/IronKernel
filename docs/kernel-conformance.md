@@ -42,7 +42,6 @@ exercised, not that IronKernel matches the report exactly.
 | Report | Divergence |
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. |
-| 4.8.3 | `eval` takes its arguments in the opposite order to the report: IronKernel is `(eval environment expression)`, the report is `(eval expression environment)`. |
 | 1.3.7 | IronKernel drops the `$` sigil the report uses for operatives, so `$if` is `if` and `$define!` is `define`. See the alias column. |
 
 ## 4 Core types and primitive features

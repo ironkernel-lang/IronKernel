@@ -3,8 +3,8 @@
 
 (define html
   (vau (tag & body) env
-    (let ((parts (map (lambda (form) (eval env form)) body))
-          (name (eval env tag)))
+    (let ((parts (map (lambda (form) (eval form env)) body))
+          (name (eval tag env)))
       (str "<" name ">" (apply str parts) "</" name ">"))))
 
 (defn (attr tag attrs body)

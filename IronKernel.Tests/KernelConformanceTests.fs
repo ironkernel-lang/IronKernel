@@ -98,7 +98,7 @@ let private behaviouralChecks () : (string * string list) list = [
     "4.6.2", [ "(null? ())"; "(eqv? (null? (cons 1 2)) #f)" ]
     "4.6.3", [ "(eqv? (car (cons 1 2)) 1)"; "(eqv? (cdr (cons 1 2)) 2)" ]
     "4.8.1", [ "(environment? (get-current-environment))" ]
-    "4.8.3", [ "(eqv? (eval (get-current-environment) (list + 1 2)) 3)" ]
+    "4.8.3", [ "(eqv? (eval (list + 1 2) (get-current-environment)) 3)" ]
     "4.8.4", [ "(environment? (make-environment))" ]
     "4.10.3", [ // An operative receives its operands unevaluated.
                 "(eqv? (car ((vau xs _ xs) foo)) 'foo)" ]
@@ -150,9 +150,6 @@ let private behaviouralChecks () : (string * string list) list = [
 let private divergences () = [
     "3.6", "External representations differ: IronKernel prints a number as "
            + "`<obj 3 : Int32>` rather than `3`."
-    "4.8.3", "`eval` takes its arguments in the opposite order to the report: "
-             + "IronKernel is `(eval environment expression)`, the report is "
-             + "`(eval expression environment)`."
     "1.3.7", "IronKernel drops the `$` sigil the report uses for operatives, so "
              + "`$if` is `if` and `$define!` is `define`. See the alias column."
 ]

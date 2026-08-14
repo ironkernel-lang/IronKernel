@@ -17,17 +17,17 @@
             (define aux
               (vau (head & tail) env
                    (if (null? tail)
-                     (eval env head)
+                     (eval head env)
                      (seq2
-                       (eval env head)
-                       (eval env (cons aux tail))))))
+                       (eval head env)
+                       (eval (cons aux tail) env)))))
             (vau body env
                  (if (null? body)
                    #inert
-                   (eval env (cons aux body)))))))
+                   (eval (cons aux body) env))))))
    (vau (first second) env
-        ((wrap (vau _ _ (eval env second)))
-         (eval env first)))))
+        ((wrap (vau _ _ (eval second env)))
+         (eval first env)))))
 
 ; (list . objects)
 ; The list applicative returns objects.
@@ -63,17 +63,17 @@
   ((wrap
      (vau (vau) _
           (vau (formals eformal & body) env
-               (eval env (list vau formals eformal
+               (eval (list vau formals eformal
                            (if (> (length body) 1)
                              (cons sequence body)
-                             (car body)))))))
+                             (car body))) env))))
    vau))		   
 			
 ; lambda is built in terms of vau
 (define lambda 
 	(vau (params & body) static-env 
 		; inlined comment
-		(wrap (eval static-env (list* vau params '_ body)))))
+		(wrap (eval (list* vau params '_ body) static-env))))
 
 (define λ lambda)
 (define ϝ vau)
@@ -81,10 +81,10 @@
 (define apply 
 	(lambda (appv arg & opt)
 		(eval 
+			(cons (unwrap appv) arg)
 			(if (null? opt)
 				(make-environment)
-				(car opt))
-			(cons (unwrap appv) arg))))
+				(car opt)))))
 
 (define last (lambda (xs)
     (if (null? (cdr xs))
@@ -105,10 +105,10 @@
 (define cddr (lambda ((_ & (_ & x))) x))	  
 
 (define let (vau (binds & body) env
-    (eval env
-        (cons
+    (eval (cons
             (list* lambda (cons (map car binds) body))
-            (map cadr binds)))))
+            (map cadr binds))
+        env)))
 
 (define any?
   (lambda (f xs)
@@ -128,30 +128,30 @@
 
 (define let*
   (vau (bindings & body) env
-    (eval env (if (null? bindings)
+    (eval (if (null? bindings)
             (list* let bindings body)
             (list let (list (car bindings))
-                  (list* let* (cdr bindings) body))))))
+                  (list* let* (cdr bindings) body))) env)))
 
 (define letrec
   (vau (bindings & body) env
-    (eval env (list* let ()
+    (eval (list* let ()
                  (list define
                    (map car bindings)
                    (cons list (map cadr bindings)))
-                 body))))
+                 body) env)))
 
 (define letrec*
   (vau (bindings & body) env
-    (eval env (if (null? bindings)
+    (eval (if (null? bindings)
             (list* letrec bindings body)
             (list letrec (list (car bindings))
-                  (list* letrec* (cdr bindings) body))))))
+                  (list* letrec* (cdr bindings) body))) env)))
 
 (define let-redirect
   (vau (exp bindings & body) env
-    (eval env (cons (eval (eval env exp) (list* lambda (map car bindings) body))
-                (map cadr bindings)))))
+    (eval (cons (eval (list* lambda (map car bindings) body) (eval exp env))
+                (map cadr bindings)) env)))
 
 (define for-each
   (wrap (vau (x f) env (apply map (list f x) env) #inert)))
@@ -160,49 +160,51 @@
 
 (define remote-eval
   (vau (o e) d
-    (eval (eval d e) o)))
+    (eval o (eval e d))))
 
 (define bindings->environment
   (vau bindings env
-    (eval env (list let-redirect
+    (eval (list let-redirect
                 (make-environment)
                 bindings
-                (list get-current-environment)))))
+                (list get-current-environment)) env)))
 		  
 (define provide!
   (vau (symbols & body) env
-    (eval env (list define symbols
+    (eval (list define symbols
                 (list let ()
                       (cons sequence body)
-                      (cons list symbols))))))
+                      (cons list symbols))) env)))
 					  
+; The inner (list (unwrap eval) values env) builds an eval call at runtime, so its
+; operand order follows R-1RK 4.8.3 -- (eval expression environment) -- by hand.
 (define set!
   (vau (target formals values) env
-    (eval (eval env target) (list define formals (list (unwrap eval) env values)))))					  
+    (eval (list define formals (list (unwrap eval) values env)) (eval target env))))					  
 
 (define import!
   (vau (exp & symbols) env
-    (eval (eval env exp) (list set! env symbols (cons list symbols)))))		  
+    (eval (list set! env symbols (cons list symbols)) (eval exp env))))		  
 
 (define defn
   (vau (name & body) e
     (if (pair? name)
       (let (((n & as) name))
-        (eval e (list define n
-                    (cons lambda (cons as body)))))
-      (eval e (cons define (cons name body))))))
+        (eval (list define n
+                    (cons lambda (cons as body))) e))
+      (eval (cons define (cons name body)) e))))
 
 (defn (compose f g) (lambda (x) (f (g x))))
 
 (define let/cc
 	(vau (symbol & body) env
-		(eval env (list call/cc (list* lambda (list symbol) body)))))
+		(eval (list call/cc (list* lambda (list symbol) body)) env)))
 
 ; the time operative benchmarks expression evaluation
 (define time (vau (x) env 
 	(let* 
 		((start (.get System.DateTime Now)) 
-		 (result (eval env x))) 
+		 (result (eval x env))) 
 		 (begin 
 			(printf "Time elapsed: {0} milliseconds\n" (.get (- (.get System.DateTime Now) start) TotalMilliseconds)) result))))
 			
@@ -210,7 +212,7 @@
 	(vau clauses env
 		(define aux
 			(lambda ((test & body) & clauses)
-				(if (eval env test)
+				(if (eval test env)
 					(apply (wrap sequence) body env)
 					(apply (wrap cond) clauses env))))
 					
@@ -223,15 +225,15 @@
 (define $and?
    (vau x e
       (cond ((null? x)         #t)
-             ((null? (cdr x))   (eval e (car x)))
-             ((eval e (car x))  (apply (wrap $and?) (cdr x) e))
+             ((null? (cdr x))   (eval (car x) e))
+             ((eval (car x) e)  (apply (wrap $and?) (cdr x) e))
              (#t                #f))))
 
 (define $or?
 	(vau x e
 		(cond ((null? x)	#f)
-			((null? (cdr x)) (eval e (car x)))
-			((eval e (car x)) #t)
+			((null? (cdr x)) (eval (car x) e))
+			((eval (car x) e) #t)
 			(#t			(apply (wrap $or?) (cdr x) e)))))
 
 ; R-1RK 6.1.2 / 6.1.3: and? and or? are *applicatives*. Every argument is evaluated

@@ -62,7 +62,7 @@ let ``formal binding handles very long lists`` () =
 [<Fact>]
 let ``vau can eval in caller environment`` () =
     [
-        "(define force-it (vau (x) e (eval e x)))", Inert
+        "(define force-it (vau (x) e (eval x e)))", Inert
         "(define n 21)", Inert
         "(force-it (+ n n))", Obj 42
     ] |> evalSession
@@ -72,7 +72,7 @@ let ``operative unless short-circuits`` () =
     evalSessionKernel [
         """(define unless
              (vau (test & body) env
-               (if (eval env test) #inert (eval env (cons sequence body)))))""", Inert
+               (if (eval test env) #inert (eval (cons sequence body) env))))""", Inert
         "(define ran #f)", Inert
         "(unless #t (define ran #t))", Inert
         "ran", Bool false

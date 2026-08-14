@@ -114,7 +114,7 @@
         </div>
         <div class="example">
           <p class="example-caption">eval in the caller’s environment</p>
-          <pre><code>(define force-it (vau (x) e (eval e x)))
+          <pre><code>(define force-it (vau (x) e (eval x e)))
 (define n 21)
 (force-it (+ n n))
 ; ⇒ 42</code></pre>
@@ -316,7 +316,7 @@ ik pack</code></pre>
     (begin
       (show exp)
       (. System.Console WriteLine "")
-      (eval env exp))))
+      (eval exp env))))
 
 (trace (+ 2 2))
 ; prints: (+ 2 2)
@@ -327,7 +327,7 @@ ik pack</code></pre>
           <pre><code>(define timed
   (vau (label exp) env
     (let* ((start (.get System.DateTime Now))
-           (result (eval env exp))
+           (result (eval exp env))
            (ms (.get (- (.get System.DateTime Now) start)
                      TotalMilliseconds)))
       (printf "[{0}] {1} ms\n" label ms)

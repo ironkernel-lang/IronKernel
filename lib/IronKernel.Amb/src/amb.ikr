@@ -143,8 +143,8 @@
   ; Run body with an arbitrary handler applied to every solution.
   (define search
     (vau (handler & body) env
-      (with-sink (eval env handler)
-                 (lambda () (eval env (cons sequence body))))
+      (with-sink (eval handler env)
+                 (lambda () (eval (cons sequence body) env)))
       #inert))
 
   ; Every solution, in the order found.
@@ -153,7 +153,7 @@
       (let ((acc (make-vector 1 ())))
         (with-sink
           (lambda (s) (vector-set! acc 0 (cons s (vector-ref acc 0))))
-          (lambda () (eval env (cons sequence body))))
+          (lambda () (eval (cons sequence body) env)))
         (list-reverse (vector-ref acc 0)))))
 
   ; How many solutions, retaining none of them.
@@ -162,7 +162,7 @@
       (let ((n (make-vector 1 0)))
         (with-sink
           (lambda (s) (vector-set! n 0 (+ (vector-ref n 0) 1)))
-          (lambda () (eval env (cons sequence body))))
+          (lambda () (eval (cons sequence body) env)))
         (vector-ref n 0))))
 
   ; The first solution, or () if there is none. Escapes through call/cc, so
@@ -181,7 +181,7 @@
                            (vector-set! sink 0
                              (lambda (solution)
                                ((vector-ref escape 0) solution)))
-                           (reset (eval env (cons sequence body)))
+                           (reset (eval (cons sequence body) env))
                            ()))))
           (vector-set! sink 0 saved-sink)
           (vector-set! escape 0 saved-escape)

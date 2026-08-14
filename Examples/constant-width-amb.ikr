@@ -89,7 +89,7 @@
     (let ((acc (make-vector 1 ())) (saved (vector-ref sink 0)))
       (vector-set! sink 0
         (lambda (s) (vector-set! acc 0 (cons s (vector-ref acc 0)))))
-      (reset (eval env (cons sequence body)))
+      (reset (eval (cons sequence body) env))
       (vector-set! sink 0 saved)
       (reverse (vector-ref acc 0)))))
 
@@ -100,7 +100,7 @@
     (let ((saved (vector-ref sink 0)))
       (let ((r (call/cc (lambda (return)
                           (vector-set! sink 0 (lambda (s) (return s)))
-                          (reset (eval env (cons sequence body)))
+                          (reset (eval (cons sequence body) env))
                           ()))))
         (vector-set! sink 0 saved)
         r))))

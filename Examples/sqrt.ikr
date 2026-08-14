@@ -2,25 +2,25 @@
 ; Square root algorithm
 ;
 
-(define abs (vau (x) _ (begin (define xv (eval _ x)) (if (< 0 xv) xv (- 0 xv)))))
-(define square (vau (x) _ (begin (define xv (eval _ x)) (* xv xv))))
-(define average (vau (x y) _ (* 0.5 (+ (eval _ x) (eval _ y)))))
+(define abs (vau (x) _ (begin (define xv (eval x _)) (if (< 0 xv) xv (- 0 xv)))))
+(define square (vau (x) _ (begin (define xv (eval x _)) (* xv xv))))
+(define average (vau (x y) _ (* 0.5 (+ (eval x _) (eval y _)))))
 
 (define good-enough? 
     (vau (guess x) _ 
-        (< (abs (- (eval _ x) (square (eval _ guess)))) 0.00001)))
+        (< (abs (- (eval x _) (square (eval guess _)))) 0.00001)))
 
 (define improve (vau (guess x) _
     (begin
-        (define gv (eval _ guess))
-        (average gv (/ (eval _ x) gv)))))
+        (define gv (eval guess _))
+        (average gv (/ (eval x _) gv)))))
 
 (define sqrt-iter 
     (vau (guess x) _ 
         (begin
-            (define gv (eval _ guess))
-            (define xv (eval _ x))
+            (define gv (eval guess _))
+            (define xv (eval x _))
             (if (good-enough? gv xv) gv
                 (sqrt-iter (improve gv xv) xv)))))
 
-(define sqrt (vau (x) _ (sqrt-iter 1.0 (eval _ x))))
+(define sqrt (vau (x) _ (sqrt-iter 1.0 (eval x _))))

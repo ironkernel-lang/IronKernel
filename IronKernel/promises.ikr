@@ -22,7 +22,7 @@
 			(let* (((v) x) (object (vector-ref v 0)) (env (vector-ref v 1)))
 				(if (not? (environment? env))
 					object
-					(handle-promise-result x (eval env object))))))
+					(handle-promise-result x (eval object env))))))
 					
 	(define handle-promise-result
 		(lambda (x y)
