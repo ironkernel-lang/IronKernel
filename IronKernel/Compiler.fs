@@ -6,7 +6,6 @@ namespace IronKernel
 module Compiler =
 
     open System
-    open System.Linq.Expressions
     open Ast
     open Errors
     open Ir
@@ -81,51 +80,14 @@ module Compiler =
         static member AppNamed(env: LispVal, cont: LispVal, name: string, operands: LispVal[]) : Step =
             RuntimeDispatch.appNamed env cont name operands
 
-    let private resolveHelper name parameterTypes =
-        let methodInfo =
-            typeof<Helpers>.GetMethod(
-                name,
-                Reflection.BindingFlags.Public ||| Reflection.BindingFlags.Static,
-                null,
-                parameterTypes,
-                null)
-        if isNull methodInfo || methodInfo.ReturnType <> typeof<Step> then
-            invalidOp (sprintf "Compiler helper '%s' has an incompatible signature" name)
-        methodInfo
+    // Plain closures rather than expression trees. `Expression.Lambda(...).Compile()`
+    // costs tens of microseconds per node, which was affordable when only top-level
+    // forms were compiled once. Procedure bodies are compiled per operative
+    // (ADR 0004 phase 3), and combiners built and applied once -- every `let`
+    // expands to one -- would pay that cost with nothing to amortise it against.
+    let private compileLiteral v = KernelFunc(fun env cont -> Helpers.Continue(env, cont, v))
 
-    let private continueMethod =
-        resolveHelper "Continue" [| typeof<LispVal>; typeof<LispVal>; typeof<LispVal> |]
-
-    let private lookupMethod =
-        resolveHelper "Lookup" [| typeof<LispVal>; typeof<LispVal>; typeof<string> |]
-
-    let private ifThenElseMethod =
-        resolveHelper
-            "IfThenElse"
-            [| typeof<LispVal>; typeof<LispVal>; typeof<KernelFunc>; typeof<KernelFunc>; typeof<KernelFunc> |]
-
-    let private appMethod =
-        resolveHelper
-            "App"
-            [| typeof<LispVal>; typeof<LispVal>; typeof<KernelFunc>; typeof<LispVal[]> |]
-
-    let private compileLiteral v =
-        let envP = Expression.Parameter(typeof<LispVal>, "env")
-        let contP = Expression.Parameter(typeof<LispVal>, "cont")
-        let call =
-            Expression.Call(
-                continueMethod,
-                envP, contP, Expression.Constant(v, typeof<LispVal>))
-        Expression.Lambda<KernelFunc>(call, envP, contP).Compile()
-
-    let private compileVariable name =
-        let envP = Expression.Parameter(typeof<LispVal>, "env")
-        let contP = Expression.Parameter(typeof<LispVal>, "cont")
-        let call =
-            Expression.Call(
-                lookupMethod,
-                envP, contP, Expression.Constant(name))
-        Expression.Lambda<KernelFunc>(call, envP, contP).Compile()
+    let private compileVariable name = KernelFunc(fun env cont -> Helpers.Lookup(env, cont, name))
 
     let compileToFunc (expr: CoreExpr) : KernelFunc =
         let mutable pending = [CompileExpression expr]
@@ -167,7 +129,7 @@ module Compiler =
                     let bodyLv = List.map toLispVal body
                     completed <-
                         KernelFunc(fun env cont ->
-                            let op = Operative { prms = formals; envarg = envarg; body = bodyLv; closure = env }
+                            let op = Operative { prms = formals; envarg = envarg; body = bodyLv; closure = env; compiledBody = None }
                             bounceContinue env cont op)
                         :: completed
                 | CEval (environmentExpression, valueExpression) ->
@@ -225,16 +187,10 @@ module Compiler =
             | BuildIf ->
                 match takeCompleted 3 with
                 | [condition; consequent; alternative] ->
-                    let envP = Expression.Parameter(typeof<LispVal>, "env")
-                    let contP = Expression.Parameter(typeof<LispVal>, "cont")
-                    let call =
-                        Expression.Call(
-                            ifThenElseMethod,
-                            envP, contP,
-                            Expression.Constant(condition),
-                            Expression.Constant(consequent),
-                            Expression.Constant(alternative))
-                    completed <- Expression.Lambda<KernelFunc>(call, envP, contP).Compile() :: completed
+                    completed <-
+                        KernelFunc(fun env cont ->
+                            Helpers.IfThenElse(env, cont, condition, consequent, alternative))
+                        :: completed
                 | _ -> invalidOp "Conditional compilation is incomplete"
             | BuildSequence count ->
                 let functions = takeCompleted count |> List.toArray
@@ -255,15 +211,9 @@ module Compiler =
             | BuildApp operands ->
                 match takeCompleted 1 with
                 | [operator] ->
-                    let envP = Expression.Parameter(typeof<LispVal>, "env")
-                    let contP = Expression.Parameter(typeof<LispVal>, "cont")
-                    let call =
-                        Expression.Call(
-                            appMethod,
-                            envP, contP,
-                            Expression.Constant(operator),
-                            Expression.Constant(operands))
-                    completed <- Expression.Lambda<KernelFunc>(call, envP, contP).Compile() :: completed
+                    completed <-
+                        KernelFunc(fun env cont -> Helpers.App(env, cont, operator, operands))
+                        :: completed
                 | _ -> invalidOp "Application compilation is incomplete"
             | BuildOperation operands ->
                 match takeCompleted 1 with
@@ -314,6 +264,18 @@ module Compiler =
     /// returns `Step` and shares this one loop.
     let evalCompiled env cont (v: LispVal) =
         compileLispValGuarded env v |> fun f -> run (f.Invoke(env, cont))
+
+    /// Installs body compilation for operative application (ADR 0004 phase 3).
+    /// The runtime cannot reference this assembly, so the tool injects it, exactly
+    /// as `RuntimeSourceServices` injects the parser. Bodies are compiled against
+    /// the operative's closure environment; guards and call-site caches revalidate
+    /// per call, so the child frame each application creates is handled already.
+    let installBodyCompiler () =
+        Eval.configureBodyCompiler (fun closure body ->
+            body
+            |> List.map (fun form ->
+                let compiled = compileLispValGuarded closure form
+                fun (env: LispVal) (cont: LispVal) -> compiled.Invoke(env, cont)))
 
     let analyzeAndCompile (source: string) : ThrowsError<KernelFunc list> =
         match Parser.readExprList source with

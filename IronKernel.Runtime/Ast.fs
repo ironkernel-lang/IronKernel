@@ -79,11 +79,17 @@ module Ast =
         resume : ThrowsError<LispVal> -> Step
     }
 
-    and OperativeRecord = { 
+    and OperativeRecord = {
         prms    : LispVal ;
         envarg  : string;
-        body    : LispVal list; 
+        body    : LispVal list;
         closure : LispVal
+        /// Compiled form of `body`, used in preference to interpreting it. Filled in
+        /// lazily on first application (ADR 0004). `body` stays authoritative so
+        /// anything reading a combiner's source, and any artifact built without the
+        /// compiler, keeps working. The write is a single reference assignment and
+        /// recompiling is pure, so a race can only duplicate work, never corrupt.
+        mutable compiledBody : ((LispVal -> LispVal -> Step) list) option
     }
     and NativeFuncRecord = { 
         cont : LispVal -> LispVal -> LispVal -> (LispVal list) option -> Step
@@ -91,6 +97,13 @@ module Ast =
     }
     and DeferredCode =
         | KernelCode of (LispVal list)
+        /// A compiled procedure body, kept as a *list* of compiled forms rather
+        /// than one delegate. Continuation capture and the stepping rule both work
+        /// on the remaining-forms tail, so keeping the list preserves proper tail
+        /// calls and lets a captured continuation resume mid-body, exactly as
+        /// `KernelCode` does. Typed as a plain function so `IronKernel.Runtime`
+        /// stays independent of the compiler (ADR 0002).
+        | CompiledCode of (LispVal -> LispVal -> Step) list
         | NativeCode of NativeFuncRecord
     and ContinuationRecord = {
         closure     : LispVal

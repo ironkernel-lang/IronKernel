@@ -14,6 +14,7 @@ open IronKernel.Parser
 /// Isolated primitive environment (does not share REPL state).
 let freshEnv () =
     IronKernel.RuntimeSourceServices.configure ()
+    installBodyCompiler ()
     makePrimitiveBindings ()
 
 let evalIn env expr =

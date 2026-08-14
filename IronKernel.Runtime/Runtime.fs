@@ -301,7 +301,7 @@
 
         let vau _env cont xs = 
             match xs with
-            | prms :: Atom e :: body   -> bounceContinue _env cont (Operative{ prms = prms; envarg = e; body = body; closure = _env} ) 
+            | prms :: Atom e :: body   -> bounceContinue _env cont (Operative{ prms = prms; envarg = e; body = body; closure = _env; compiledBody = None} ) 
             | _ -> fail (Default("invalid arguments"))
 
         let define env cont xs = 

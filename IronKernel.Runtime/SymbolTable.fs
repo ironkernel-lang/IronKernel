@@ -94,6 +94,69 @@ module SymbolTable =
         bindingCount : int
     }
 
+    /// A resolution along a simple single-parent chain: the cell, the frame holding
+    /// it, and how many frames were skipped to reach it.
+    ///
+    /// Call sites inside a procedure body see a *fresh* frame on every call, because
+    /// application binds parameters in a new environment. A cache keyed on
+    /// environment identity therefore never hits there. Revalidating a chain
+    /// resolution instead costs one dictionary miss per skipped frame and allocates
+    /// nothing, and stays valid as the frame changes.
+    type ChainResolution = {
+        cell : BindingCell
+        owner : EnvironmentRecord
+        depth : int
+    }
+
+    /// `ValueNone` when the walk meets a frame with anything other than exactly one
+    /// environment parent; such chains keep the general resolver.
+    let tryResolveAlongChain env var : ChainResolution voption =
+        let mutable current = env
+        let mutable depth = 0
+        let mutable result = ValueNone
+        let mutable running = true
+        while running do
+            match current with
+            | Environment record ->
+                match record.bindings.TryGetValue var with
+                | true, cell ->
+                    result <- ValueSome { cell = cell; owner = record; depth = depth }
+                    running <- false
+                | _ ->
+                    match record.parents with
+                    | [(Environment _ as parent)] ->
+                        depth <- depth + 1
+                        current <- parent
+                    | _ -> running <- false
+            | _ -> running <- false
+        result
+
+    /// True when resolving `var` from `env` would still reach `resolution.owner`:
+    /// every nearer frame must still lack the name, and the frame at that depth must
+    /// be the same object. Frames only gain bindings, so an absent name stays absent
+    /// unless something defines it, which this check sees.
+    let chainResolutionHolds env var (resolution: ChainResolution) =
+        let mutable current = env
+        let mutable remaining = resolution.depth
+        let mutable holds = false
+        let mutable running = true
+        while running do
+            match current with
+            | Environment record ->
+                if remaining = 0 then
+                    holds <- obj.ReferenceEquals(record, resolution.owner)
+                    running <- false
+                elif record.bindings.ContainsKey var then
+                    running <- false
+                else
+                    match record.parents with
+                    | [(Environment _ as parent)] ->
+                        remaining <- remaining - 1
+                        current <- parent
+                    | _ -> running <- false
+            | _ -> running <- false
+        holds
+
     /// Resolve a binding cell and record every frame scanned before the hit.
     /// Call-site inline caches revalidate against these snapshots instead of
     /// re-walking the environment chain.

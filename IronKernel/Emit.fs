@@ -85,6 +85,7 @@ module Emit =
 
     let bootstrapEnvForProfile profile =
         RuntimeSourceServices.configure ()
+        Compiler.installBodyCompiler ()
         let env = makePrimitiveBindingsForProfile profile
         let loadFile name =
             let legacyName = Path.ChangeExtension(name, ".scm")
