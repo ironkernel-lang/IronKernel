@@ -57,17 +57,35 @@ module Contracts =
     let validateArguments contract args =
         let expectedCount = List.length contract.operands
         let actualCount = List.length args
-        if expectedCount <> actualCount then
-            Some(
-                ContractViolation(
-                    sprintf
-                        "%s expected %d operands, found %d"
-                        contract.name
-                        expectedCount
-                        actualCount))
-        else
+        let arityError =
+            match contract.minimumOperands with
+            | Some minimum when actualCount < minimum ->
+                Some(
+                    ContractViolation(
+                        sprintf
+                            "%s expected at least %d operands, found %d"
+                            contract.name
+                            minimum
+                            actualCount))
+            | Some _ -> None
+            | None when expectedCount <> actualCount ->
+                Some(
+                    ContractViolation(
+                        sprintf
+                            "%s expected %d operands, found %d"
+                            contract.name
+                            expectedCount
+                            actualCount))
+            | None -> None
+        match arityError with
+        | Some error -> Some error
+        | None ->
             let rec validate index shapes values =
                 match shapes, values with
+                // A variadic contract runs out of declared shapes before it runs out
+                // of arguments; the last shape describes the rest.
+                | [lastShape], (_ :: _ :: _ as values) when contract.minimumOperands.IsSome ->
+                    validate index (List.replicate (List.length values) lastShape) values
                 | shape :: remainingShapes, value :: remainingValues ->
                     if shapeMatches shape value then
                         validate (index + 1) remainingShapes remainingValues
@@ -136,7 +154,12 @@ module Contracts =
             cell.id = guard.cellId
             && state.version = guard.version
             && (tryGetContract state.value
-                |> Option.exists (fun contract -> contract = guard.contractSnapshot))
+                |> Option.exists (fun contract ->
+                    // Reference equality first: a contract is almost always the same
+                    // instance the guard captured, and structural equality walks every
+                    // field of the record on each invocation of a folded constant.
+                    obj.ReferenceEquals(contract, guard.contractSnapshot)
+                    || contract = guard.contractSnapshot))
         | ValueNone -> false
 
     let certifiedApplicative name operands result =
@@ -146,4 +169,10 @@ module Contracts =
           result = result
           effect = Pure
           inlineable = true
-          trust = Certified }
+          trust = Certified
+          minimumOperands = None }
+
+    /// A certified applicative accepting `minimum` or more arguments. Arguments past
+    /// the declared shapes are matched against the last one.
+    let certifiedVariadicApplicative name operands minimum result =
+        { certifiedApplicative name operands result with minimumOperands = Some minimum }
