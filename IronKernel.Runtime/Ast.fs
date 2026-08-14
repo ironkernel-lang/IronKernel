@@ -71,6 +71,23 @@ module Ast =
         minimumOperands : int option
     }
 
+    /// The two exact real infinities (R-1RK 12.3.2). "Every implementation of Kernel
+    /// must support the two exact real infinity objects, positive and negative": they
+    /// are part of the required baseline rather than an optional module, and several
+    /// of the report's behaviours are stated in terms of them -- (max) is exact
+    /// negative infinity, (gcd) is exact positive infinity, and the bounds of an
+    /// inexact real are infinite (12.6.2).
+    ///
+    /// Nullary union cases are singletons, so each infinity is one object: the report
+    /// speaks of "the two exact real infinity objects", and eq? agrees.
+    type ExactInfinity =
+        | ExactPositiveInfinity
+        | ExactNegativeInfinity
+        override this.ToString() =
+            match this with
+            | ExactPositiveInfinity -> "#e+infinity"
+            | ExactNegativeInfinity -> "#e-infinity"
+
     /// An exact ratio of integers (R-1RK 12.8), always kept in least terms with a
     /// positive denominator. Normalising on construction is what makes the record's
     /// structural equality agree with numeric equality, so `eqv?` needs no special

@@ -169,13 +169,16 @@ let ``integer division by zero signals an error`` () =
             | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
 
 [<Fact>]
-let ``max and min reject an empty argument list`` () =
-    // The report returns exact infinities here, which IronKernel cannot represent.
-    withKernel (fun env ->
-        for expression in [ "(max)"; "(min)" ] do
-            match evalIn env expression with
-            | Status message -> Assert.Contains("at least one argument", message)
-            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+let ``max and min over an empty argument list are the exact infinities`` () =
+    // R-1RK 12.5.13 gives these the values that preserve (max h . t) = (max h (max . t)).
+    // They used to signal an error, because there was no exact infinity to return.
+    [
+        "(eqv? (max) #e-infinity)", Bool true
+        "(eqv? (min) #e+infinity)", Bool true
+        // Which is exactly the identity the report's rationale names.
+        "(eqv? (max 1 7 3) (max 1 (max 7 3)))", Bool true
+        "(eqv? (min 1 7 3) (min 1 (min 7 3)))", Bool true
+    ] |> evalSessionKernel
 
 [<Fact>]
 let ``type predicates accept non-numbers but finite? does not`` () =

@@ -328,23 +328,48 @@
 ; 12.5.12
 (define abs (lambda (x) (if (< x 0) (- 0 x) x)))
 
-; 12.5.13: max and min over a non-empty list.
+;  R-1RK 12.2: a result with no primary value. Whether producing one signals an
+; error is the strict-arithmetic keyed dynamic variable's decision (12.6.6), and
+; subtracting equal infinities is exactly the operation that has no answer.
+(define $no-primary-value (lambda () (- #e+infinity #e+infinity)))
+
+; 12.5.13. The empty cases are the report's: (max) is exact negative infinity and
+; (min) is exact positive infinity, which preserve (max h . t) = (max h (max . t)).
+; Seeding the fold with them makes that identity hold rather than being asserted.
 (define $fold-reals
-  (lambda (pick xs)
+  (lambda (pick seed xs)
     (letrec ((aux (lambda (best ys)
                     (if (null? ys) best (aux (pick best (car ys)) (cdr ys))))))
-      (if (null? xs)
-        ; The report returns exact negative/positive infinity for the empty case,
-        ; which IronKernel has no representation for; recorded as a divergence.
-        (error "max and min require at least one argument")
-        (aux (car xs) (cdr xs))))))
+      (aux seed xs))))
 
-(define max (lambda xs ($fold-reals (lambda (a b) (if (< a b) b a)) xs)))
-(define min (lambda xs ($fold-reals (lambda (a b) (if (< b a) b a)) xs)))
+(define max (lambda xs ($fold-reals (lambda (a b) (if (< a b) b a)) #e-infinity xs)))
+(define min (lambda xs ($fold-reals (lambda (a b) (if (< b a) b a)) #e+infinity xs)))
 
-; 12.5.14: gcd by Euclid, lcm from it. gcd with no arguments is 0 here rather than
-; the report's exact positive infinity, which this implementation cannot represent;
-; the divergence is recorded in the conformance matrix.
+; 12.5.14: lcm and gcd over *improper* integers -- reals that are each an integer
+; or an infinity. The report states both in terms of the whole argument list rather
+; than pairwise, and they cannot be folded pairwise: the gcd of zero with an
+; infinity has no primary value, yet (gcd 0 5) is 5, because "if gcd is called with
+; at least one finite non-zero argument, its result is the same as if all zero and
+; infinite arguments were deleted". So the list is sorted out first and the fold
+; only ever sees finite non-zero arguments.
+(define $any?
+  (lambda (ok? xs)
+    (letrec ((aux (lambda (ys) (if (null? ys) #f (if (ok? (car ys)) #t (aux (cdr ys)))))))
+      (aux xs))))
+
+(define $infinite? (lambda (x) (if (finite? x) #f #t)))
+
+(define $finite-non-zero
+  (lambda (xs)
+    (letrec ((aux (lambda (ys acc)
+                    (if (null? ys)
+                      acc
+                      (let ((y (car ys)))
+                        (if (finite? y)
+                          (if (zero? y) (aux (cdr ys) acc) (aux (cdr ys) (cons y acc)))
+                          (aux (cdr ys) acc)))))))
+      (aux xs (list)))))
+
 (define $gcd2
   (lambda (a b)
     (letrec ((aux (lambda (x y) (if (zero? y) x (aux y (mod x y))))))
@@ -352,17 +377,30 @@
 
 (define gcd
   (lambda xs
-    (letrec ((aux (lambda (acc ys) (if (null? ys) acc (aux ($gcd2 acc (car ys)) (cdr ys))))))
-      (aux 0 xs))))
+    (let ((keep ($finite-non-zero xs)))
+      (if (null? keep)
+        ; Nothing finite and non-zero: a zero argument leaves the result
+        ; indeterminate, and otherwise -- every argument infinite, or none at all --
+        ; it is exact positive infinity.
+        (if ($any? zero? xs) ($no-primary-value) #e+infinity)
+        (letrec ((aux (lambda (acc ys)
+                        (if (null? ys) acc (aux ($gcd2 acc (car ys)) (cdr ys))))))
+          (aux (car keep) (cdr keep)))))))
 
+; A zero argument leaves no primary value -- no positive multiple of zero exists --
+; and any infinite argument makes the result positive infinity.
 (define lcm
   (lambda xs
-    (letrec ((aux (lambda (acc ys)
-                    (if (null? ys)
-                      acc
-                      (let ((n (abs (car ys))))
-                        (if (zero? n) 0 (aux (div (* acc n) ($gcd2 acc n)) (cdr ys))))))))
-      (aux 1 xs))))
+    (if ($any? zero? xs)
+      ($no-primary-value)
+      (if ($any? $infinite? xs)
+        #e+infinity
+        (letrec ((aux (lambda (acc ys)
+                        (if (null? ys)
+                          acc
+                          (let ((n (abs (car ys))))
+                            (aux (div (* acc n) ($gcd2 acc n)) (cdr ys)))))))
+          (aux 1 xs))))))
 
 ; --- R-1RK 12.8 Rational features --------------------------------------------
 ; An optional module. rational?, /, numerator, denominator, floor, ceiling,

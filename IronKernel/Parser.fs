@@ -43,6 +43,12 @@ module Parser =
                     | "#t" -> Bool(true)
                     | "#f" -> Bool(false)
                     | "#inert" -> Inert
+                    // R-1RK 12.4 gives the exact infinities of 12.3.2 an external
+                    // representation. They read as atoms because `#`, `+` and `-` are
+                    // all symbol characters, so they are recognised here rather than
+                    // in the number parser.
+                    | "#e+infinity" -> Obj(box ExactPositiveInfinity)
+                    | "#e-infinity" -> Obj(box ExactNegativeInfinity)
                     | _    -> Atom atom }
 
     // We want to support decimal or hexadecimal numbers with an optional minus

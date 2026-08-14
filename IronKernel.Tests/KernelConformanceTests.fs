@@ -265,8 +265,71 @@ let private behaviouralChecks () : (string * string list) list = [
     "12.5.11", [ "(even? 4)"; "(even? -4)"; "(eqv? (even? 3) #f)"
                  "(odd? 3)"; "(eqv? (odd? 4) #f)" ]
     "12.5.12", [ "(=? (abs -5) 5)"; "(=? (abs 5) 5)"; "(=? (abs 0) 0)" ]
-    "12.5.13", [ "(=? (max 1 7 3) 7)"; "(=? (min 1 7 3) 1)"; "(=? (max 5) 5)" ]
-    "12.5.14", [ "(=? (gcd 12 18) 6)"; "(=? (lcm 4 6) 12)"; "(=? (gcd 0 5) 5)" ]
+    "12.5.13", [ "(=? (max 1 7 3) 7)"; "(=? (min 1 7 3) 1)"; "(=? (max 5) 5)"
+                 // The empty cases preserve (max h . t) = (max h (max . t)).
+                 "(eqv? (max) #e-infinity)"; "(eqv? (min) #e+infinity)" ]
+    "12.5.14", [ "(=? (gcd 12 18) 6)"; "(=? (lcm 4 6) 12)"; "(=? (gcd 0 5) 5)"
+                 // Over *improper* integers: an infinity beside a finite non-zero
+                 // argument drops away, and the empty gcd is positive infinity.
+                 "(eqv? (gcd) #e+infinity)"; "(=? (gcd #e+infinity 6) 6)"
+                 "(=? (lcm) 1)"; "(eqv? (lcm 3 #e+infinity) #e+infinity)" ]
+    // R-1RK 12.6. The implementation is the one 12.2 sanctions explicitly: inexact
+    // reals are non-robust with infinite bounds, and the tag distinguishing exact
+    // from inexact is the internal representation.
+    "12.6.1", [ "(exact? 1)"; "(exact? 1/2)"; "(exact? #e+infinity)"
+                "(eqv? (exact? 0.5) #f)"
+                "(inexact? 0.5)"; "(eqv? (inexact? 1) #f)"
+                // An exact real is robust and has itself as its primary value (12.2).
+                "(robust? 1)"; "(eqv? (robust? 0.5) #f)"
+                "(eqv? (undefined? 0.5) #f)"; "(eqv? (undefined? 1) #f)"
+                // Variadic, and true for the empty argument list.
+                "(exact?)"; "(inexact?)"; "(robust?)"; "(undefined?)" ]
+    "12.6.2", [ // An exact real is its own bounds.
+                "(eqv? (car (get-real-internal-bounds 5)) 5)"
+                "(eqv? (car (cdr (get-real-internal-bounds 5))) 5)"
+                "(eqv? (car (get-real-exact-bounds 5)) 5)"
+                // An inexact real is bounded only by the infinities: exactly by those
+                // of 12.3.2, and internally in its own format.
+                "(eqv? (car (get-real-exact-bounds 0.5)) #e-infinity)"
+                "(eqv? (car (cdr (get-real-exact-bounds 0.5))) #e+infinity)"
+                "(eqv? (finite? (car (get-real-internal-bounds 0.5))) #f)"
+                "(inexact? (car (get-real-internal-bounds 0.5)))"
+                // A freshly allocated list of two.
+                "(=? (length (get-real-internal-bounds 0.5)) 2)"
+                "(=? (length (get-real-exact-bounds 0.5)) 2)" ]
+    "12.6.3", [ "(eqv? (get-real-internal-primary 5) 5)"
+                "(eqv? (get-real-exact-primary 5) 5)"
+                "(eqv? (get-real-internal-primary 0.5) 0.5)"
+                // The exact value of a double is exact: a finite one is a dyadic
+                // rational, which exact ratios can hold in full.
+                "(eqv? (get-real-exact-primary 0.5) 1/2)"
+                "(eqv? (get-real-exact-primary 0.75) 3/4)"
+                "(inexact? (get-real-internal-primary 0.5))" ]
+    "12.6.4", [ "(inexact? (make-inexact 0 1/2 1))"
+                // The primary value comes from the middle argument.
+                "(=? (make-inexact 0 1/2 1) 0.5)"
+                "(=? (make-inexact #e-infinity 2 #e+infinity) 2)"
+                // An inexact second argument is carried through unchanged.
+                "(eqv? (make-inexact 0 0.25 1) 0.25)" ]
+    "12.6.5", [ "(inexact? (real->inexact 1))"; "(=? (real->inexact 1) 1)"
+                "(exact? (real->exact 0.5))"; "(eqv? (real->exact 0.5) 1/2)"
+                // real->inexact leaves an inexact real alone.
+                "(eqv? (real->inexact 0.5) 0.5)"
+                // real->exact behaves just as get-real-exact-primary.
+                "(eqv? (real->exact 0.75) (get-real-exact-primary 0.75))" ]
+    "12.6.6", [ // The binder and accessor of the strict-arithmetic keyed dynamic
+                // variable, so the setting follows the extent of the binder's call.
+                "(eqv? (with-strict-arithmetic #f (lambda () (get-strict-arithmetic?))) #f)"
+                "(eqv? (with-strict-arithmetic #t (lambda () (get-strict-arithmetic?))) #t)"
+                "(get-strict-arithmetic?)"
+                "(eqv? (with-strict-arithmetic #f (lambda ()"
+                + " (with-strict-arithmetic #t (lambda () (get-strict-arithmetic?))))) #t)"
+                // When cleared, a result with no primary value is returned rather than
+                // signalled -- and it is a number, but neither robust nor undefined.
+                "(with-strict-arithmetic #f (lambda ()"
+                + " (number? (- #e+infinity #e+infinity))))"
+                "(with-strict-arithmetic #f (lambda ()"
+                + " (eqv? (robust? (- #e+infinity #e+infinity)) #f)))" ]
     "12.8.1", [ "(rational? 1)"; "(rational? 1.5)"; "(rational? 1/3)"
                 "(eqv? (rational? 'a) #f)"; "(rational?)"
                 // A ratio is not an integer, and reduces to one when it can.
@@ -355,22 +418,29 @@ let private divergences () = [
            + "`<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a "
            + "number written to a port cannot be read back by `read`; symbols, lists "
            + "and booleans round-trip."
-    "12.2", "There is no exact/inexact distinction. Numbers are CLR primitives, so "
-            + "exactness, bounds and robustness (module Inexact, 12.6) are absent and "
-            + "no number can be an exact infinity."
-    "12.5.13", "`(max)` and `(min)` with no arguments signal an error. The report "
-               + "returns exact negative and positive infinity, which IronKernel "
-               + "cannot represent."
-    "12.5.14", "`(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact "
-               + "positive infinity for `(gcd)`."
     "12.9", "The report specifies 12.9.2 through 12.9.6 by signature only. Appendix "
             + "A.2 records that it is an incomplete draft whose unwritten portions were "
             + "\"only planned in rough outline\", so `verified` there means the binding "
             + "exists with its standard mathematical meaning, and the choices the "
             + "report leaves open are IronKernel's: an argument outside a function's "
             + "real domain takes its complex value now that 12.10 is supported, so "
-            + "`(sqrt -1)` is `i`; a NaN result still signals an error; and infinities "
-            + "are returned as values."
+            + "`(sqrt -1)` is `i`; a result with no primary value follows 12.2's rule and "
+            + "so signals under strict arithmetic and is returned without it; and "
+            + "infinities are returned as values."
+    "12.2", "Inexact reals are non-robust with bounds of exact negative and positive "
+            + "infinity, which 12.2 sanctions explicitly (\"an implementation can fully "
+            + "support module Inexact without making any effort to maintain finite "
+            + "bounds or robustness\"). Two things follow. `robust?` is exactly \"every "
+            + "argument is exact\". And no number is ever created with its lower bound "
+            + "above its upper bound, so the report's `undefined` number never arises "
+            + "and `undefined?` is always false. Narrowing the bounds is what module "
+            + "Narrow inexact (12.7) asks for, and that module is absent."
+    "12.3.3", "Under strict arithmetic the report signals on numeric overflow and "
+              + "underflow as well as on a result with no primary value. IronKernel "
+              + "signals only the latter: an overflow still yields an infinity and an "
+              + "underflow a zero, which is the report's behaviour for *cleared* "
+              + "strict-arithmetic. Its initial value here is true, which the report "
+              + "leaves open."
     "4.2.1", "`eq?` is bound to the same structural comparison as `eqv?`, so it is "
              + "coarser than the report's, which distinguishes objects that `equal?` "
              + "does not."
