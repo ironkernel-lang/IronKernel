@@ -38,7 +38,9 @@ module Contracts =
         | NumberShape, Obj (:? int)
         | NumberShape, Obj (:? int64)
         | NumberShape, Obj (:? float32)
-        | NumberShape, Obj (:? double) -> true
+        | NumberShape, Obj (:? double)
+        // Every complex is a number (R-1RK 12.10), so arithmetic contracts accept one.
+        | NumberShape, Obj (:? System.Numerics.Complex) -> true
         | IntegerShape, Obj (:? byte)
         | IntegerShape, Obj (:? int)
         | IntegerShape, Obj (:? int64) -> true

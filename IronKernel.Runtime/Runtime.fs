@@ -218,6 +218,7 @@
         let private isNumberValue (value: obj) =
             match value with
             | :? byte | :? int | :? int64 | :? float32 | :? float -> true
+            | :? Numerics.Complex -> true
             | _ -> false
 
         let private isIntegerValue (value: obj) =
@@ -225,6 +226,11 @@
             | :? byte | :? int | :? int64 -> true
             | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f) && Math.Floor(float f) = float f
             | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d) && Math.Floor d = d
+            // R-1RK 12.5.1: a complex is an integer iff its real part is an integer and
+            // its imaginary part is zero.
+            | :? Numerics.Complex as c ->
+                c.Imaginary = 0.0 && not (Double.IsNaN c.Real) && not (Double.IsInfinity c.Real)
+                && Math.Floor c.Real = c.Real
             | _ -> false
 
         let private isFiniteValue (value: obj) =
@@ -232,6 +238,11 @@
             | :? byte | :? int | :? int64 -> Some true
             | :? float32 as f -> Some(not (Single.IsNaN f) && not (Single.IsInfinity f))
             | :? float as d -> Some(not (Double.IsNaN d) && not (Double.IsInfinity d))
+            // R-1RK 12.5.1: a complex is finite iff its components all are.
+            | :? Numerics.Complex as c ->
+                Some(
+                    not (Double.IsNaN c.Real) && not (Double.IsInfinity c.Real)
+                    && not (Double.IsNaN c.Imaginary) && not (Double.IsInfinity c.Imaginary))
             | _ -> None
 
         let isNumber env cont args =
@@ -283,6 +294,8 @@
                         | :? int64 as x -> x = 0L
                         | :? float32 as x -> x = 0.0f
                         | :? float as x -> x = 0.0
+                        // R-1RK 12.5.7: a complex is zero when all its components are.
+                        | :? Numerics.Complex as c -> c = Numerics.Complex.Zero
                         | _ -> false
                     if isZeroValue then loop rest else bounceContinue env cont (Bool false)
                 | found :: _ -> fail (TypeMismatch("number", found))
@@ -717,35 +730,76 @@
             | :? float as d -> Some d
             | _ -> None
 
-        let private realPrimitive name (apply: float -> float) env cont args =
+        let private asComplex (value: obj) =
+            match value with
+            | :? Numerics.Complex as c -> Some c
+            | :? byte as b -> Some(Numerics.Complex(float b, 0.0))
+            | :? int as i -> Some(Numerics.Complex(float i, 0.0))
+            | :? int64 as l -> Some(Numerics.Complex(float l, 0.0))
+            | :? float32 as f -> Some(Numerics.Complex(float f, 0.0))
+            | :? float as d -> Some(Numerics.Complex(d, 0.0))
+            | _ -> None
+
+        let private ofComplexValue (value: Numerics.Complex) : LispVal =
+            if value.Imaginary = 0.0 then Obj(box value.Real) else Obj(box value)
+
+        /// With the Complex module (12.10) supported, a real argument outside a
+        /// function's real domain takes its complex value rather than signalling: this
+        /// is where (sqrt -1) becomes i. A complex argument routes straight to the
+        /// complex version. NaN still signals, since it has no primary value.
+        let private realPrimitive
+                name
+                (apply: float -> float)
+                (applyComplex: Numerics.Complex -> Numerics.Complex)
+                env cont args =
             match args with
             | [Obj value] ->
-                match toFloat value with
-                | None -> fail (TypeMismatch("number", Obj value))
-                | Some input ->
-                    let result = apply input
-                    if Double.IsNaN result && not (Double.IsNaN input) then
-                        fail (Default(name + ": argument is outside the domain"))
-                    else bounceContinue env cont (Obj(box result))
+                match value with
+                | :? Numerics.Complex as c ->
+                    bounceContinue env cont (ofComplexValue (applyComplex c))
+                | _ ->
+                    match toFloat value with
+                    | None -> fail (TypeMismatch("number", Obj value))
+                    | Some input ->
+                        let result = apply input
+                        if Double.IsNaN result && not (Double.IsNaN input) then
+                            let complex = applyComplex (Numerics.Complex(input, 0.0))
+                            if Double.IsNaN complex.Real || Double.IsNaN complex.Imaginary then
+                                fail (Default(name + ": argument is outside the domain"))
+                            else bounceContinue env cont (ofComplexValue complex)
+                        else bounceContinue env cont (Obj(box result))
             | [found] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(1, args))
 
-        /// R-1RK 12.9.1: without a complex type every number is real.
-        let isReal env cont args = isNumber env cont args
+        /// R-1RK 12.9.1: a complex is real iff its imaginary part is zero. Arithmetic
+        /// collapses a zero-imaginary result back to a real, so a surviving Complex
+        /// normally has a non-zero imaginary part; the check is made anyway.
+        let isReal env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest ->
+                    let real =
+                        match value with
+                        | :? byte | :? int | :? int64 | :? float32 | :? float -> true
+                        | :? Numerics.Complex as c -> c.Imaginary = 0.0
+                        | _ -> false
+                    if real then loop rest else bounceContinue env cont (Bool false)
+                | _ -> bounceContinue env cont (Bool false)
+            loop args
 
-        let expReal env cont args = realPrimitive "exp" Math.Exp env cont args
-        let logReal env cont args = realPrimitive "log" Math.Log env cont args
-        let sinReal env cont args = realPrimitive "sin" Math.Sin env cont args
-        let cosReal env cont args = realPrimitive "cos" Math.Cos env cont args
-        let tanReal env cont args = realPrimitive "tan" Math.Tan env cont args
-        let asinReal env cont args = realPrimitive "asin" Math.Asin env cont args
-        let acosReal env cont args = realPrimitive "acos" Math.Acos env cont args
-        let sqrtReal env cont args = realPrimitive "sqrt" Math.Sqrt env cont args
+        let expReal env cont args = realPrimitive "exp" Math.Exp Numerics.Complex.Exp env cont args
+        let logReal env cont args = realPrimitive "log" Math.Log Numerics.Complex.Log env cont args
+        let sinReal env cont args = realPrimitive "sin" Math.Sin Numerics.Complex.Sin env cont args
+        let cosReal env cont args = realPrimitive "cos" Math.Cos Numerics.Complex.Cos env cont args
+        let tanReal env cont args = realPrimitive "tan" Math.Tan Numerics.Complex.Tan env cont args
+        let asinReal env cont args = realPrimitive "asin" Math.Asin Numerics.Complex.Asin env cont args
+        let acosReal env cont args = realPrimitive "acos" Math.Acos Numerics.Complex.Acos env cont args
+        let sqrtReal env cont args = realPrimitive "sqrt" Math.Sqrt Numerics.Complex.Sqrt env cont args
 
         /// R-1RK 12.9.4 gives atan both a one- and a two-argument form.
         let atanReal env cont args =
             match args with
-            | [_] -> realPrimitive "atan" Math.Atan env cont args
+            | [_] -> realPrimitive "atan" Math.Atan Numerics.Complex.Atan env cont args
             | [Obj y; Obj x] ->
                 match toFloat y, toFloat x with
                 | Some y', Some x' -> bounceContinue env cont (Obj(box (Math.Atan2(y', x'))))
@@ -768,7 +822,13 @@
                         | _ -> false
                     let result = Math.Pow(baseValue, exponent)
                     if Double.IsNaN result then
-                        fail (Default "expt: argument is outside the domain")
+                        // A negative base with a fractional exponent leaves the reals.
+                        let complex =
+                            Numerics.Complex.Pow(
+                                Numerics.Complex(baseValue, 0.0), Numerics.Complex(exponent, 0.0))
+                        if Double.IsNaN complex.Real || Double.IsNaN complex.Imaginary then
+                            fail (Default "expt: argument is outside the domain")
+                        else bounceContinue env cont (ofComplexValue complex)
                     elif integral b && integral e && exponent >= 0.0
                          && Math.Abs result <= 9.2233720368547758e18
                          && Math.Floor result = result then
@@ -778,6 +838,45 @@
                 | _, None -> fail (TypeMismatch("number", Obj e))
             | [found; _] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(2, args))
+
+        /// R-1RK 12.10. Like 12.9 the report gives these signatures only, so they take
+        /// their standard meanings. A complex whose imaginary part is zero is a real,
+        /// so make-rectangular collapses that case rather than creating a value that
+        /// real? would have to reject.
+        /// R-1RK 12.10.1: every number is a complex.
+        let isComplex env cont args = isNumber env cont args
+
+        let private complexFromParts build env cont args =
+            match args with
+            | [Obj a; Obj b] ->
+                match toFloat a, toFloat b with
+                | Some x, Some y -> bounceContinue env cont (ofComplexValue (build x y))
+                | None, _ -> fail (TypeMismatch("number", Obj a))
+                | _, None -> fail (TypeMismatch("number", Obj b))
+            | [found; _] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let makeRectangular env cont args =
+            complexFromParts (fun real imaginary -> Numerics.Complex(real, imaginary)) env cont args
+
+        let makePolar env cont args =
+            complexFromParts
+                (fun magnitude angle -> Numerics.Complex.FromPolarCoordinates(magnitude, angle))
+                env cont args
+
+        let private complexPart name (pick: Numerics.Complex -> float) env cont args =
+            match args with
+            | [Obj value] ->
+                match asComplex value with
+                | Some c -> bounceContinue env cont (Obj(box (pick c)))
+                | None -> fail (TypeMismatch("number", Obj value))
+            | [found] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(1, args))
+
+        let realPart env cont args = complexPart "real-part" (fun c -> c.Real) env cont args
+        let imagPart env cont args = complexPart "imag-part" (fun c -> c.Imaginary) env cont args
+        let magnitudeOf env cont args = complexPart "magnitude" (fun c -> c.Magnitude) env cont args
+        let angleOf env cont args = complexPart "angle" (fun c -> c.Phase) env cont args
 
         /// R-1RK 12.8.1. A rational is a ratio of integers, so every finite number
         /// qualifies and infinities and NaN do not. Being a type predicate, a
@@ -791,6 +890,11 @@
                         | :? byte | :? int | :? int64 -> true
                         | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f)
                         | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d)
+                        // R-1RK 12.8.1: a complex is rational iff its real part is and
+                        // its imaginary part is zero.
+                        | :? Numerics.Complex as c ->
+                            c.Imaginary = 0.0 && not (Double.IsNaN c.Real)
+                            && not (Double.IsInfinity c.Real)
                         | _ -> false
                     if rational then loop rest else bounceContinue env cont (Bool false)
                 | _ -> bounceContinue env cont (Bool false)
@@ -960,6 +1064,13 @@
                   ("div-and-mod", divAndMod);
                   ("rational?", isRational);
                   ("real?", isReal);
+                  ("complex?", isComplex);
+                  ("make-rectangular", makeRectangular);
+                  ("make-polar", makePolar);
+                  ("real-part", realPart);
+                  ("imag-part", imagPart);
+                  ("magnitude", magnitudeOf);
+                  ("angle", angleOf);
                   ("exp", expReal);
                   ("log", logReal);
                   ("sin", sinReal);

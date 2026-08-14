@@ -324,15 +324,19 @@ let ``expt keeps integer results integral`` () =
     ] |> evalSessionKernel
 
 [<Fact>]
-let ``real functions signal domain errors rather than returning NaN`` () =
-    // NaN is a value with no primary value in the report's terms, and 12.2 signals an
-    // error for those. It also stops (sqrt -1) quietly producing a non-number while
-    // the Complex module (12.10) is unimplemented.
-    withKernel (fun env ->
-        for expression in [ "(sqrt -1)"; "(log -1)"; "(asin 2)"; "(acos 2)" ] do
-            match evalIn env expression with
-            | Status message -> Assert.Contains("outside the domain", message)
-            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+let ``arguments outside the real domain give complex results`` () =
+    // These signalled a domain error while the Complex module (12.10) was
+    // unimplemented. With complex numbers available they take their complex values,
+    // which is what the standard mathematics gives.
+    [
+        "(real? (sqrt -1))", Bool false
+        "(<? (abs (- (imag-part (sqrt -1)) 1)) 0.000001)", Bool true
+        "(<? (abs (- (imag-part (sqrt -4)) 2)) 0.000001)", Bool true
+        "(<? (abs (- (imag-part (log -1)) 3.141592653589793)) 0.000001)", Bool true
+        "(real? (asin 2))", Bool false
+        // A real argument inside the domain still gives a real.
+        "(real? (sqrt 4))", Bool true
+    ] |> evalSessionKernel
 
 [<Fact>]
 let ``infinities are values rather than errors`` () =
@@ -342,3 +346,39 @@ let ``infinities are values rather than errors`` () =
         "(number? (log 0))", Bool true
         "(<? (log 0) 0)", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``complex numbers join the numeric tower`` () =
+    // R-1RK 12.10. Arithmetic collapses a zero-imaginary result back to a real, so
+    // complex values do not leak into computations that have returned to the line.
+    [
+        "(complex? (make-rectangular 0 1))", Bool true
+        "(complex? 1)", Bool true
+        "(real? (make-rectangular 0 1))", Bool false
+        "(real? (make-rectangular 5 0))", Bool true
+        "(=? (real-part (make-rectangular 3 4)) 3)", Bool true
+        "(=? (imag-part (make-rectangular 3 4)) 4)", Bool true
+        "(=? (* (make-rectangular 0 1) (make-rectangular 0 1)) -1)", Bool true
+        "(<? (abs (- (magnitude (make-rectangular 3 4)) 5)) 0.000001)", Bool true
+        "(<? (abs (- (angle (make-rectangular 0 1)) 1.5707963267948966)) 0.000001)", Bool true
+        "(=? (make-polar 1 0) 1)", Bool true
+        "(finite? (make-rectangular 0 1))", Bool true
+        "(integer? (make-rectangular 0 1))", Bool false
+        "(zero? (make-rectangular 0 1))", Bool false
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``complex numbers are not ordered`` () =
+    // R-1RK confines <? and friends to reals (12.5.3); ordering a complex is an error
+    // rather than some arbitrary total order.
+    withKernel (fun env ->
+        match evalIn env "(<? 1 (make-rectangular 0 1))" with
+        | Status message -> Assert.Contains("not ordered", message)
+        | value -> failwithf "expected an error, got %s" (showVal value))
+
+[<Fact>]
+let ``div and mod stay on the reals`` () =
+    withKernel (fun env ->
+        match evalIn env "(div (make-rectangular 0 1) 2)" with
+        | Status message -> Assert.Contains("defined on reals", message)
+        | value -> failwithf "expected an error, got %s" (showVal value))

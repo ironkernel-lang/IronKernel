@@ -171,7 +171,18 @@ let private behaviouralChecks () : (string * string list) list = [
                 "(=? (round 0.5) 0)"; "(=? (round 1.5) 2)"; "(=? (round 2.5) 2)" ]
     // 12.9: the report gives these signatures only (see the note in the matrix), so
     // the checks assert the standard mathematical meanings.
-    "12.9.1", [ "(real? 1)"; "(real? 1.5)"; "(eqv? (real? 'a) #f)"; "(real?)" ]
+    "12.9.1", [ "(real? 1)"; "(real? 1.5)"; "(eqv? (real? 'a) #f)"; "(real?)"
+                // A complex is real only when its imaginary part is zero.
+                "(eqv? (real? (make-rectangular 0 1)) #f)"
+                "(real? (make-rectangular 5 0))" ]
+    "12.10.1", [ "(complex? 1)"; "(complex? (make-rectangular 0 1))"
+                 "(eqv? (complex? 'a) #f)"; "(complex?)" ]
+    "12.10.2", [ "(=? (real-part (make-rectangular 3 4)) 3)"
+                 "(=? (imag-part (make-rectangular 3 4)) 4)"
+                 "(=? (* (make-rectangular 0 1) (make-rectangular 0 1)) -1)" ]
+    "12.10.3", [ "(<? (abs (- (magnitude (make-rectangular 3 4)) 5)) 0.000001)"
+                 "(<? (abs (- (angle (make-rectangular 0 1)) 1.5707963267948966)) 0.000001)"
+                 "(=? (make-polar 1 0) 1)" ]
     "12.9.2", [ "(<? (abs (- (exp 0) 1)) 0.000001)"
                 "(<? (abs (- (log 1) 0)) 0.000001)"
                 "(<? (abs (- (log (exp 2)) 2)) 0.000001)" ]
@@ -209,8 +220,13 @@ let private divergences () = [
             + "A.2 records that it is an incomplete draft whose unwritten portions were "
             + "\"only planned in rough outline\", so `verified` there means the binding "
             + "exists with its standard mathematical meaning, and the choices the "
-            + "report leaves open (a NaN result signals an error; infinities are "
-            + "returned) are IronKernel's."
+            + "report leaves open are IronKernel's: an argument outside a function's "
+            + "real domain takes its complex value now that 12.10 is supported, so "
+            + "`(sqrt -1)` is `i`; a NaN result still signals an error; and infinities "
+            + "are returned as values."
+    "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
+             + "double precision and a result whose imaginary part is zero collapses "
+             + "back to a real. The report specifies 12.10 by signature only."
     "12.8", "Module Rational is implemented over the existing numeric types, which "
             + "have no exact rational representation. `(/ 1 3)` is the closest double "
             + "rather than an exact third, and `numerator`/`denominator` signal an "
