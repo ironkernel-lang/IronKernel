@@ -120,3 +120,7 @@
 ((car (make-keyed-dynamic-variable)) 1 2)
 ((car (cdr (make-keyed-dynamic-variable))))
 ((car (make-keyed-dynamic-variable)) 1 (lambda () (car ())))
+((car (make-keyed-static-variable)) 1 2)
+((car (cdr (make-keyed-static-variable))))
+(eval (list (car (cdr (make-keyed-static-variable)))) (get-current-environment))
+((car (make-keyed-static-variable)) 1 (get-current-environment))

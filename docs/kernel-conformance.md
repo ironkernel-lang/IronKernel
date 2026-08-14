@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 98 | 73% |
+| `verified` | 99 | 73% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 37 | 27% |
+| `absent` | 36 | 27% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -98,7 +98,7 @@ divergences before taking any row as a claim of conformance.
 | 8.1 Encapsulations — Primitive features | **required** | 1 | 1 | yes |
 | 9.1 Promises — Library features | **required** | 4 | 3 | no |
 | 10.1 Keyed dynamic variables — Primitive features | **required** | 1 | 1 | yes |
-| 11.1 Keyed static variables — Primitive features | **required** | 1 | 0 | no |
+| 11.1 Keyed static variables — Primitive features | **required** | 1 | 1 | yes |
 | 12.5 Numbers — Number features | **required** | 14 | 14 | yes |
 | 12.6 Numbers — Inexact features | optional | 6 | 0 | no |
 | 12.7 Numbers — Narrow inexact features | optional | 1 | 0 | no |
@@ -235,7 +235,7 @@ divergences before taking any row as a claim of conformance.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 11.1.1 | `make-keyed-static-variable` | Primitive features | `absent` |  |
+| 11.1.1 | `make-keyed-static-variable` | Primitive features | `verified` | 5 behavioural check(s) |
 
 ## 12 Numbers
 

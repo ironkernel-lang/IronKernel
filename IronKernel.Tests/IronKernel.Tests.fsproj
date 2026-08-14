@@ -32,6 +32,7 @@
     <Compile Include="StdlibTests.fs" />
     <Compile Include="ExampleTests.fs" />
     <Compile Include="KeyedDynamicVariableTests.fs" />
+    <Compile Include="KeyedStaticVariableTests.fs" />
     <Compile Include="KernelConformanceTests.fs" />
   </ItemGroup>
   <ItemGroup>
