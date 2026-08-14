@@ -42,6 +42,7 @@ exercised, not that IronKernel matches the report exactly.
 | Report | Divergence |
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a number written to a port cannot be read back by `read`; symbols, lists and booleans round-trip. |
+| 12.3.2 | **Exact integer arithmetic silently wraps.** The report requires every implementation to support exact integers of arbitrary size, and exact ratios of them when module Rational is supported. IronKernel's exact integers are 32- or 64-bit CLR values: `(* 2147483647 2147483647)` is `1` rather than an error or the true product, and an integer literal wider than `Int32` needs an `L` suffix or fails to parse. Modules Numbers and Rational therefore return wrong results for arguments they appear to accept, which a per-entry status cannot show. |
 | 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
@@ -54,10 +55,17 @@ exercised, not that IronKernel matches the report exactly.
 
 R-1RK 1.3.2 makes the *module* the unit of conformance: "An implementation
 cannot claim to support a module M unless it both (1) supports all of the
-features in M, and (2) supports all of the modules assumed by M." A module
-counts as complete here only when every one of its entries is `verified`.
+features in M, and (2) supports all of the modules assumed by M."
 
-| Module | Required | Entries | Verified | Complete |
+**"All entries verified" is weaker than "supported".** The column below says
+only that every entry of the module has a passing behavioural check. It does
+not assert 1.3.2 support, which additionally requires the module's assumed
+modules and the report's baseline representation requirements -- and R-1RK
+12.3.2 requires exact integers of arbitrary size, which IronKernel does not
+have. See the divergence for 12.3.2 before reading any row as a claim of
+conformance.
+
+| Module | Required | Entries | Verified | All entries verified |
 |---|---|---:|---:|---|
 | 4.1 Core types and primitive features — Booleans | **required** | 1 | 1 | yes |
 | 4.2 Core types and primitive features — Equivalence under mutation (optional) | optional | 1 | 1 | yes |
