@@ -560,6 +560,80 @@
                   ("contract", attachContract);
                   ]
         
+        /// R-1RK 7.2.5. The applicative's underlying operative abnormally passes its
+        /// operand tree to `target`. With no guards in the system the report's "series
+        /// of interceptors" is empty for every pass, so the derived continuation is the
+        /// destination itself and the pass is simply a normal receipt there.
+        ///
+        /// The operand tree of a combination is a list, which is what the evaluator
+        /// hands a primitive, so it is rebuilt as one here. An *atomic* operand tree,
+        /// which the report also allows, has no representation in that list -- use
+        /// apply-continuation, which takes the object directly.
+        let private abnormalPass target =
+            Applicative(
+                PrimitiveOperative
+                    { identity = None
+                      invoke = fun e _ args -> More(fun () -> continueEvalStep e target (List args)) })
+
+        let continuationToApplicative env cont args =
+            match args with
+            | [Continuation _ as target] -> bounceContinue env cont (abnormalPass target)
+            | [found] -> fail (TypeMismatch("continuation", found))
+            | _ -> fail (NumArgs(1, args))
+
+        /// R-1RK 7.3.1: (apply-continuation continuation object). Derived in the report
+        /// from continuation->applicative and apply, but written directly here so that
+        /// an atomic object is passed as the operand tree rather than wrapped in the
+        /// argument list the evaluator would build for it.
+        let applyContinuation env cont args =
+            match args with
+            | [Continuation _ as target; value] ->
+                ignore cont
+                More(fun () -> continueEvalStep env target value)
+            | [found; _] -> fail (TypeMismatch("continuation", found))
+            | _ -> fail (NumArgs(2, args))
+
+        /// R-1RK 7.2.3. A child of `target` that, on normally receiving v, calls the
+        /// underlying combiner of `applicative` with dynamic environment `dynamicEnv`
+        /// and operand tree v, its result normally returning to `target`.
+        ///
+        /// The child relation is the chain itself: the new record's nextCont is
+        /// `target`, so `target` is its ancestor in exactly the sense of 7.1.
+        let private extendWith target applicative dynamicEnv =
+            match applicative, target with
+            | Applicative underlying, Continuation(cr, mc, ct) ->
+                let operands = function
+                    | List values -> values
+                    | Nil -> []
+                    // An atomic operand tree has no list form; the combiner receives it
+                    // as a one-element tree, which is the closest available reading.
+                    | value -> [value]
+                let receive _ c value _ =
+                    More(fun () -> operateStep dynamicEnv c underlying (operands value))
+                Choice2Of2(
+                    Continuation(
+                        { closure = dynamicEnv
+                          currentCont = Some(NativeCode { cont = receive; args = None })
+                          nextCont = Some(Continuation(cr, None, Full))
+                          args = None },
+                        mc, ct))
+            | Applicative _, found -> Choice1Of2(TypeMismatch("continuation", found))
+            | found, _ -> Choice1Of2(TypeMismatch("applicative", found))
+
+        let extendContinuation env cont args =
+            // The two-argument form is sugar for an empty environment (7.2.3).
+            let extend target applicative dynamicEnv =
+                match extendWith target applicative dynamicEnv with
+                | Choice2Of2 extended -> bounceContinue env cont extended
+                | Choice1Of2 error -> fail error
+            match args with
+            | [target; applicative; (Environment _ as dynamicEnv)] ->
+                extend target applicative dynamicEnv
+            | [target; applicative] ->
+                extend target applicative (newEnvWithClr (ofEnvironment env) [] [])
+            | [_; _; found] -> fail (TypeMismatch("environment", found))
+            | _ -> fail (NumArgs(2, args))
+
         let callcc env cont  = function 
             | [func] -> 
                 match func with 
@@ -1005,6 +1079,10 @@
 
         let isInert env cont args =
             typePredicate (function Inert -> true | _ -> false) env cont args
+
+        /// R-1RK 7.2.1: the primitive type predicate for type continuation.
+        let isContinuation env cont args =
+            typePredicate (function Continuation _ -> true | _ -> false) env cont args
 
         /// R-1RK 4.10.1 / 4.10.2 / 6.2.1. A combiner is an operative or an applicative;
         /// wrapping is what makes it applicative, so anything not wrapped is operative.
@@ -1588,6 +1666,10 @@
                   ("unwrap", unwrap);
                   ("load", loadAndEval);
                   ("call/cc", callcc);
+                  ("continuation->applicative", continuationToApplicative);
+                  ("apply-continuation", applyContinuation);
+                  ("extend-continuation", extendContinuation);
+                  ("continuation?", isContinuation);
                   ("+", plus);
                   ("-", minus);
                   ("*", times);
