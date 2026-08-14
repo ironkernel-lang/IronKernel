@@ -24,16 +24,36 @@ promo site (`python3 -m http.server -d website 8080`) and is not part of the app
 - Standard commands are in `README.md`. Debug (dev) is the default for
   `dotnet build`/`dotnet test`; CI (`.github/workflows/ci.yml`) uses `-c Release`.
 - There is no separate linter; the F# compiler warnings emitted during
-  `dotnet build` are the lint signal (the build currently has warnings, 0 errors).
+  `dotnet build` are the lint signal. `IronKernel`, `IronKernel.Runtime`, and
+  `IronKernel.Tests` all set `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`,
+  so the build is warning-clean by construction — a new warning fails the build.
+  Keep it that way rather than adding `NoWarn` entries.
+
+### Compilation reach (non-obvious, affects optimization work)
+- Only **top-level** forms are compiled (`evalCompiled` / `compileFormsGuarded`).
+  Procedure bodies are stored as raw `KernelCode` and interpreted form by form by
+  `evalStep`; the `CompiledCombiner` case exists in `Ast.fs` but is **never
+  constructed**. `define` also evaluates its right-hand side through `bounceEval`,
+  so `(define f (vau ...))` never reaches the analyzer's specializations.
+- Consequence for `Analyze.analyzeGuarded`: adding `PrimitiveIdentity` cases is
+  currently a **pessimization, not a win**. Guards re-resolve the binding by name on
+  every invocation, whereas the `COperate` fallback's `NamedCallSite` cache
+  validates by environment reference equality and always hits when the environment
+  is stable — which is the only situation compiled code sees today. Measured with
+  `GuardSpecializationBenchmarks`: guarded is ~10% slower with a shared environment
+  and ~12% faster only with a fresh frame per call, a case the runtime never
+  produces. Compile procedure bodies first; then extending guards pays off.
 
 ### REPL gotchas (non-obvious)
 - `dotnet run --project IronKernel` loads `kernel.ikr` and `promises.ikr` from
   the current directory when present, then falls back to the application output
   directory. Running from the repository root is supported.
 - The REPL uses the `Mono.Terminal` line editor, which needs a **real TTY**.
-  Piping stdin (`printf ... | dotnet run`) crashes with a `System.Console`
-  `SetCursorPosition` exception. For scripted/interactive REPL testing, drive it
-  through a pty (e.g. a `tmux` session with `send-keys`).
+  When stdin or stdout is redirected the REPL now detects it and falls back to
+  plain `Console.ReadLine`, so piping works:
+  `printf '(+ 1 2)\nquit\n' | dotnet run --project IronKernel`. End of input exits
+  cleanly, so the trailing `quit` is optional. Use a pty (e.g. `tmux send-keys`)
+  only when testing line-editing behaviour itself (history, completion, arrows).
 - IronKernel is **Kernel, not Scheme**. Use `define`/`defn`, `lambda`, `if`,
   `letrec`. `+` and `*` are **binary** (exactly 2 args). `display`, `=?`, and
   `$let` are not bound; print via .NET interop, e.g.
