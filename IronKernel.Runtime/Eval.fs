@@ -410,7 +410,12 @@ module Eval =
                 match defineVar newEnv envarg _env with
                 | Choice1Of2 error -> fail error
                 | Choice2Of2 _ -> evalBody newEnv
-        | Inert -> More (fun () -> continueEvalStep _env cont Nil)
+        // The empty list is spelled `List []` everywhere a Kernel program can observe
+        // it. Returning the bare `Nil` case here made a value that was neither `null?`
+        // nor `eqv?` to itself, because the predicates and the equivalence walk only
+        // know the `List` spelling. ADR 0005 phase 1 removes the duplicate case; until
+        // then the producers normalise.
+        | Inert -> More (fun () -> continueEvalStep _env cont (List []))
         | _ -> fail (BadSpecialForm ("Expecting a combiner, got ", func))
 
     and bindStep env cont lf rf : Step =

@@ -160,6 +160,17 @@ nothing: each parsed form is evaluated and discarded, and an operative created
 along the way acquires its own structure through `vau`. That is recorded as a
 comment there rather than as a call that would do nothing.
 
+**Phase 1 prerequisite — one spelling of the empty list.** *Done.* `LispVal`
+carries both `Nil` and `List []`, and only the second was recognised: applying
+`#inert` produced the bare case, which was neither `null?` nor `eqv?` to itself.
+A value that is not equal to itself breaks the reflexivity 4.3.1 requires of an
+equivalence predicate, and the package decoder produced the same case for tag 5,
+so a value read back from a `.ikc` was not `eqv?` to the equal value built at
+runtime. The producers now normalise and the predicates accept both spellings.
+Collapsing the two cases on top of that inconsistency would have buried the bug
+rather than fixed it, so it is fixed first and phase 1 removes the duplicate case
+outright.
+
 **Phase 1 — introduce the cell.** Replace the two union cases with `Pair of
 PairCell` plus `Nil`, keep `List`/`DottedList` as the active patterns described
 above, and edit the construction sites to the renamed helpers. The type checker

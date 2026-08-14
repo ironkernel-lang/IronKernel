@@ -82,7 +82,9 @@ module CorePackage =
         | 2uy -> DottedList(readValues (), readValue (depth + 1) reader)
         | 3uy -> Bool(reader.ReadBoolean())
         | 4uy -> Inert
-        | 5uy -> Nil
+        // Normalised to the `List` spelling of the empty list: a decoded `Nil` was not
+        // `eqv?` to an empty list built at runtime. See Eval's note.
+        | 5uy -> List []
         | 6uy -> Keyword(readString reader)
         | 7uy -> Obj null
         | 8uy -> Obj(box (readString reader))

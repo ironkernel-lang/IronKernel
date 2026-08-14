@@ -100,3 +100,23 @@ let ``a memoised body keeps answering as the body that was captured`` () =
         "(=? (h) 2)", Bool true
         "(=? (h) 2)", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``the empty list has one spelling that a program can observe`` () =
+    // The type carries both `Nil` and `List []`, and only the second was recognised.
+    // Applying #inert produced the bare case, which was neither `null?` nor `eqv?` to
+    // itself -- a value not equal to itself breaks the reflexivity R-1RK 4.3.1
+    // requires of an equivalence predicate. ADR 0005 phase 1 removes the duplicate
+    // case; until then the producers normalise and the predicates accept both.
+    [
+        "(null? (#inert))", Bool true
+        "(eqv? (#inert) (#inert))", Bool true
+        "(equal? (#inert) (#inert))", Bool true
+        // and it is the same empty list as one built at runtime
+        "(eqv? (#inert) (list))", Bool true
+        "(eqv? (#inert) (cdr (list 1)))", Bool true
+        "(eqv? (list) (list))", Bool true
+        // still not a pair, and still counts as a list
+        "(eqv? (pair? (#inert)) #f)", Bool true
+        "(=? (length (#inert)) 0)", Bool true
+    ] |> evalSessionKernel
