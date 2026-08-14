@@ -25,8 +25,8 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 41 | 30% |
-| `bound` | 14 | 10% |
+| `verified` | 43 | 32% |
+| `bound` | 12 | 9% |
 | `partial` | 0 | 0% |
 | `absent` | 80 | 59% |
 | **total** | **135** | |
@@ -43,8 +43,6 @@ exercised, not that IronKernel matches the report exactly.
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. |
 | 4.8.3 | `eval` takes its arguments in the opposite order to the report: IronKernel is `(eval environment expression)`, the report is `(eval expression environment)`. |
-| 6.1.2 | `and?` short-circuits in IronKernel, so it behaves as the report's operative `$and?` (6.1.4) rather than the applicative `and?`, which must evaluate every argument. |
-| 6.1.3 | `or?` short-circuits, matching `$or?` (6.1.5) rather than the applicative `or?`. |
 | 1.3.7 | IronKernel drops the `$` sigil the report uses for operatives, so `$if` is `if` and `$define!` is `define`. See the alias column. |
 
 ## 4 Core types and primitive features
@@ -96,10 +94,10 @@ exercised, not that IronKernel matches the report exactly.
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
 | 6.1.1 | `not?` | Booleans | `verified` | 2 behavioural check(s) |
-| 6.1.2 | `and?` | Booleans | `bound` |  |
-| 6.1.3 | `or?` | Booleans | `bound` |  |
-| 6.1.4 | `$and?` | Booleans | `verified` | `$and?` as `and?`; 3 behavioural check(s) |
-| 6.1.5 | `$or?` | Booleans | `verified` | `$or?` as `or?`; 3 behavioural check(s) |
+| 6.1.2 | `and?` | Booleans | `verified` | 4 behavioural check(s) |
+| 6.1.3 | `or?` | Booleans | `verified` | 4 behavioural check(s) |
+| 6.1.4 | `$and?` | Booleans | `verified` | 4 behavioural check(s) |
+| 6.1.5 | `$or?` | Booleans | `verified` | 4 behavioural check(s) |
 | 6.2.1 | `combiner?` | Combiners | `absent` |  |
 | 6.3.1 | `length` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 6.3.2 | `list-ref` | Pairs and lists | `absent` |  |
