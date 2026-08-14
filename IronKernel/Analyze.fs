@@ -76,7 +76,13 @@ module Analyze =
     let analyzeForms (forms: LispVal list) : CoreExpr list =
         List.map analyze forms
 
-    let analyzeGuarded env (value: LispVal) : CoreExpr =
+    /// Specialized `if` and `define` analyze their sub-forms into Core rather than
+    /// leaving them as operands for the runtime primitive. `CIntrinsicOperate` hands
+    /// the primitive raw syntax, which it then evaluates through the interpreter, so
+    /// leaving them there kept every conditional and every definition inside a
+    /// compiled body interpreted. The located analyzer below has always lowered them
+    /// this way; this makes the ordinary path agree.
+    let rec analyzeGuarded env (value: LispVal) : CoreExpr =
         let mutable current = value
         let mutable pendingOperands = []
         let mutable result = None
@@ -91,7 +97,10 @@ module Analyze =
                         Some(
                             CGuarded(
                                 guard,
-                                CIntrinsicOperate(PrimitiveIf, [condition; consequent; alternative]),
+                                CIf(
+                                    analyzeGuarded env condition,
+                                    analyzeGuarded env consequent,
+                                    analyzeGuarded env alternative),
                                 fallback))
                 | None -> result <- Some fallback
             | List (Atom "define" :: [Atom name; rhs] as form) ->
@@ -102,7 +111,7 @@ module Analyze =
                         Some(
                             CGuarded(
                                 guard,
-                                CIntrinsicOperate(PrimitiveDefine, [Atom name; rhs]),
+                                CDefine(CVar name, analyzeGuarded env rhs),
                                 fallback))
                 | None -> result <- Some fallback
             | List (Atom name :: operands) ->
@@ -168,7 +177,7 @@ module Analyze =
                     let expression = analyzeGuarded env (Source.toLispVal located)
                     match located.kind, expression with
                     | Source.LList [_; condition; consequent; alternative],
-                      CGuarded (guard, CIntrinsicOperate (PrimitiveIf, _), fallback) ->
+                      CGuarded (guard, CIf _, fallback) ->
                         pending <-
                             AnalyzeLocated condition
                             :: AnalyzeLocated consequent
@@ -176,7 +185,7 @@ module Analyze =
                             :: BuildLocatedIf(located.span, sourceLine, guard, fallback)
                             :: pending
                     | Source.LList [_; { kind = Source.LAtom name }; rhs],
-                      CGuarded (guard, CIntrinsicOperate (PrimitiveDefine, _), fallback) ->
+                      CGuarded (guard, CDefine _, fallback) ->
                         pending <-
                             AnalyzeLocated rhs
                             :: BuildLocatedDefine(located.span, sourceLine, guard, name, fallback)

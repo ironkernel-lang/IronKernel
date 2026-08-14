@@ -24,28 +24,28 @@ module RuntimeDispatch =
     [<Sealed; AllowNullLiteral>]
     type ResolvedCallSite
         (
-            env: LispVal,
-            path: SymbolTable.VisitedFrame[],
-            cell: BindingCell,
+            resolution: SymbolTable.ChainResolution,
             version: int64,
             combiner: LispVal,
             eagerUnderlying: LispVal voption
         ) =
-        member _.Env = env
-        member _.Path = path
-        member _.Cell = cell
+        member _.Resolution = resolution
         member _.Version = version
         member _.Combiner = combiner
         member _.EagerUnderlying = eagerUnderlying
 
     /// Monomorphic inline cache for a compiled `(name operand ...)` call site.
     ///
-    /// The cache is valid while the invoking environment is the same instance,
-    /// every frame scanned during the original resolution still holds the same
-    /// number of bindings (frames only gain bindings, so an unchanged count
-    /// proves no new definition shadows the resolved cell), and the resolved
-    /// cell's version is unchanged (redefinition bumps it). Any mismatch falls
-    /// back to full resolution and refills the cache.
+    /// The cache is valid while resolving the name from the invoking environment
+    /// would still reach the same frame -- every nearer frame still lacks the name
+    /// and the owning frame is the same object -- and the resolved cell's version is
+    /// unchanged (redefinition bumps it). Any mismatch falls back to full resolution
+    /// and refills the cache.
+    ///
+    /// Validating the chain rather than the environment's identity is what makes the
+    /// cache usable inside a procedure body, where application binds parameters in a
+    /// fresh frame and no two calls ever share an environment instance. Chains that
+    /// are not a simple single-parent walk are dispatched without caching.
     ///
     /// When the cached combiner is an applicative over an ordinary combiner and
     /// every operand is a variable or a self-evaluating value, arguments are
@@ -80,16 +80,8 @@ module RuntimeDispatch =
                 | _ -> ValueNone
 
         let cacheValid (resolved: ResolvedCallSite) env =
-            obj.ReferenceEquals(env, resolved.Env)
-            && resolved.Cell.state.version = resolved.Version
-            && (let path = resolved.Path
-                let mutable consistent = true
-                let mutable index = 0
-                while consistent && index < path.Length do
-                    let entry = path.[index]
-                    consistent <- entry.frame.bindings.Count = entry.bindingCount
-                    index <- index + 1
-                consistent)
+            resolved.Resolution.cell.state.version = resolved.Version
+            && SymbolTable.chainResolutionHolds env name resolved.Resolution
 
         let rec evaluateSimpleOperands env evaluated remaining =
             match remaining with
@@ -113,20 +105,23 @@ module RuntimeDispatch =
             if not (isNull cached) && cacheValid cached env then
                 dispatch cached env cont
             else
-                match SymbolTable.resolveBindingCellWithPath env name with
-                | ValueNone -> Done(throwError (UnboundVar("Getting an unbound variable", name)))
-                | ValueSome(cell, visitedPath) ->
-                    let state = cell.state
+                match SymbolTable.tryResolveAlongChain env name with
+                | ValueSome resolution ->
+                    let state = resolution.cell.state
                     let resolved =
                         ResolvedCallSite(
-                            env,
-                            visitedPath,
-                            cell,
+                            resolution,
                             state.version,
                             state.value,
                             classifyEager state.value)
                     Volatile.Write(&cache, resolved)
                     dispatch resolved env cont
+                // Not a simple chain: dispatch without caching rather than storing a
+                // snapshot that could never be revalidated.
+                | ValueNone ->
+                    match getVar env name with
+                    | Choice1Of2 error -> Done(throwError error)
+                    | Choice2Of2 combiner -> bounceOperate env cont combiner operands
 
     type GeneratedFunc = Func<LispVal, LispVal, Step>
 

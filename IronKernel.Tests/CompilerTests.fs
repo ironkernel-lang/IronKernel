@@ -160,13 +160,15 @@ let ``partial evaluation handles deeply nested locations`` () =
 let ``environment-aware analysis guards primitive forms`` () =
     let env = freshEnv ()
 
+    // Guarded specialization lowers the sub-forms into Core so a compiled body does
+    // not hand them back to the interpreter.
     match analyzeGuarded env (parseOk "(if #t 1 2)") with
-    | CGuarded (guard, CIntrinsicOperate (PrimitiveIf, _), COperate (CVar "if", _)) ->
+    | CGuarded (guard, CIf (CLit (Bool true), CLit _, CLit _), COperate (CVar "if", _)) ->
         Assert.True(bindingGuardMatches env guard)
     | other -> failwith (showCore other)
 
     match analyzeGuarded env (parseOk "(define answer 42)") with
-    | CGuarded (guard, CIntrinsicOperate (PrimitiveDefine, _), COperate (CVar "define", _)) ->
+    | CGuarded (guard, CDefine (CVar "answer", CLit _), COperate (CVar "define", _)) ->
         Assert.True(bindingGuardMatches env guard)
     | other -> failwith (showCore other)
 
