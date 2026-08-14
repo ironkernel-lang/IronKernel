@@ -1,0 +1,227 @@
+# ADR 0005: Mutable pairs
+
+Status: Proposed
+
+## Decision
+
+Pairs will become mutable cons cells, replacing `List of LispVal list` and
+`DottedList of (LispVal list * LispVal)` with a single `Pair` case over a cell
+holding a mutable car, a mutable cdr, and an immutability flag. The change will
+land in phases, and the phase that introduces the cell will keep `List` and
+`DottedList` as active patterns so that the match sites compile unchanged, while
+construction moves to differently named helpers. `eq?` will become object
+identity, and `equal?`, `showVal` and `get-list-metrics` will become cycle-safe.
+
+Until that happens, module Pair mutation stays half implemented: `copy-es`,
+`copy-es-immutable`, `assq` and `memq?` are supported; `set-car!`, `set-cdr!`,
+`encycle!` and `append!` are absent. That is the state recorded in the matrix
+under the 4.7 divergence.
+
+## Problem
+
+R-1RK 4.7.1 requires `set-car!` and `set-cdr!` to write into a pair that other
+references can observe. IronKernel has no such pair. A list is an F# immutable
+list, so two references to "the same" list share structure only by accident of
+implementation, and there is no cell to assign to. Every remaining entry of module
+Pair mutation follows from that one gap: `encycle!` (5.8.1) and `append!` (6.4.1)
+mutate, and `copy-es`'s guarantee that its result is *not* `eq?` to its argument
+(6.4.2) is meaningless while `eq?` compares structurally.
+
+The gap is not confined to those entries. Two required entries are implemented on
+the assumption it holds:
+
+- `equal?` (4.3.1, 6.6.1) is an explicit work-stack walk in `eqvValue`
+  (`Runtime.fs`). It terminates because structure is finite. Once `encycle!` can
+  build a cycle it must terminate anyway, which the report requires.
+- `get-list-metrics` (5.7.1) reports `(pairs nils pairs 0)` computed with
+  `List.length`, i.e. it answers "acyclic, of this length" unconditionally. It is
+  the primitive the whole list library in `kernel.ikr` is derived from, and those
+  derivations carry comments saying cycles cannot arise.
+
+## Scale
+
+`List` and `DottedList` are matched or constructed 121 times across 19 of the
+project's source files, and most of that is concentrated:
+
+| File | Sites |
+|---|---:|
+| `IronKernel.Runtime/Runtime.fs` | 45 |
+| `IronKernel.Runtime/Eval.fs` | 22 |
+| `IronKernel/Analyze.fs` | 20 |
+| remaining 16 files | 34 |
+
+Three files hold 87 of the 121. That is better than it first appears: a naive
+count of the two names reaches 315, but 194 of those are `List.map`,
+`List.length` and the rest of the F# `List` module, which have nothing to do with
+the union case. The distinction matters for more than sizing — see below.
+
+This is still the core data type of the language, so a change to it is not local
+to a feature, and the traversals that depend on structure being finite are spread
+more widely than the constructors are.
+
+## Why one representation, not two
+
+The obvious way to contain the blast radius is to keep `List`/`DottedList` for
+immutable structure and add a mutable `Pair` beside it, converting where needed.
+That does not work. `(set-car! (list 1 2) 0)` has to mutate what `list` returned,
+so `list` must produce mutable pairs; and `cons` likewise; and once the ordinary
+constructors produce cells, every list in the system is a cell chain and the
+second representation is dead weight that `car`, `cdr`, `pair?`, `eq?`, `equal?`
+and every traversal still have to handle. The two-representation design pays the
+full conversion cost and adds a permanent case split.
+
+Representing a list as a mutable array is worse: it cannot express cdr sharing,
+which is the point of cons cells, and cannot represent a cycle at all.
+
+So: one representation, cons cells.
+
+## What the cell has to carry
+
+```
+and PairCell = {
+    mutable car : LispVal
+    mutable cdr : LispVal
+    /// R-1RK distinguishes mutable from immutable pairs. copy-es-immutable
+    /// (4.7.2) produces immutable ones, and $vau (4.10.3) and load (15.2.2)
+    /// acquire immutable copies of the structures they capture.
+    immutable : bool
+}
+```
+
+The immutability flag is not optional. The report has `set-car!` signal an error
+on an immutable pair, and more importantly IronKernel already *depends* on
+algorithm structure being immutable: `OperativeRecord.compiledBody` memoises the
+compiled form of a body (`Eval.fs`, where `compiledBody` is read and assigned).
+That memo is sound today only because a body cannot change after `$vau` captured
+it. With mutable pairs it stays sound only if `$vau` copies its operands
+immutably, which is exactly what 4.7.2's rationale says `$vau` is for. `$vau`
+currently stores `body` directly (`Runtime.fs`, the `Operative` construction).
+
+This is the part most likely to be missed, so it is phase 0 below rather than an
+afterthought: it is a correctness prerequisite for the memo, not a feature.
+
+## Containing the churn
+
+Converting the sites by hand is where a change like this goes wrong. Most of them
+do not care that a list is an F# list; they care about shape — `| List [a; b] ->`
+for arity dispatch, `List [x; y]` to build a result.
+
+The pattern side survives intact. An active pattern named `List` coexists with the
+F# `List` module, so sites like
+
+```
+| List [] -> ...
+| List (x :: rest) -> ...
+```
+
+compile unchanged over cells:
+
+```
+let (|List|_|) (value: LispVal) : LispVal list option = (* walk a proper chain *)
+```
+
+The construction side does not. Defining `let List (values: LispVal list)` to
+build a chain **shadows the `List` module**, and the 194 `List.map` /
+`List.length` / `List.foldBack` usages elsewhere stop resolving. This was checked
+rather than assumed: with the function defined, the compiler rejects
+`List.length` as "The field, constructor or member 'length' is not defined".
+
+So the constructor takes a different name — `ofList`, `ofDotted` — and the ~32
+construction sites are edited, while the ~28 pattern sites are not. That is the
+right split anyway: construction is where the immutability flag has to be chosen,
+so those sites deserve to be looked at individually.
+
+Two further caveats, both real:
+
+- The active pattern materialises an F# list on every match, allocating on paths
+  that currently allocate nothing. The evaluator's argument dispatch and the
+  primitives' arity matching are the hot ones, and they should move to direct cell
+  access rather than keep the convenience pattern. Which sites those are is a
+  measurement question, not a guess — `CompilerBenchmarks` is the instrument.
+- The active pattern must not loop on a cyclic argument. Bounding the walk and
+  returning `None` past the bound is the right answer for "is this a proper list
+  of the shape I expect", and keeps cycle-handling in the places that should have
+  it. A prototype confirms a self-referential cell falls through to the
+  not-a-proper-list branch rather than hanging.
+
+## Plan
+
+**Phase 0 — `$vau` and `load` copy their captured structure.** Add
+`copy-es-immutable` behaviour to operative construction and to `load`. Today this
+is a no-op, because every pair is already immutable, so it lands with no
+observable change and no risk. It is what makes the `compiledBody` memo sound
+later, and doing it first means the later phases cannot silently invalidate it.
+
+**Phase 1 — introduce the cell.** Replace the two union cases with `Pair of
+PairCell` plus `Nil`, keep `List`/`DottedList` as the active patterns described
+above, and edit the construction sites to the renamed helpers. The type checker
+locates every site that needs more than that. No behaviour changes: pairs are still created immutable, and nothing mutates
+them yet. Validated by the existing suite and by `CompilerBenchmarks` against the
+numbers below — this is the phase most likely to cost performance, and it should
+be measured before anything is built on it.
+
+**Phase 2 — `eq?` becomes identity.** With cells, two `equal?` lists can be
+different objects, which is the distinction 4.2.1 asks for and IronKernel has
+never been able to make. `eq?` moves to reference identity on pairs, keeping its
+current behaviour on atoms, numbers and the rest. This retires the 4.2.1
+divergence and changes `assq` and `memq?` (6.4.3, 6.4.4), which are `assoc` and
+`member?` over `eq?` — their tests currently pass *because* `eq?` is structural
+and will need revisiting deliberately.
+
+**Phase 3 — mutation.** `set-car!` and `set-cdr!` (4.7.1), signalling on an
+immutable pair. `copy-es` (6.4.2) becomes a real copy with an observably fresh
+result, and `copy-es-immutable` (4.7.2) stops being the identity. These are the
+entries the module is named for, and the first point at which anything can
+actually change under a reference.
+
+**Phase 4 — cycle safety.** Now that `encycle!` is buildable, before it is built:
+`equal?` gets a termination-safe algorithm; `showVal` — already an explicit work
+stack — gets cycle detection; `get-list-metrics` computes the four metrics for
+real. Then the `kernel.ikr` list library derivations that carry "no list can be
+cyclic" comments are revisited one at a time against the report's cyclic cases.
+`equal?` is a required entry, so this phase is not optional.
+
+**Phase 5 — the mutating library entries.** `encycle!` (5.8.1) and `append!`
+(6.4.1), which is where a cycle first enters the system from Kernel code.
+
+**Phase 6 — re-validate and record.** Benchmarks against the baseline, the CLR
+fault sweep extended with cyclic and mutation cases, the conformance matrix
+regenerated, and the 4.7 and 4.2.1 divergences removed.
+
+## Baseline to hold
+
+`CompilerBenchmarks` on master at the time of writing:
+
+| Method | Mean | Allocated |
+|---|---:|---:|
+| ColdCompile | 105.4 ns | 592 B |
+| Interpreted | 371.1 ns | 1872 B |
+| CompiledGeneric | 173.6 ns | 808 B |
+| CompiledFolded | 51.9 ns | 304 B |
+
+340 tests pass; the conformance matrix records 119 of 135 entries verified and 35
+of 44 modules complete.
+
+A cons cell and an F# list cell are both one heap object per element, so the
+allocation totals should be close. The risk is not allocation volume but the
+arity-dispatch paths described above, and `CompiledGeneric` is the number that
+will show it first.
+
+## Consequences
+
+The change retires two divergences (4.7 and 4.2.1), completes an optional module,
+and makes two required entries — `equal?` and `get-list-metrics` — honest about
+cycles rather than correct only because cycles cannot occur.
+
+It also removes a simplifying assumption the codebase currently benefits from
+everywhere: that a value's structure is finite and cannot change while being
+walked. Every traversal added after this lands has to be written with that in
+mind, and the analyzer and compiler are protected only by phase 0's copying, not
+by the type system.
+
+The phases are ordered so that each is independently reviewable and the suite
+stays green throughout. Phases 0 and 1 change no behaviour at all; phase 2 changes
+behaviour that is currently a recorded divergence; phases 3 to 5 add the module.
+If the work stops after any phase, the result is a consistent system rather than a
+half-migration — which is the main reason for doing it in this order rather than
+starting with the entries the module is named for.
