@@ -1,0 +1,106 @@
+# ADR 0004: Compiling procedure bodies
+
+Status: Proposed
+
+## Decision
+
+Compiled code will return `Step` rather than a collapsed `ThrowsError<LispVal>`,
+and operative bodies will be compiled lazily and carried in the continuation
+representation as a list of compiled forms. Until compiled functions participate
+in the caller's trampoline, procedure bodies must stay interpreted, and further
+analyzer specialization must not be added.
+
+## Problem
+
+Only top-level forms are compiled today, through `evalCompiled` and
+`compileFormsGuarded`. Operative application binds a fresh frame and evaluates
+the body as `KernelCode`, a list of raw `LispVal` forms driven form by form by
+`evalStep`. The `CompiledCombiner` case in `Ast.fs` is matched in three places
+but is never constructed anywhere. Because `define` evaluates its right-hand side
+through `bounceEval`, `(define f (vau ...))` never reaches the analyzer's
+specializations either. Effectively all real work runs interpreted.
+
+The measured gap is large. On an identical form, `CompilerBenchmarks` reports
+interpreted evaluation at 369.9 ns and 1832 B, generic compiled evaluation at
+160.2 ns and 712 B, and constant-folded compiled evaluation at 93.5 ns and 240 B
+— 2.3x to 4.0x faster with 2.6x to 7.6x less allocation. Compiling a form costs
+86.2 ns, less than a single interpreted evaluation, so compilation pays for
+itself within roughly one call.
+
+## Why bodies cannot be compiled today
+
+`KernelFunc` is `Func<LispVal, LispVal, ThrowsError<LispVal>>`. It returns a
+finished value, not a trampoline step. Every compiled leaf bottoms out in `eval`,
+`continueEval`, `operate`, or `bind`, and each of those calls `run`. Each
+compiled form is therefore a nested trampoline. For one-shot top-level forms this
+is harmless. For procedure bodies it breaks three guarantees:
+
+- **Proper tail calls.** A tail-recursive procedure one million calls deep runs in
+  constant stack today. Nested trampolines would turn each Kernel tail call into
+  CLR stack growth.
+- **First-class continuations.** `run` collapses `Step` into a value, so a
+  continuation captured inside a compiled body cannot escape past that boundary
+  or be resumed back into the middle of the body.
+- **Asynchrony.** `run` ends in `GetAwaiter().GetResult()`. An `Await` raised
+  inside a compiled body would block a thread instead of suspending.
+
+## Plan
+
+**Phase 1 — return `Step` from compiled code.** Change `KernelFunc` and
+`GeneratedFunc` to `Func<LispVal, LispVal, Step>` and replace collapsing calls
+with the `bounceEval`, `bounceContinue`, `bounceOperate`, and `bounceBind`
+variants that already exist for exactly this purpose. A single `run` remains at
+the top-level entry points. This touches roughly twenty call sites in
+`Compiler.fs` and `RuntimeDispatch.fs`, the seven emitted helpers used by
+generated artifacts, and the `StaticEmit` source strings. The change is wide but
+mechanical, and the type checker locates every site. It alters no observable
+behaviour and is validated by the existing suite plus deep tail recursion.
+
+**Phase 2 — represent compiled bodies in continuations.** Add
+`CompiledCode of KernelFunc list` beside `KernelCode` in `DeferredCode` and
+mirror the existing stepping in `continueEvalValidStep`: evaluate the head form,
+retain the remaining forms in `currentCont`, and let the final form inherit
+`nextCont`. Keeping the body a list rather than one opaque delegate is what
+preserves proper tail calls structurally, exactly as the interpreter does.
+`DeferredCode` appears in only ten places across `Ast.fs` and `Eval.fs`, two of
+them its own declaration. `appendContinuationRecord` and
+`findPrompt` manipulate only the `nextCont` chain and never inspect the payload
+of `currentCont`, so continuation splicing, `call/cc`, `shift`/`reset`, and
+`prompt`/`perform`/`resume` require no changes.
+
+**Phase 3 — compile bodies lazily.** Give `OperativeRecord` a mutable memo and
+compile on first application with `analyzeFormsGuarded` against the closure
+environment. Because compilation costs less than one interpreted evaluation, no
+tiering or hotness heuristic is warranted. Invalidation already works: binding
+guards key on cell version, and the named call-site cache validates frame binding
+counts, so a body that defines locally invalidates correctly.
+
+`IronKernel.Runtime` cannot reference the compiler, since ADR 0002 requires
+managed artifacts to exclude the compiler and FParsec. The body compiler is
+therefore injected the way `RuntimeSourceServices` already injects the parser.
+Artifacts that do not install it fall back to interpretation.
+
+**Phase 4 — revisit analyzer specialization.** Re-measure with
+`GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
+once bodies are compiled, and guards measured 12% faster there, so extending
+`PrimitiveIdentity` should be reconsidered then, with evidence.
+
+## Consequences
+
+Phases 1 and 2 change no observable behaviour and land independently; the
+performance benefit arrives only with Phase 3. Until then, adding
+`PrimitiveIdentity` cases is a measured pessimization rather than an
+optimization: guards re-resolve the binding by name on every invocation, whereas
+the `COperate` fallback's call-site cache validates by environment reference
+equality and always hits when the environment is stable, which is the only
+situation compiled code encounters today.
+
+Continuation-heavy behaviour is the primary regression risk, and it is exercised
+by examples rather than by unit tests. `Examples/coroutines.ikr` is now executed
+in CI rather than merely packaged; the remaining continuation examples should
+gain equivalent coverage before Phase 2 begins.
+
+Compiled bodies are immutable lists of compiled forms, so re-entry through a
+multi-shot continuation stays safe. Debuggability changes: body frames will
+report through compiled delegates, and located spans must be preserved through
+`CLocated` for diagnostics to survive.
