@@ -167,3 +167,6 @@
 (assq 1 5)
 (memq? 1 5)
 (assq 1 (list 5))
+(#inert)
+(null? (#inert))
+(eqv? (#inert) (list))

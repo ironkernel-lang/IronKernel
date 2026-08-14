@@ -100,6 +100,10 @@
                     pending.Push(x, y)
                     pushLists xs ys
                 | List xs, List ys -> pushLists xs ys
+                // Both spellings of the empty list, and either against the other. Left
+                // out, `Nil` was not even equal to itself, which breaks the reflexivity
+                // R-1RK 4.3.1 requires of an equivalence predicate.
+                | Nil, Nil | Nil, List [] | List [], Nil -> ()
                 | _ -> equal <- false
 
             equal
@@ -209,6 +213,10 @@
 
         let isNull env cont = function 
             | [List[]]   -> bounceContinue env cont <| Bool(true) 
+            // The producers normalise to `List []`, but the predicate accepts the bare
+            // case too, so that a future one cannot quietly reintroduce a value that is
+            // not `null?`.
+            | [Nil]      -> bounceContinue env cont <| Bool(true) 
             | _          -> bounceContinue env cont <| Bool(false)
 
         let isEnvironment env cont = function 
