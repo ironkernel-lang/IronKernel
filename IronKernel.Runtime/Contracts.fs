@@ -42,7 +42,10 @@ module Contracts =
         // Every complex is a number (R-1RK 12.10), so arithmetic contracts accept one.
         | NumberShape, Obj (:? System.Numerics.Complex)
         // Exact integers of arbitrary size (R-1RK 12.3.2) are numbers and integers.
-        | NumberShape, Obj (:? System.Numerics.BigInteger) -> true
+        | NumberShape, Obj (:? System.Numerics.BigInteger)
+        // An exact ratio (R-1RK 12.8) is a number but never an integer: a ratio whose
+        // denominator reduces to one is collapsed back to an integer on construction.
+        | NumberShape, Obj (:? ExactRatio) -> true
         | IntegerShape, Obj (:? byte)
         | IntegerShape, Obj (:? int)
         | IntegerShape, Obj (:? int64)

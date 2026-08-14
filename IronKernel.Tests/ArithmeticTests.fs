@@ -106,12 +106,14 @@ let ``dividing by zero signals an error instead of faulting`` () =
         | value -> failwithf "%s should signal an error, got %s" expression (showVal value)
 
 [<Fact>]
-let ``arithmetic overflow signals an error instead of faulting`` () =
-    // Int32.MinValue / -1 has no representable result and raises inside the CLR.
-    let env = freshEnv ()
-    match evalIn env "(/ -2147483648 -1)" with
-    | Status message -> Assert.Contains("overflow", message.ToLowerInvariant())
-    | value -> failwithf "overflow should signal an error, got %s" (showVal value)
+let ``dividing the most negative integer promotes instead of faulting`` () =
+    // Int32.MinValue / -1 and Int64.MinValue / -1 have no result in their own width
+    // and raise inside the CLR. R-1RK 12.3.2 requires exact integers of arbitrary
+    // size, so the answer exists and division must widen to it rather than fault.
+    [
+        "(/ -2147483648 -1)", Obj 2147483648L
+        "(/ -9223372036854775808 -1)", Obj (System.Numerics.BigInteger.Parse "9223372036854775808")
+    ] |> evalSession
 
 [<Fact>]
 let ``division still works for non-zero divisors`` () =
@@ -418,3 +420,90 @@ let ``big integers work with the rest of the numeric tower`` () =
         "(=? (/ 100000000000000000000 10000000000) 10000000000)", Bool true
         "(=? 100000000000000000000 (+ (* 7 (div 100000000000000000000 7)) (mod 100000000000000000000 7)))", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``dividing exact integers gives an exact ratio`` () =
+    // R-1RK 12.3.2 requires exact ratios of exact integers when module Rational is
+    // supported. Approximating with a double is not merely imprecise: three thirds
+    // do not add back to one, and no amount of tolerance makes the identity hold.
+    [
+        "(=? (+ (/ 1 3) (/ 1 3) (/ 1 3)) 1)", Bool true
+        "(=? (* 3 (/ 1 3)) 1)", Bool true
+        "(=? (numerator (/ 1 3)) 1)", Bool true
+        "(=? (denominator (/ 1 3)) 3)", Bool true
+        // Kept in least terms, so equal ratios are the same value.
+        "(eqv? (/ 2 4) (/ 1 2))", Bool true
+        "(eqv? (/ 100 8) (/ 25 2))", Bool true
+        // A ratio that reduces to an integer is one, and stays a fixed-width integer.
+        "(eqv? (/ 6 3) 2)", Bool true
+        "(eqv? (+ (/ 1 2) (/ 1 2)) 1)", Bool true
+        // The sign lives in the numerator; the denominator is always positive.
+        "(=? (numerator (/ 1 -3)) -1)", Bool true
+        "(=? (denominator (/ 1 -3)) 3)", Bool true
+        // Ratios of arbitrary-size integers, not just ones that fit a machine word.
+        "(=? (denominator (/ 1 12345678901234567890123456789)) 12345678901234567890123456789)", Bool true
+        // An inexact operand still contaminates the result, as it must.
+        "(integer? (+ (/ 1 3) 0.5))", Bool false
+        "(<? (+ (/ 1 3) 0.5) 0.84)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``ratio literals read back the way ratios print`` () =
+    [
+        "(eqv? 1/3 (/ 1 3))", Bool true
+        "(eqv? 2/4 1/2)", Bool true
+        // A literal whose denominator reduces to one is an ordinary integer.
+        "(eqv? 6/3 2)", Bool true
+        // The slash only joins digits, so division is still a call, not a literal.
+        "(eqv? (/ 1 3) 1/3)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``ratios carry through the numeric predicates and rounding`` () =
+    [
+        "(number? 1/3)", Bool true
+        "(rational? 1/3)", Bool true
+        "(real? 1/3)", Bool true
+        "(finite? 1/3)", Bool true
+        "(integer? 1/3)", Bool false
+        "(zero? 1/3)", Bool false
+        "(positive? 1/3)", Bool true
+        "(negative? (/ 1 -3))", Bool true
+        "(<? 1/3 1/2)", Bool true
+        "(<? 1/2 1/3)", Bool false
+        "(=? (max 1/3 1/2) 1/2)", Bool true
+        // Rounding an exact argument stays exact, and halfway cases go to even.
+        "(eqv? (floor 7/2) 3)", Bool true
+        "(eqv? (ceiling 7/2) 4)", Bool true
+        "(eqv? (truncate -7/2) -3)", Bool true
+        "(eqv? (floor -7/2) -4)", Bool true
+        "(eqv? (round 7/2) 4)", Bool true
+        "(eqv? (round 5/2) 2)", Bool true
+        // div and mod keep their identity on ratios: 0 <= mod < |divisor|.
+        "(=? 7/2 (+ (* 1/3 (div 7/2 1/3)) (mod 7/2 1/3)))", Bool true
+        "(=? -7/2 (+ (* 1/3 (div -7/2 1/3)) (mod -7/2 1/3)))", Bool true
+        "(<? (mod -7/2 1/3) 1/3)", Bool true
+        "(negative? (mod -7/2 1/3))", Bool false
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``expt is exact when both arguments are`` () =
+    // The result used to be read back out of a double, which rounded it -- 3^39 needs
+    // 62 bits and came back 11 short -- and capped it at what a double can count.
+    [
+        "(=? (expt 3 39) 4052555153018976267)", Bool true
+        "(=? (expt 2 100) 1267650600228229401496703205376)", Bool true
+        "(eqv? (expt 2 10) 1024)", Bool true
+        // A negative exponent has an exact answer now that ratios exist.
+        "(eqv? (expt 2 -3) 1/8)", Bool true
+        "(eqv? (expt -2 -3) (/ -1 8))", Bool true
+        "(eqv? (expt 2/3 3) 8/27)", Bool true
+        "(eqv? (expt 2/3 -3) 27/8)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``an exact zero to a negative power signals division by zero`` () =
+    // R-1RK 12.8.2 makes division by zero an error; Math.Pow yields an infinity.
+    match evalIn (freshEnv ()) "(expt 0 -1)" with
+    | Status message -> Assert.Contains("division by zero", message)
+    | value -> failwithf "(expt 0 -1) should signal an error, got %s" (showVal value)

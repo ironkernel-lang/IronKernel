@@ -209,20 +209,36 @@ let private behaviouralChecks () : (string * string list) list = [
     "12.5.12", [ "(=? (abs -5) 5)"; "(=? (abs 5) 5)"; "(=? (abs 0) 0)" ]
     "12.5.13", [ "(=? (max 1 7 3) 7)"; "(=? (min 1 7 3) 1)"; "(=? (max 5) 5)" ]
     "12.5.14", [ "(=? (gcd 12 18) 6)"; "(=? (lcm 4 6) 12)"; "(=? (gcd 0 5) 5)" ]
-    "12.8.1", [ "(rational? 1)"; "(rational? 1.5)"; "(eqv? (rational? 'a) #f)"; "(rational?)" ]
+    "12.8.1", [ "(rational? 1)"; "(rational? 1.5)"; "(rational? 1/3)"
+                "(eqv? (rational? 'a) #f)"; "(rational?)"
+                // A ratio is not an integer, and reduces to one when it can.
+                "(eqv? (integer? 1/3) #f)"; "(integer? 4/2)" ]
     "12.8.2", [ "(=? (/ 8 2) 4)"
-                // Ordinary division, not the truncating quotient: (/ 1 3) is a third.
-                "(<? 0.3 (/ 1 3))"; "(<? (/ 1 3) 0.34)"
+                // Dividing exact integers gives an exact ratio, not the nearest
+                // double: three thirds are exactly one, which no double satisfies.
+                "(=? (+ (/ 1 3) (/ 1 3) (/ 1 3)) 1)"
+                "(=? (numerator (/ 1 3)) 1)"; "(=? (denominator (/ 1 3)) 3)"
+                // Least terms, and a ratio that reduces to an integer becomes one.
+                "(eqv? (/ 2 4) (/ 1 2))"; "(eqv? (/ 6 3) 2)"
                 // Divides by the product of the remaining arguments.
                 "(=? (/ 24 2 3) 4)" ]
     "12.8.3", [ "(=? (numerator 0.5) 1)"; "(=? (denominator 0.5) 2)"
                 "(=? (numerator 6) 6)"; "(=? (denominator 6) 1)"
-                "(=? (numerator 0.75) 3)"; "(=? (denominator 0.75) 4)" ]
+                "(=? (numerator 0.75) 3)"; "(=? (denominator 0.75) 4)"
+                "(=? (numerator 3/4) 3)"; "(=? (denominator 3/4) 4)"
+                // Least terms, and a negative ratio carries its sign in the numerator.
+                "(=? (numerator 6/8) 3)"; "(=? (denominator 6/8) 4)"
+                "(=? (numerator (/ 1 -3)) -1)"; "(=? (denominator (/ 1 -3)) 3)" ]
     "12.8.4", [ "(=? (floor 3.7) 3)"; "(=? (floor -3.7) -4)"
                 "(=? (ceiling 3.2) 4)"; "(=? (ceiling -3.2) -3)"
                 "(=? (truncate 3.7) 3)"; "(=? (truncate -3.7) -3)"
                 // Halfway cases round to even.
-                "(=? (round 0.5) 0)"; "(=? (round 1.5) 2)"; "(=? (round 2.5) 2)" ]
+                "(=? (round 0.5) 0)"; "(=? (round 1.5) 2)"; "(=? (round 2.5) 2)"
+                // An exact ratio rounds to an exact integer, which R-1RK 12.3.2
+                // requires of every operation given only exact arguments.
+                "(eqv? (floor 7/2) 3)"; "(eqv? (ceiling 7/2) 4)"
+                "(eqv? (truncate -7/2) -3)"; "(eqv? (floor -7/2) -4)"
+                "(eqv? (round 7/2) 4)"; "(eqv? (round 5/2) 2)" ]
     // 12.9: the report gives these signatures only (see the note in the matrix), so
     // the checks assert the standard mathematical meanings.
     "12.9.1", [ "(real? 1)"; "(real? 1.5)"; "(eqv? (real? 'a) #f)"; "(real?)"
@@ -260,10 +276,18 @@ let private behaviouralChecks () : (string * string list) list = [
     "12.9.5", [ "(<? (abs (- (sqrt 4) 2)) 0.000001)"
                 "(<? (abs (- (sqrt 2) 1.4142135623730951)) 0.000001)" ]
     "12.9.6", [ "(=? (expt 2 10) 1024)"; "(=? (expt 3 0) 1)"
-                "(<? (abs (- (expt 2 -1) 0.5)) 0.000001)" ]
+                // Exact arguments give an exact result of whatever size it takes,
+                // rather than one read back out of a double: 3^39 needs 62 bits and
+                // the nearest double is 11 short.
+                "(=? (expt 3 39) 4052555153018976267)"
+                "(=? (expt 2 100) 1267650600228229401496703205376)"
+                "(eqv? (expt 2 -1) 1/2)"; "(eqv? (expt 2/3 3) 8/27)" ]
     "12.8.5", [ "(=? (simplest-rational 0.2 0.4) (/ 1 3))"
                 "(=? (simplest-rational -0.5 0.5) 0)"
-                "(=? (rationalize 0.3 0.1) (/ 1 3))" ]
+                "(=? (rationalize 0.3 0.1) (/ 1 3))"
+                // Exact bounds give the exact simplest ratio between them.
+                "(eqv? (simplest-rational 1/3 1/2) 1/2)"
+                "(eqv? (rationalize 3/10 1/10) 1/3)" ]
 ]
 
 /// Divergences the matrix cannot express as a status, recorded so that a `verified`
@@ -273,10 +297,6 @@ let private divergences () = [
            + "`<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a "
            + "number written to a port cannot be read back by `read`; symbols, lists "
            + "and booleans round-trip."
-    "12.3.2", "Exact integers are of arbitrary size and promote rather than wrapping. "
-              + "Exact *ratios* of integers, which the report also requires when module "
-              + "Rational is supported, are still absent: `(/ 1 3)` is the closest "
-              + "double rather than an exact third."
     "12.2", "There is no exact/inexact distinction. Numbers are CLR primitives, so "
             + "exactness, bounds and robustness (module Inexact, 12.6) are absent and "
             + "no number can be an exact infinity."
@@ -299,10 +319,12 @@ let private divergences () = [
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."
-    "12.8", "Module Rational is implemented over the existing numeric types, which "
-            + "have no exact rational representation. `(/ 1 3)` is the closest double "
-            + "rather than an exact third, and `numerator`/`denominator` signal an "
-            + "error when a value's exact ratio does not fit in 64 bits."
+    "12.8", "Exactness is carried by a value's representation rather than by the "
+            + "exactness tag the report describes, since module Inexact (12.6) is "
+            + "unimplemented: `1/2` is an exact ratio and `0.5` is a double. One "
+            + "consequence is that `numerator` and `denominator` of an inexact real "
+            + "return exact integers -- `(denominator 0.1)` is 2^55 -- rather than "
+            + "inexact ones."
 ]
 
 let private conformanceEnv () =
@@ -425,10 +447,8 @@ let private renderMatrix () =
     appendLine "**\"All entries verified\" is weaker than \"supported\".** The column below says"
     appendLine "only that every entry of the module has a passing behavioural check. It does"
     appendLine "not assert 1.3.2 support, which additionally requires the module's assumed"
-    appendLine "modules and the report's baseline representation requirements -- and R-1RK"
-    appendLine "12.3.2 also requires exact ratios of arbitrary-size integers when module"
-    appendLine "Rational is supported, which IronKernel does not have. Read the divergences"
-    appendLine "before taking any row as a claim of conformance."
+    appendLine "modules and the report's baseline representation requirements. Read the"
+    appendLine "divergences before taking any row as a claim of conformance."
     appendLine ""
     appendLine "| Module | Required | Entries | Verified | All entries verified |"
     appendLine "|---|---|---:|---:|---|"

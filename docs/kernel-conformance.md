@@ -42,14 +42,13 @@ exercised, not that IronKernel matches the report exactly.
 | Report | Divergence |
 |---|---|
 | 3.6 | External representations differ: IronKernel prints a number as `<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a number written to a port cannot be read back by `read`; symbols, lists and booleans round-trip. |
-| 12.3.2 | Exact integers are of arbitrary size and promote rather than wrapping. Exact *ratios* of integers, which the report also requires when module Rational is supported, are still absent: `(/ 1 3)` is the closest double rather than an exact third. |
 | 12.2 | There is no exact/inexact distinction. Numbers are CLR primitives, so exactness, bounds and robustness (module Inexact, 12.6) are absent and no number can be an exact infinity. |
 | 12.5.13 | `(max)` and `(min)` with no arguments signal an error. The report returns exact negative and positive infinity, which IronKernel cannot represent. |
 | 12.5.14 | `(gcd)` returns 0 and `(lcm)` returns 1. The report returns exact positive infinity for `(gcd)`. |
 | 12.9 | The report specifies 12.9.2 through 12.9.6 by signature only. Appendix A.2 records that it is an incomplete draft whose unwritten portions were "only planned in rough outline", so `verified` there means the binding exists with its standard mathematical meaning, and the choices the report leaves open are IronKernel's: an argument outside a function's real domain takes its complex value now that 12.10 is supported, so `(sqrt -1)` is `i`; a NaN result still signals an error; and infinities are returned as values. |
 | 4.2.1 | `eq?` is bound to the same structural comparison as `eqv?`, so it is coarser than the report's, which distinguishes objects that `equal?` does not. |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
-| 12.8 | Module Rational is implemented over the existing numeric types, which have no exact rational representation. `(/ 1 3)` is the closest double rather than an exact third, and `numerator`/`denominator` signal an error when a value's exact ratio does not fit in 64 bits. |
+| 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
 
 ## Modules
 
@@ -60,10 +59,8 @@ features in M, and (2) supports all of the modules assumed by M."
 **"All entries verified" is weaker than "supported".** The column below says
 only that every entry of the module has a passing behavioural check. It does
 not assert 1.3.2 support, which additionally requires the module's assumed
-modules and the report's baseline representation requirements -- and R-1RK
-12.3.2 also requires exact ratios of arbitrary-size integers when module
-Rational is supported, which IronKernel does not have. Read the divergences
-before taking any row as a claim of conformance.
+modules and the report's baseline representation requirements. Read the
+divergences before taking any row as a claim of conformance.
 
 | Module | Required | Entries | Verified | All entries verified |
 |---|---|---:|---:|---|
@@ -265,17 +262,17 @@ before taking any row as a claim of conformance.
 | 12.6.5 | `real->inexact, real->exact` | Inexact features | `absent` | optional module; `real->inexact` absent; `real->exact` absent |
 | 12.6.6 | `with-strict-arithmetic, get-strict-arithmetic?` | Inexact features | `absent` | optional module; `with-strict-arithmetic` absent; `get-strict-arithmetic?` absent |
 | 12.7.1 | `with-narrow-arithmetic, get-narrow-arithmetic?` | Narrow inexact features | `absent` | optional module; `with-narrow-arithmetic` absent; `get-narrow-arithmetic?` absent |
-| 12.8.1 | `rational?` | Rational features | `verified` | optional module; 4 behavioural check(s) |
-| 12.8.2 | `/` | Rational features | `verified` | optional module; 4 behavioural check(s) |
-| 12.8.3 | `numerator, denominator` | Rational features | `verified` | optional module; 6 behavioural check(s) |
-| 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `verified` | optional module; 9 behavioural check(s) |
-| 12.8.5 | `rationalize, simplest-rational` | Rational features | `verified` | optional module; 3 behavioural check(s) |
+| 12.8.1 | `rational?` | Rational features | `verified` | optional module; 7 behavioural check(s) |
+| 12.8.2 | `/` | Rational features | `verified` | optional module; 7 behavioural check(s) |
+| 12.8.3 | `numerator, denominator` | Rational features | `verified` | optional module; 12 behavioural check(s) |
+| 12.8.4 | `floor, ceiling, truncate, round` | Rational features | `verified` | optional module; 15 behavioural check(s) |
+| 12.8.5 | `rationalize, simplest-rational` | Rational features | `verified` | optional module; 5 behavioural check(s) |
 | 12.9.1 | `real?` | Real features | `verified` | optional module; 6 behavioural check(s) |
 | 12.9.2 | `exp, log` | Real features | `verified` | optional module; 3 behavioural check(s) |
 | 12.9.3 | `sin, cos, tan` | Real features | `verified` | optional module; 3 behavioural check(s) |
 | 12.9.4 | `asin, acos, atan` | Real features | `verified` | optional module; 4 behavioural check(s) |
 | 12.9.5 | `sqrt` | Real features | `verified` | optional module; 2 behavioural check(s) |
-| 12.9.6 | `expt` | Real features | `verified` | optional module; 3 behavioural check(s) |
+| 12.9.6 | `expt` | Real features | `verified` | optional module; 6 behavioural check(s) |
 | 12.10.1 | `complex?` | Complex features | `verified` | optional module; 4 behavioural check(s) |
 | 12.10.2 | `make-rectangular, real-part, imag-part` | Complex features | `verified` | optional module; 3 behavioural check(s) |
 | 12.10.3 | `make-polar, magnitude, angle` | Complex features | `verified` | optional module; 3 behavioural check(s) |

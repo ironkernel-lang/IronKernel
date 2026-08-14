@@ -69,16 +69,48 @@ module Parser =
                         // literal takes the narrowest exact type that holds it and falls
                         // back to BigInteger rather than failing to parse. The `L`
                         // suffix still forces at least 64-bit.
+                        //
+                        // Hexadecimal keeps F#'s own conversions and its fixed widths:
+                        // they understand the `0x` prefix that Int32.TryParse rejects,
+                        // and they are what decides that 0xFFFFFFFF is -1.
                         let integerLiteral (text: string) forceLong =
-                            match System.Int32.TryParse text with
-                            | true, value when not forceLong -> box value
-                            | _ ->
-                                match System.Int64.TryParse text with
-                                | true, value -> box value
-                                | _ -> box (System.Numerics.BigInteger.Parse text)
+                            if nl.IsHexadecimal then
+                                if forceLong then box (int64 text) else box (int32 text)
+                            else
+                                match System.Int32.TryParse text with
+                                | true, value when not forceLong -> box value
+                                | _ ->
+                                    match System.Int64.TryParse text with
+                                    | true, value -> box value
+                                    | _ -> box (System.Numerics.BigInteger.Parse text)
+                        /// R-1RK 12.4 gives exact ratios an external representation, so a
+                        /// value that prints as 1/3 reads back as itself. Only digits may
+                        /// follow the slash, which keeps `(/ 1 3)` -- where the slash is a
+                        /// separate token -- reading as a call as it always has.
+                        let ratioDenominator () =
+                            if nl.SuffixLength > 0 || nl.IsHexadecimal || stream.Peek() <> '/' then None
+                            else
+                                let mutable length = 1
+                                while System.Char.IsDigit(stream.Peek(length)) do
+                                    length <- length + 1
+                                if length = 1 then None
+                                else Some(stream.Read(length).Substring(1))
                         let result =
                             if nl.IsInteger then
-                                Obj(integerLiteral nl.String (nl.SuffixLength > 0))
+                                match ratioDenominator () with
+                                | Some denominator ->
+                                    let denominator = System.Numerics.BigInteger.Parse denominator
+                                    if denominator.IsZero then
+                                        raise (System.FormatException "a ratio literal cannot have a zero denominator")
+                                    let ratio =
+                                        makeExactRatio
+                                            (System.Numerics.BigInteger.Parse nl.String) denominator
+                                    // A denominator that reduces to one leaves an ordinary
+                                    // integer, exactly as dividing would.
+                                    if ratio.Denominator.IsOne then
+                                        Obj(Arithmetic.ofBig ratio.Numerator)
+                                    else Obj(box ratio)
+                                | None -> Obj(integerLiteral nl.String (nl.SuffixLength > 0))
                             else
                                 if nl.IsHexadecimal then
                                     float (floatOfHexString nl.String) :> obj |> Obj

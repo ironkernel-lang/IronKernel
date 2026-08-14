@@ -231,13 +231,14 @@
         let private isNumberValue (value: obj) =
             match value with
             | :? byte | :? int | :? int64 | :? float32 | :? float -> true
-            | :? Numerics.BigInteger -> true
+            | :? Numerics.BigInteger | :? ExactRatio -> true
             | :? Numerics.Complex -> true
             | _ -> false
 
         let private isIntegerValue (value: obj) =
             match value with
             | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> true
+            | :? ExactRatio as ratio -> ratio.Denominator.IsOne
             | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f) && Math.Floor(float f) = float f
             | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d) && Math.Floor d = d
             // R-1RK 12.5.1: a complex is an integer iff its real part is an integer and
@@ -249,7 +250,7 @@
 
         let private isFiniteValue (value: obj) =
             match value with
-            | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> Some true
+            | :? byte | :? int | :? int64 | :? Numerics.BigInteger | :? ExactRatio -> Some true
             | :? float32 as f -> Some(not (Single.IsNaN f) && not (Single.IsInfinity f))
             | :? float as d -> Some(not (Double.IsNaN d) && not (Double.IsInfinity d))
             // R-1RK 12.5.1: a complex is finite iff its components all are.
@@ -309,6 +310,7 @@
                         | :? float32 as x -> x = 0.0f
                         | :? float as x -> x = 0.0
                         | :? Numerics.BigInteger as x -> x = Numerics.BigInteger.Zero
+                        | :? ExactRatio as x -> x.Numerator.IsZero
                         // R-1RK 12.5.7: a complex is zero when all its components are.
                         | :? Numerics.Complex as c -> c = Numerics.Complex.Zero
                         | _ -> false
@@ -762,6 +764,7 @@
         let private toFloat (value: obj) =
             match value with
             | :? Numerics.BigInteger as v -> Some(float v)
+            | :? ExactRatio as r -> Some(float r.Numerator / float r.Denominator)
             | :? byte as b -> Some(float b)
             | :? int as i -> Some(float i)
             | :? int64 as l -> Some(float l)
@@ -773,6 +776,8 @@
             match value with
             | :? Numerics.Complex as c -> Some c
             | :? Numerics.BigInteger as v -> Some(Numerics.Complex(float v, 0.0))
+            | :? ExactRatio as r ->
+                Some(Numerics.Complex(float r.Numerator / float r.Denominator, 0.0))
             | :? byte as b -> Some(Numerics.Complex(float b, 0.0))
             | :? int as i -> Some(Numerics.Complex(float i, 0.0))
             | :? int64 as l -> Some(Numerics.Complex(float l, 0.0))
@@ -821,7 +826,7 @@
                     let real =
                         match value with
                         | :? byte | :? int | :? int64 | :? float32 | :? float -> true
-                        | :? Numerics.BigInteger -> true
+                        | :? Numerics.BigInteger | :? ExactRatio -> true
                         | :? Numerics.Complex as c -> c.Imaginary = 0.0
                         | _ -> false
                     if real then loop rest else bounceContinue env cont (Bool false)
@@ -849,32 +854,63 @@
             | [found; _] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(1, args))
 
-        /// R-1RK 12.9.6. An integer base raised to a non-negative integer power stays
-        /// an integer when the result is representable, so (expt 2 10) is 1024 rather
-        /// than 1024.0; anything else is computed as a real.
+        /// The numerator and denominator of an exact argument; None for an inexact one.
+        let private asExact (value: obj) =
+            match value with
+            | :? byte as b -> Some(Numerics.BigInteger(int b), Numerics.BigInteger.One)
+            | :? int as i -> Some(Numerics.BigInteger i, Numerics.BigInteger.One)
+            | :? int64 as l -> Some(Numerics.BigInteger l, Numerics.BigInteger.One)
+            | :? Numerics.BigInteger as v -> Some(v, Numerics.BigInteger.One)
+            | :? ExactRatio as r -> Some(r.Numerator, r.Denominator)
+            | _ -> None
+
+        /// An exact base raised to a whole exact power, as numerator and denominator.
+        /// None when either argument is inexact, when the exponent is not a whole
+        /// number -- a root is rarely rational -- or when the exact answer would be
+        /// absurdly large, where the real result is what the caller wants anyway.
+        let private exactPower (b: obj) (e: obj) =
+            match asExact b, asExact e with
+            | Some(numerator, denominator), Some(exponent, exponentDenominator)
+                    when exponentDenominator.IsOne ->
+                let magnitude = Numerics.BigInteger.Abs exponent
+                let widest = max (Numerics.BigInteger.Abs numerator) denominator
+                let bits = if widest.IsZero then 1L else widest.GetBitLength()
+                if magnitude > Numerics.BigInteger Int32.MaxValue
+                   || int64 magnitude * bits > 1000000L then None
+                else
+                    let raised (value: Numerics.BigInteger) =
+                        Numerics.BigInteger.Pow(value, int magnitude)
+                    if exponent.Sign >= 0 then Some(raised numerator, raised denominator)
+                    else Some(raised denominator, raised numerator)
+            | _ -> None
+
+        /// R-1RK 12.9.6. Exact arguments give an exact result, so (expt 2 100) is the
+        /// whole 31-digit integer and (expt 2 -3) is an eighth. The result used to be
+        /// read back out of a double, which both rounded -- (expt 3 39) came back
+        /// short by 11 -- and capped the answer at what a double can count.
         let exptReal env cont args =
             match args with
             | [Obj b; Obj e] ->
                 match toFloat b, toFloat e with
                 | Some baseValue, Some exponent ->
-                    let integral (value: obj) =
-                        match value with
-                        | :? byte | :? int | :? int64 -> true
-                        | _ -> false
-                    let result = Math.Pow(baseValue, exponent)
-                    if Double.IsNaN result then
-                        // A negative base with a fractional exponent leaves the reals.
-                        let complex =
-                            Numerics.Complex.Pow(
-                                Numerics.Complex(baseValue, 0.0), Numerics.Complex(exponent, 0.0))
-                        if Double.IsNaN complex.Real || Double.IsNaN complex.Imaginary then
-                            fail (Default "expt: argument is outside the domain")
-                        else bounceContinue env cont (ofComplexValue complex)
-                    elif integral b && integral e && exponent >= 0.0
-                         && Math.Abs result <= 9.2233720368547758e18
-                         && Math.Floor result = result then
-                        bounceContinue env cont (Obj(box (int64 result)))
-                    else bounceContinue env cont (Obj(box result))
+                    match exactPower b e with
+                    // An exact zero to a negative power divides by zero, which R-1RK
+                    // 12.8.2 makes an error rather than an infinity.
+                    | Some(_, denominator) when denominator.IsZero ->
+                        fail (Default "division by zero")
+                    | Some(numerator, denominator) ->
+                        bounceContinue env cont (Obj(ofRatio numerator denominator))
+                    | None ->
+                        let result = Math.Pow(baseValue, exponent)
+                        if Double.IsNaN result then
+                            // A negative base with a fractional exponent leaves the reals.
+                            let complex =
+                                Numerics.Complex.Pow(
+                                    Numerics.Complex(baseValue, 0.0), Numerics.Complex(exponent, 0.0))
+                            if Double.IsNaN complex.Real || Double.IsNaN complex.Imaginary then
+                                fail (Default "expt: argument is outside the domain")
+                            else bounceContinue env cont (ofComplexValue complex)
+                        else bounceContinue env cont (Obj(box result))
                 | None, _ -> fail (TypeMismatch("number", Obj b))
                 | _, None -> fail (TypeMismatch("number", Obj e))
             | [found; _] -> fail (TypeMismatch("number", found))
@@ -985,6 +1021,7 @@
                     let rational =
                         match value with
                         | :? byte | :? int | :? int64 | :? Numerics.BigInteger -> true
+                        | :? ExactRatio -> true
                         | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f)
                         | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d)
                         // R-1RK 12.8.1: a complex is rational iff its real part is and
@@ -997,81 +1034,109 @@
                 | _ -> bounceContinue env cont (Bool false)
             loop args
 
-        /// R-1RK 12.8.4. Integers are returned unchanged; a real keeps its own numeric
-        /// kind, which still satisfies integer? because that predicate accepts a float
-        /// with an integral value.
-        let private roundingPrimitive name (apply: float -> float) env cont args =
+        /// The truncated quotient of a ratio and the remainder that goes with it. The
+        /// denominator is positive by construction, so the remainder carries the sign
+        /// of the numerator.
+        let private truncatedParts (numerator: Numerics.BigInteger) (denominator: Numerics.BigInteger) =
+            let truncated = Numerics.BigInteger.Divide(numerator, denominator)
+            truncated, numerator - truncated * denominator
+
+        let private floorExact numerator denominator =
+            let truncated, remainder = truncatedParts numerator denominator
+            if remainder.Sign < 0 then truncated - Numerics.BigInteger.One else truncated
+
+        let private ceilingExact numerator denominator =
+            let truncated, remainder = truncatedParts numerator denominator
+            if remainder.Sign > 0 then truncated + Numerics.BigInteger.One else truncated
+
+        let private truncateExact numerator denominator =
+            fst (truncatedParts numerator denominator)
+
+        /// Halfway cases go to even, matching the inexact path. Comparing twice the
+        /// fractional part against the denominator keeps the test in exact integers.
+        let private roundExact numerator denominator =
+            let two = Numerics.BigInteger 2
+            let below = floorExact numerator denominator
+            let comparison = ((numerator - below * denominator) * two).CompareTo denominator
+            if comparison < 0 then below
+            elif comparison > 0 then below + Numerics.BigInteger.One
+            elif (below % two).IsZero then below
+            else below + Numerics.BigInteger.One
+
+        /// R-1RK 12.8.4. Integers are returned unchanged; an exact ratio rounds to an
+        /// exact integer, because 12.3.2 requires an exact argument to give an exact
+        /// result; a real keeps its own numeric kind, which still satisfies integer?
+        /// because that predicate accepts a float with an integral value.
+        let private roundingPrimitive
+                (applyExact: Numerics.BigInteger -> Numerics.BigInteger -> Numerics.BigInteger)
+                (apply: float -> float)
+                env cont args =
             match args with
             | [Obj value] ->
                 match value with
                 | :? byte | :? int | :? int64 | :? Numerics.BigInteger ->
                     bounceContinue env cont (Obj value)
+                | :? ExactRatio as ratio ->
+                    bounceContinue env cont (Obj(ofBig (applyExact ratio.Numerator ratio.Denominator)))
                 | :? float32 as f -> bounceContinue env cont (Obj(box (float32 (apply (float f)))))
                 | :? float as d -> bounceContinue env cont (Obj(box (apply d)))
                 | _ -> fail (TypeMismatch("number", Obj value))
             | [found] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(1, args))
 
-        let floorReal env cont args = roundingPrimitive "floor" Math.Floor env cont args
-        let ceilingReal env cont args = roundingPrimitive "ceiling" Math.Ceiling env cont args
-        let truncateReal env cont args = roundingPrimitive "truncate" Math.Truncate env cont args
+        let floorReal env cont args = roundingPrimitive floorExact Math.Floor env cont args
+        let ceilingReal env cont args = roundingPrimitive ceilingExact Math.Ceiling env cont args
+        let truncateReal env cont args = roundingPrimitive truncateExact Math.Truncate env cont args
 
         /// Rounds halfway cases to even, per R-1RK 12.8.4 and IEEE 754.
         let roundReal env cont args =
-            roundingPrimitive "round" (fun d -> Math.Round(d, MidpointRounding.ToEven)) env cont args
+            roundingPrimitive roundExact (fun d -> Math.Round(d, MidpointRounding.ToEven)) env cont args
 
-        /// R-1RK 12.8.3, in least terms. A double is a dyadic rational, so doubling
-        /// until the value is integral gives an exact numerator over a power of two,
-        /// which is then reduced. Values whose exact denominator exceeds Int64 are
-        /// rejected rather than silently approximated; IronKernel has no exact
-        /// rational type to hold them.
-        let private exactRatio (value: float) =
+        /// R-1RK 12.8.3, in least terms. A finite double is a dyadic rational, so
+        /// doubling until the value is integral gives an exact numerator over a power
+        /// of two. Both parts are arbitrary-size, so every finite real has an answer;
+        /// the loop terminates because a double large enough to overflow is already
+        /// integral, and the smallest subnormal reaches an integer within 1074 steps.
+        let private exactRatioOf (value: float) =
             if Double.IsNaN value || Double.IsInfinity value then None
             else
+                let two = Numerics.BigInteger 2
                 let mutable numerator = value
-                let mutable denominator = 1L
-                let mutable overflow = false
-                while not overflow && Math.Floor numerator <> numerator do
-                    if denominator > Int64.MaxValue / 2L then overflow <- true
-                    else
-                        numerator <- numerator * 2.0
-                        denominator <- denominator * 2L
-                if overflow || Math.Abs numerator > 9.2233720368547758e18 then None
-                else
-                    let rec gcd (a: int64) (b: int64) = if b = 0L then a else gcd b (a % b)
-                    let n = int64 numerator
-                    let divisor = gcd (abs n) denominator
-                    let divisor = if divisor = 0L then 1L else divisor
-                    Some(n / divisor, denominator / divisor)
+                let mutable denominator = Numerics.BigInteger.One
+                while Math.Floor numerator <> numerator do
+                    numerator <- numerator * 2.0
+                    denominator <- denominator * two
+                Some(makeExactRatio (Numerics.BigInteger numerator) denominator)
 
-        let private ratioPart name wantNumerator env cont args =
-            let pick (numerator: int64, denominator: int64) =
-                Obj(box (if wantNumerator then numerator else denominator))
+        let private ratioPart wantNumerator env cont args =
+            let pick (ratio: ExactRatio) =
+                Obj(ofBig (if wantNumerator then ratio.Numerator else ratio.Denominator))
+            let ofInteger (value: Numerics.BigInteger) =
+                // An exact integer is itself over one, whatever its size.
+                Obj(if wantNumerator then ofBig value else box 1)
             match args with
             | [Obj value] ->
                 match value with
-                | :? byte as b -> bounceContinue env cont (pick (int64 b, 1L))
-                | :? int as i -> bounceContinue env cont (pick (int64 i, 1L))
-                | :? int64 as l -> bounceContinue env cont (pick (l, 1L))
-                // An exact integer has denominator one whatever its size, and its
-                // numerator is itself -- returned unchanged rather than narrowed.
-                | :? Numerics.BigInteger as v ->
-                    bounceContinue env cont (Obj(if wantNumerator then box v else box 1L))
+                | :? byte as b -> bounceContinue env cont (ofInteger (Numerics.BigInteger(int b)))
+                | :? int as i -> bounceContinue env cont (ofInteger (Numerics.BigInteger i))
+                | :? int64 as l -> bounceContinue env cont (ofInteger (Numerics.BigInteger l))
+                | :? Numerics.BigInteger as v -> bounceContinue env cont (ofInteger v)
+                | :? ExactRatio as ratio -> bounceContinue env cont (pick ratio)
                 | :? float32 as f ->
-                    match exactRatio (float f) with
+                    match exactRatioOf (float f) with
                     | Some ratio -> bounceContinue env cont (pick ratio)
-                    | None -> fail (Default(name + ": no exact ratio is representable"))
+                    | None -> fail (TypeMismatch("rational", Obj value))
                 | :? float as d ->
-                    match exactRatio d with
+                    match exactRatioOf d with
                     | Some ratio -> bounceContinue env cont (pick ratio)
-                    | None -> fail (Default(name + ": no exact ratio is representable"))
+                    | None -> fail (TypeMismatch("rational", Obj value))
                 | _ -> fail (TypeMismatch("number", Obj value))
             | [found] -> fail (TypeMismatch("number", found))
             | _ -> fail (NumArgs(1, args))
 
-        let numeratorOf env cont args = ratioPart "numerator" true env cont args
+        let numeratorOf env cont args = ratioPart true env cont args
 
-        let denominatorOf env cont args = ratioPart "denominator" false env cont args
+        let denominatorOf env cont args = ratioPart false env cont args
 
         /// R-1RK 12.5.8: a freshly allocated list of the quotient and the remainder.
         let divAndMod env cont args =
