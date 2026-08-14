@@ -115,12 +115,73 @@ with 17% less allocation, and continuation-heavy paths are 4-6% slower. That doe
 not repay phase 1's cost, so the premise that phase 3 pays for phase 1 does not
 hold as stated.
 
-**Phase 4 — compile operand trees.** The remaining lever is teaching the compiler
-to descend into operands while preserving Kernel's operative/applicative
-distinction: operands may only be pre-compiled once the combiner in operator
-position is known to be applicative, which the binding guards and call-site cache
-already establish. This is a larger change than phases 1-3 and should be measured
-against the same body-heavy workload before being adopted.
+**Phase 4 — compile operand trees. Attempted and rejected.** Operands were
+compiled and dispatched once the call site resolved to an applicative, preserving
+the operative distinction. It was correct but 2.4x *slower* on the body-heavy
+workload, 55s against 23s, and the cost scaled with iteration count rather than
+being one-time compilation.
+
+Instrumenting the call-site cache during that run explains why, and invalidates
+the premise of phases 3 and 4 together: **0 hits against 150,393 misses**.
+`NamedCallSite.cacheValid` requires `obj.ReferenceEquals(env, resolved.Env)`, and
+every procedure call binds its parameters in a fresh frame, so a call site
+evaluated inside a procedure body never sees the same environment twice. Each
+compiled operand therefore pays full `resolveBindingCellWithPath`, a
+`ResolvedCallSite` allocation, and a volatile publish, where the interpreter pays
+one `getVar'`. Compiling more of the body simply buys more cache misses.
+
+This is the same effect measured earlier by `GuardSpecializationBenchmarks`, where
+guards only paid off against a fresh frame per call, and it is why phase 3 returned
+1.3% rather than the projected multiple.
+
+One further trap found here: operands must not be partially evaluated. Constant
+folding an operand raises errors from expressions that may never be evaluated, and
+`(and? #f (/ 1 0))` must short-circuit.
+
+**Phase 4 (revised) — implemented.** Three changes, each measured separately.
+
+*Call-site validation across fresh frames.* `NamedCallSite` now validates that
+resolving the name from the invoking environment still reaches the same frame --
+every nearer frame still lacks the name, and the owning frame is the same object --
+rather than requiring the environment to be the same instance. Hit rate inside a
+procedure body went from 0% to 67%. Chains that are not a simple single-parent walk
+are dispatched without caching rather than cached and never revalidated.
+
+*Lowering guarded `if` and `define` into Core.* `analyzeGuarded` produced
+`CIntrinsicOperate`, which hands the runtime primitive raw syntax that it then
+evaluates through the interpreter. Every conditional and every definition inside a
+compiled body was therefore interpreted. The located analyzer had always lowered
+them to `CIf` and `CDefine`; the ordinary path now agrees.
+
+*Plain closures instead of expression trees.* `Expression.Lambda(...).Compile()`
+costs tens of microseconds per node. That was affordable when only top-level forms
+were compiled once, but phase 3 compiles a body per operative, and a combiner built
+and applied once -- every `let` expands to one -- has nothing to amortise it
+against. Lowering `if` while still emitting expression trees made
+`LambdaLiteralCall` 4.5x slower; replacing them with closures removed that and left
+every benchmark at or better than master.
+
+Compiling operand trees stays rejected. Retried on top of the fixed cache it was
+still 2.4x slower, so the cost is in the dispatch path rather than in cache misses,
+and it needs profiling rather than another attempt.
+
+## Results
+
+Against master, with 237 tests passing and diagnostics byte-identical:
+
+| Measurement | master | now |
+|---|---|---|
+| Body-heavy workload | 23.0 s | 20.5 s (-11%) |
+| `NamedLambdaCall` | 905 ns | 695 ns (-23%) |
+| `NamedVauCall` | 902 ns | 680 ns (-25%) |
+| `DirectEffectHandler` | 1040 ns | 799 ns (-23%) |
+| `EffectHandlerAbort` | 2021 ns | 1774 ns (-12%) |
+| `LambdaLiteralCall` | 29.7 us | 28.9 us (-3%) |
+
+Allocation on a named call falls 22%. Continuation-heavy paths are within 1-2% of
+master. Phase 1's cost on `CompiledGeneric` and `CompiledFolded` remains: those
+measure a single top-level form, where the extra continuation threading is not
+offset by anything a body would gain.
 
 **Phase 5 — revisit analyzer specialization.** Re-measure with
 `GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
