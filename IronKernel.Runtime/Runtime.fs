@@ -704,13 +704,25 @@
         /// guaranteed at the point a primitive first reads it.
         let private strictArithmeticKey () = Guid "9d2f5a10-7c3e-4b58-9a61-2f7c1d4e8b03"
 
+        /// R-1RK 12.7.1's narrow-arithmetic variable, the other of the pair.
+        let private narrowArithmeticKey () = Guid "4e81c6b2-05da-4f37-8c19-6b3a7f20d5ee"
+
+        let private booleanDynamicVariable key defaultValue cont =
+            match findDynamicBinding (key ()) cont with
+            | Some (Bool value) -> value
+            | _ -> defaultValue
+
         /// The report leaves the initial value open. True is what IronKernel has always
         /// done: a result with no primary value has been an error here rather than a
         /// NaN that propagates silently into later arithmetic.
         let private isStrictArithmetic cont =
-            match findDynamicBinding (strictArithmeticKey ()) cont with
-            | Some (Bool value) -> value
-            | _ -> true
+            booleanDynamicVariable strictArithmeticKey true cont
+
+        /// R-1RK 12.7.1 phrases narrowing as advice the client asks for, so it starts
+        /// off. Nothing here reads it beyond the accessor: see the divergence recorded
+        /// for 12.7 in the conformance matrix.
+        let private isNarrowArithmetic cont =
+            booleanDynamicVariable narrowArithmeticKey false cont
 
         /// R-1RK 12.2: a real with no primary value is NaN here. That is where the
         /// indeterminate infinity combinations land -- infinity minus infinity, zero
@@ -1356,27 +1368,46 @@
             | [_; _; _] -> fail (TypeMismatch("real", List args))
             | _ -> fail (NumArgs(3, args))
 
-        /// R-1RK 12.6.6: the binder and accessor of the strict-arithmetic keyed dynamic
-        /// variable. The binder is a keyed dynamic binder like any other (10.1.1), so
-        /// the setting follows the dynamic extent of the call including across captured
-        /// continuations; the accessor differs from a plain one only in answering with
-        /// the default when no binder encloses it.
-        let withStrictArithmetic env cont args =
+        /// R-1RK 12.6.6 and 12.7.1 are each "the binder and accessor of" a keyed
+        /// dynamic variable, so the binder is one from 10.1.1 -- the setting follows the
+        /// dynamic extent of its call, including across captured continuations -- and
+        /// the accessor differs from a plain one only in answering with a default when
+        /// no binder encloses it.
+        let private withBooleanVariable key env cont args =
             match args with
             | [Bool _ as flag; combiner] ->
                 let isolated = newEnvWithClr (ofEnvironment env) [] []
                 bounceOperate
                     isolated
-                    (makeDynamicBinding env cont (strictArithmeticKey ()) flag)
+                    (makeDynamicBinding env cont (key ()) flag)
                     combiner
                     []
             | [found; _] -> fail (TypeMismatch("boolean", found))
             | _ -> fail (NumArgs(2, args))
 
-        let getStrictArithmetic env cont args =
+        let private getBooleanVariable read env cont args =
             match args with
-            | [] -> bounceContinue env cont (Bool(isStrictArithmetic cont))
+            | [] -> bounceContinue env cont (Bool(read cont))
             | _ -> fail (NumArgs(0, args))
+
+        let withStrictArithmetic env cont args =
+            withBooleanVariable strictArithmeticKey env cont args
+
+        let getStrictArithmetic env cont args =
+            getBooleanVariable isStrictArithmetic env cont args
+
+        /// R-1RK 12.7.1. Setting this asks the implementation to maintain the most
+        /// restrictive bounding and robustness information it correctly can. It is
+        /// advice, and the report's only hard constraints are that whatever is
+        /// maintained be correct and be no less restrictive when the variable is true
+        /// than when it is false. IronKernel's bounds are the infinities either way, so
+        /// both hold and nothing observable changes; the matrix records that rather
+        /// than leaving a reader to discover it.
+        let withNarrowArithmetic env cont args =
+            withBooleanVariable narrowArithmeticKey env cont args
+
+        let getNarrowArithmetic env cont args =
+            getBooleanVariable isNarrowArithmetic env cont args
 
         let numeratorOf env cont args = ratioPart true env cont args
 
@@ -1643,6 +1674,8 @@
                   ("real->exact", realToExact);
                   ("with-strict-arithmetic", withStrictArithmetic);
                   ("get-strict-arithmetic?", getStrictArithmetic);
+                  ("with-narrow-arithmetic", withNarrowArithmetic);
+                  ("get-narrow-arithmetic?", getNarrowArithmetic);
                   ("clr-opens", clr_opens);
                   ]
 

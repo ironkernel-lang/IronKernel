@@ -221,3 +221,48 @@ let ``with-strict-arithmetic requires a boolean and a combiner`` () =
             match evalIn env expression with
             | Status _ -> ()
             | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``narrow arithmetic is a keyed dynamic variable that starts cleared`` () =
+    // R-1RK 12.7.1. Narrowing is advice the client asks for, so it starts off.
+    [
+        "(eqv? (get-narrow-arithmetic?) #f)", Bool true
+        "(with-narrow-arithmetic #t (lambda () (get-narrow-arithmetic?)))", Bool true
+        "(with-narrow-arithmetic #t (lambda () (with-narrow-arithmetic #f (lambda () (get-narrow-arithmetic?)))))",
+            Bool false
+        "(with-narrow-arithmetic #t (lambda () (with-narrow-arithmetic #f (lambda () 0)) (get-narrow-arithmetic?)))",
+            Bool true
+        "(eqv? (get-narrow-arithmetic?) #f)", Bool true
+        // The two arithmetic variables of 12.6.6 and 12.7.1 are separate.
+        "(with-narrow-arithmetic #t (lambda () (get-strict-arithmetic?)))", Bool true
+        "(with-strict-arithmetic #f (lambda () (get-narrow-arithmetic?)))", Bool false
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``the bounds are no less restrictive when narrow arithmetic is set`` () =
+    // This is the report's only hard constraint on the information maintained, besides
+    // correctness: it "cannot be less restrictive when the variable is true than when
+    // the variable is false". IronKernel narrows nothing, so the two intervals are
+    // equal, which satisfies containment -- and the check would catch a later change
+    // that made the narrow bounds *wider* rather than tighter.
+    [
+        "(define wide (with-narrow-arithmetic #f (lambda () (get-real-exact-bounds 0.5))))", Inert
+        "(define narrow (with-narrow-arithmetic #t (lambda () (get-real-exact-bounds 0.5))))", Inert
+        "(<=? (car wide) (car narrow))", Bool true
+        "(<=? (car (cdr narrow)) (car (cdr wide)))", Bool true
+        // And robustness cannot go backwards either.
+        "(define robust-wide (with-narrow-arithmetic #f (lambda () (robust? 0.5))))", Inert
+        "(define robust-narrow (with-narrow-arithmetic #t (lambda () (robust? 0.5))))", Inert
+        "(if robust-wide robust-narrow #t)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``with-narrow-arithmetic requires a boolean and a combiner`` () =
+    withKernel (fun env ->
+        for expression in
+            [ "(with-narrow-arithmetic 1 (lambda () 0))"
+              "(with-narrow-arithmetic #t)"
+              "(get-narrow-arithmetic? 1)" ] do
+            match evalIn env expression with
+            | Status _ -> ()
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
