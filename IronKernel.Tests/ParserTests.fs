@@ -123,6 +123,45 @@ let ``parses integers and floats`` () =
     | v -> failwith (showVal v)
 
 [<Fact>]
+let ``parses hexadecimal integers`` () =
+    // The number format allows a 0x prefix, which only F#'s own string conversions
+    // understand -- widening decimal literals to arbitrary size once routed these
+    // through Int32.TryParse instead, and every hexadecimal literal stopped parsing.
+    match parseOk "0x10" with
+    | Obj (:? int as n) -> Assert.Equal(16, n)
+    | v -> failwith (showVal v)
+    match parseOk "0xFFL" with
+    | Obj (:? int64 as n) -> Assert.Equal(255L, n)
+    | v -> failwith (showVal v)
+
+[<Fact>]
+let ``parses exact ratio literals`` () =
+    match parseOk "1/3" with
+    | Obj (:? ExactRatio as r) ->
+        Assert.Equal(System.Numerics.BigInteger.One, r.Numerator)
+        Assert.Equal(System.Numerics.BigInteger 3, r.Denominator)
+    | v -> failwith (showVal v)
+    // Least terms on the way in, and a denominator of one leaves an integer.
+    match parseOk "2/4" with
+    | Obj (:? ExactRatio as r) ->
+        Assert.Equal(System.Numerics.BigInteger 2, r.Denominator)
+    | v -> failwith (showVal v)
+    match parseOk "6/3" with
+    | Obj (:? int as n) -> Assert.Equal(2, n)
+    | v -> failwith (showVal v)
+    // The slash only joins digits, so an operator is still read as a symbol.
+    match parseOk "/" with
+    | Atom name -> Assert.Equal("/", name)
+    | v -> failwith (showVal v)
+
+[<Fact>]
+let ``a ratio literal cannot have a zero denominator`` () =
+    match readExprFromSource "zero-denominator.ikr" "1/0" with
+    | Choice1Of2 (LocatedError(_, _, Parser _)) -> ()
+    | Choice1Of2 error -> failwithf "unexpected error: %A" error
+    | Choice2Of2 value -> failwithf "1/0 unexpectedly parsed: %s" (showVal value)
+
+[<Fact>]
 let ``parses booleans inert and keywords`` () =
     assertEqv (parseOk "#t") (Bool true)
     assertEqv (parseOk "#f") (Bool false)

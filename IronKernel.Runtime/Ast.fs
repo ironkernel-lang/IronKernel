@@ -71,6 +71,29 @@ module Ast =
         minimumOperands : int option
     }
 
+    /// An exact ratio of integers (R-1RK 12.8), always kept in least terms with a
+    /// positive denominator. Normalising on construction is what makes the record's
+    /// structural equality agree with numeric equality, so `eqv?` needs no special
+    /// case and 2/4 and 1/2 are the same value.
+    type ExactRatio =
+        { Numerator : System.Numerics.BigInteger
+          Denominator : System.Numerics.BigInteger }
+        override this.ToString() =
+            string this.Numerator + "/" + string this.Denominator
+
+    /// The caller must reject a zero denominator first; R-1RK 12.8.2 signals an error
+    /// for that rather than producing an infinity.
+    let makeExactRatio (numerator: System.Numerics.BigInteger) (denominator: System.Numerics.BigInteger) =
+        let negative = denominator.Sign < 0
+        let numerator = if negative then -numerator else numerator
+        let denominator = if negative then -denominator else denominator
+        let divisor =
+            System.Numerics.BigInteger.GreatestCommonDivisor(
+                System.Numerics.BigInteger.Abs numerator, denominator)
+        let divisor =
+            if divisor.IsZero then System.Numerics.BigInteger.One else divisor
+        { Numerator = numerator / divisor; Denominator = denominator / divisor }
+
     type ContinuationType = Full | Delimited
 
     /// Trampoline step used by the CPS evaluator / compiler runtime.

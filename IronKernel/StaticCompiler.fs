@@ -59,6 +59,15 @@ module StaticCompiler =
         | Obj (:? byte as value) -> Some(sprintf "Obj(box %uy)" value)
         | Obj (:? int as value) -> Some(sprintf "Obj(box %d)" value)
         | Obj (:? int64 as value) -> Some(sprintf "Obj(box %dL)" value)
+        // Exact numbers wider than the fixed-width types are rebuilt from their decimal
+        // text, which is exact for both and avoids depending on a literal syntax.
+        | Obj (:? System.Numerics.BigInteger as value) ->
+            Some("Obj(box (System.Numerics.BigInteger.Parse " + quote (string value) + "))")
+        | Obj (:? ExactRatio as value) ->
+            Some(
+                "Obj(box (makeExactRatio (System.Numerics.BigInteger.Parse "
+                + quote (string value.Numerator) + ") (System.Numerics.BigInteger.Parse "
+                + quote (string value.Denominator) + ")))")
         | Obj (:? float32 as value) ->
             Some("Obj(box " + value.ToString("R", CultureInfo.InvariantCulture) + "f)")
         | Obj (:? double as value) ->

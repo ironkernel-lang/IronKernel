@@ -530,6 +530,19 @@ let ``static backend emits direct managed entry points without source compilatio
         Assert.DoesNotContain("Parser", source)
         Assert.DoesNotContain("Expression.Compile", source)
 
+[<Fact>]
+let ``static backend emits exact numbers wider than the fixed-width types`` () =
+    // A ratio or a big integer has no F# literal syntax, so both are rebuilt from
+    // their decimal text. Without this the whole program is rejected as unsupported.
+    let expressions = analyzeForms [parseOk "(+ 1/3 123456789012345678901234567890)"]
+    match generateProgram Minimal expressions with
+    | Error error -> failwith error
+    | Ok source ->
+        Assert.Contains("makeExactRatio (System.Numerics.BigInteger.Parse \"1\") "
+                        + "(System.Numerics.BigInteger.Parse \"3\")", source)
+        Assert.Contains(
+            "System.Numerics.BigInteger.Parse \"123456789012345678901234567890\"", source)
+
 let private invokeSite (compiled: KernelFunc) env =
     match run (compiled.Invoke(env, newContinuation env)) with
     | Choice2Of2 value -> value
