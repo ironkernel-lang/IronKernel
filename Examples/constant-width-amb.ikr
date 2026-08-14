@@ -250,10 +250,11 @@
                              (if (eq? c w) (scan v (+ i 1) len w) -1))))))))
       (let* ((w1 (scan rw 0 n 0)) (w2 (scan cl 0 n w1))
              (w3 (scan pd 0 m w2)) (w (scan nd 0 m w3)))
-        (if (< w 1) () (list n (/ (length s) w) w))))))
+        (if (< w 1) () (list n (div (length s) w) w))))))
 
-; `/` truncates toward zero, so fold the negative case back by hand.
-(defn (modulo a m) (let ((r (- a (* m (/ a m))))) (if (< r 0) (+ r m) r)))
+; `mod` (R-1RK 12.5.8) already returns a remainder in [0, |m|), which is what this
+; code wants. It used to be hand-rolled from `/` back when `/` truncated.
+(define modulo mod)
 
 ; Extended constant width: the diagonals wrap around the board, so the lines
 ; are i+j and i-j taken mod n. Lemma 1 needs this of its left operand.

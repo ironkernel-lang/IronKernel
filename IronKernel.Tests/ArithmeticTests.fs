@@ -227,3 +227,70 @@ let ``variadic addition preserves the datetime extension`` () =
         // assertion about arithmetic instead of about CLR equality semantics.
         assertEval env "(=? (.get (- (+ d ts) d) TotalHours) 24.0)" (Bool true)
         assertEval env "(=? (.get (- (+ d ts ts) d) TotalHours) 48.0)" (Bool true))
+
+[<Fact>]
+let ``division is not the truncating quotient`` () =
+    // R-1RK 12.8.2: `/` is ordinary division. It stays integral only when it divides
+    // evenly; the truncating quotient is `div` (12.5.8), a separate feature.
+    withKernel (fun env ->
+        assertEval env "(=? (/ 8 2) 4)" (Bool true)
+        assertEval env "(=? (/ 7 2) 3.5)" (Bool true)
+        assertEval env "(and? (<? 0.333 (/ 1 3)) (<? (/ 1 3) 0.334))" (Bool true)
+        // div keeps truncating, and must not be defined in terms of `/`.
+        assertEval env "(and? (=? (div 7 2) 3) (=? (mod 7 2) 1))" (Bool true)
+        assertEval env "(and? (=? (div 1 3) 0) (=? (mod 1 3) 1))" (Bool true))
+
+[<Fact>]
+let ``division divides by the product of its remaining arguments`` () =
+    withKernel (fun env ->
+        assertEval env "(=? (/ 24 2 3) 4)" (Bool true)
+        assertEval env "(=? (/ 100 2 5 2) 5)" (Bool true)
+        match evalIn env "(/ 5)" with
+        | Status message -> Assert.Contains("at least 2 operands", message)
+        | value -> failwithf "(/ 5) should signal an error, got %s" (showVal value))
+
+[<Fact>]
+let ``rounding follows the report including halfway cases`` () =
+    // R-1RK 12.8.4: round goes to even on a halfway value, per IEEE 754.
+    [
+        "(=? (floor 3.7) 3)", Bool true
+        "(=? (floor -3.7) -4)", Bool true
+        "(=? (ceiling 3.2) 4)", Bool true
+        "(=? (ceiling -3.2) -3)", Bool true
+        "(=? (truncate 3.7) 3)", Bool true
+        "(=? (truncate -3.7) -3)", Bool true
+        "(=? (round 0.5) 0)", Bool true
+        "(=? (round 1.5) 2)", Bool true
+        "(=? (round 2.5) 2)", Bool true
+        "(=? (round -1.5) -2)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``numerator and denominator are in least terms`` () =
+    [
+        "(=? (numerator 0.75) 3)", Bool true
+        "(=? (denominator 0.75) 4)", Bool true
+        "(=? (numerator 6) 6)", Bool true
+        "(=? (denominator 6) 1)", Bool true
+        "(=? (numerator -0.5) -1)", Bool true
+        "(=? (denominator -0.5) 2)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``simplest-rational finds the simplest value in the interval`` () =
+    // Zero is simpler than every other rational, so an interval spanning zero
+    // yields zero regardless of its bounds.
+    [
+        "(=? (simplest-rational 0.2 0.4) (/ 1 3))", Bool true
+        "(=? (simplest-rational -0.5 0.5) 0)", Bool true
+        "(=? (simplest-rational -0.4 -0.2) (/ -1 3))", Bool true
+        "(=? (simplest-rational 3 3) 3)", Bool true
+        "(=? (rationalize 0.3 0.1) (/ 1 3))", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``simplest-rational rejects an inverted interval`` () =
+    withKernel (fun env ->
+        match evalIn env "(simplest-rational 0.5 0.2)" with
+        | Status message -> Assert.Contains("lower bound exceeds", message)
+        | value -> failwithf "expected an error, got %s" (showVal value))

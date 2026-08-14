@@ -673,7 +673,128 @@
             | [_; _] -> binaryOrFold opMinus (box 0) env cont args
             | _ :: _ :: _ -> foldNumeric opMinus (box 0) env cont args
             | _ -> fail (NumArgs(2, args))
-        let divide env cont args = numericBinOp env cont opDivide args
+        /// R-1RK 12.8.2: (/ number . numbers) divides number by the *product* of the
+        /// rest, so (/ 24 2 3) is 4, not (24/2)/3 computed stepwise -- which agrees
+        /// here, but the product is what the report specifies and it is what decides
+        /// the zero-divisor error.
+        let divide env cont args =
+            match args with
+            | [a; b] ->
+                match opDivide a b with
+                | Choice2Of2 result -> bounceContinue env cont result
+                | Choice1Of2 error -> fail error
+            | numerator :: (_ :: _ as divisors) ->
+                let rec product acc = function
+                    | [] -> Choice2Of2 acc
+                    | next :: rest ->
+                        match opMultiply acc next with
+                        | Choice2Of2 value -> product value rest
+                        | Choice1Of2 error -> Choice1Of2 error
+                match product (List.head divisors) (List.tail divisors) with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 divisor ->
+                    match opDivide numerator divisor with
+                    | Choice2Of2 result -> bounceContinue env cont result
+                    | Choice1Of2 error -> fail error
+            | _ -> fail (NumArgs(2, args))
+        /// R-1RK 12.8.1. A rational is a ratio of integers, so every finite number
+        /// qualifies and infinities and NaN do not. Being a type predicate, a
+        /// non-number is false rather than an error.
+        let isRational env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | Obj value :: rest ->
+                    let rational =
+                        match value with
+                        | :? byte | :? int | :? int64 -> true
+                        | :? float32 as f -> not (Single.IsNaN f) && not (Single.IsInfinity f)
+                        | :? float as d -> not (Double.IsNaN d) && not (Double.IsInfinity d)
+                        | _ -> false
+                    if rational then loop rest else bounceContinue env cont (Bool false)
+                | _ -> bounceContinue env cont (Bool false)
+            loop args
+
+        /// R-1RK 12.8.4. Integers are returned unchanged; a real keeps its own numeric
+        /// kind, which still satisfies integer? because that predicate accepts a float
+        /// with an integral value.
+        let private roundingPrimitive name (apply: float -> float) env cont args =
+            match args with
+            | [Obj value] ->
+                match value with
+                | :? byte | :? int | :? int64 -> bounceContinue env cont (Obj value)
+                | :? float32 as f -> bounceContinue env cont (Obj(box (float32 (apply (float f)))))
+                | :? float as d -> bounceContinue env cont (Obj(box (apply d)))
+                | _ -> fail (TypeMismatch("number", Obj value))
+            | [found] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(1, args))
+
+        let floorReal env cont args = roundingPrimitive "floor" Math.Floor env cont args
+        let ceilingReal env cont args = roundingPrimitive "ceiling" Math.Ceiling env cont args
+        let truncateReal env cont args = roundingPrimitive "truncate" Math.Truncate env cont args
+
+        /// Rounds halfway cases to even, per R-1RK 12.8.4 and IEEE 754.
+        let roundReal env cont args =
+            roundingPrimitive "round" (fun d -> Math.Round(d, MidpointRounding.ToEven)) env cont args
+
+        /// R-1RK 12.8.3, in least terms. A double is a dyadic rational, so doubling
+        /// until the value is integral gives an exact numerator over a power of two,
+        /// which is then reduced. Values whose exact denominator exceeds Int64 are
+        /// rejected rather than silently approximated; IronKernel has no exact
+        /// rational type to hold them.
+        let private exactRatio (value: float) =
+            if Double.IsNaN value || Double.IsInfinity value then None
+            else
+                let mutable numerator = value
+                let mutable denominator = 1L
+                let mutable overflow = false
+                while not overflow && Math.Floor numerator <> numerator do
+                    if denominator > Int64.MaxValue / 2L then overflow <- true
+                    else
+                        numerator <- numerator * 2.0
+                        denominator <- denominator * 2L
+                if overflow || Math.Abs numerator > 9.2233720368547758e18 then None
+                else
+                    let rec gcd (a: int64) (b: int64) = if b = 0L then a else gcd b (a % b)
+                    let n = int64 numerator
+                    let divisor = gcd (abs n) denominator
+                    let divisor = if divisor = 0L then 1L else divisor
+                    Some(n / divisor, denominator / divisor)
+
+        let private ratioPart name pick env cont args =
+            match args with
+            | [Obj value] ->
+                match value with
+                | :? byte as b -> bounceContinue env cont (Obj(pick (int64 b, 1L)))
+                | :? int as i -> bounceContinue env cont (Obj(pick (int64 i, 1L)))
+                | :? int64 as l -> bounceContinue env cont (Obj(pick (l, 1L)))
+                | :? float32 as f ->
+                    match exactRatio (float f) with
+                    | Some ratio -> bounceContinue env cont (Obj(pick ratio))
+                    | None -> fail (Default(name + ": no exact ratio is representable"))
+                | :? float as d ->
+                    match exactRatio d with
+                    | Some ratio -> bounceContinue env cont (Obj(pick ratio))
+                    | None -> fail (Default(name + ": no exact ratio is representable"))
+                | _ -> fail (TypeMismatch("number", Obj value))
+            | [found] -> fail (TypeMismatch("number", found))
+            | _ -> fail (NumArgs(1, args))
+
+        let numeratorOf env cont args =
+            ratioPart "numerator" (fun (n, _) -> box n) env cont args
+
+        let denominatorOf env cont args =
+            ratioPart "denominator" (fun (_, d) -> box d) env cont args
+
+        /// R-1RK 12.5.8: a freshly allocated list of the quotient and the remainder.
+        let divAndMod env cont args =
+            match args with
+            | [a; b] ->
+                match opDivAndMod a b with
+                | Choice2Of2 (quotient, remainder) ->
+                    bounceContinue env cont (List [quotient; remainder])
+                | Choice1Of2 error -> fail error
+            | _ -> fail (NumArgs(2, args))
+
         let lessThan env cont args = numBoolBinop env cont opLessThan args
         let lessThanOrEqual env cont args = numBoolBinop env cont opLessThanOrEqual args
         let greaterThan env cont args = numBoolBinop env cont opGreaterThan args
@@ -754,6 +875,14 @@
                   ("null?", isNull);
                   ("pair?", isPair) ;
                   ("zero?", isZero);
+                  ("div-and-mod", divAndMod);
+                  ("rational?", isRational);
+                  ("floor", floorReal);
+                  ("ceiling", ceilingReal);
+                  ("truncate", truncateReal);
+                  ("round", roundReal);
+                  ("numerator", numeratorOf);
+                  ("denominator", denominatorOf);
                   ("error", raiseError);
                   ("number?", isNumber);
                   ("integer?", isInteger);
@@ -821,7 +950,7 @@
                     | "*" ->
                         Some(certifiedVariadicApplicative name [NumberShape; NumberShape] 0 NumberShape)
                     | "/" ->
-                        Some(certifiedApplicative name [NumberShape; NumberShape] NumberShape)
+                        Some(certifiedVariadicApplicative name [NumberShape; NumberShape] 2 NumberShape)
                     | "<" | "<=" | ">" ->
                         Some(certifiedApplicative name [NumberShape; NumberShape] BooleanShape)
                     | _ -> None
