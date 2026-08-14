@@ -8,15 +8,17 @@ namespace IronKernel
     module Arithmetic =
 
         /// Operand pair widened to a common numeric representation.
-        /// Promotion rank: byte < int32 < int64 < float32 < double, except that
-        /// int64 paired with float32 widens to double, because float32 cannot
-        /// represent every int64.
+        /// Promotion rank: byte < int32 < int64 < float32 < double < complex, except
+        /// that int64 paired with float32 widens to double, because float32 cannot
+        /// represent every int64. Complex sits at the top because every real is a
+        /// complex with zero imaginary part (R-1RK 12.10).
         type private Widened =
             | Bytes of byte * byte
             | Ints of int32 * int32
             | Longs of int64 * int64
             | Singles of float32 * float32
             | Doubles of double * double
+            | Complexes of Numerics.Complex * Numerics.Complex
 
         type private BadOperand =
             | FirstOperand
@@ -29,6 +31,7 @@ namespace IronKernel
             | :? int64 -> 2
             | :? float32 -> 3
             | :? double -> 4
+            | :? Numerics.Complex -> 5
             | _ -> -1
 
         let private rankName = function
@@ -36,7 +39,8 @@ namespace IronKernel
             | 1 -> "int32"
             | 2 -> "int64"
             | 3 -> "float32"
-            | _ -> "float"
+            | 4 -> "float"
+            | _ -> "complex"
 
         let private toInt (value: obj) =
             match value with
@@ -63,6 +67,11 @@ namespace IronKernel
             | :? float32 as v -> double v
             | _ -> value :?> double
 
+        let private toComplex (value: obj) =
+            match value with
+            | :? Numerics.Complex as v -> v
+            | other -> Numerics.Complex(toDouble other, 0.0)
+
         let private widen (a: obj) (b: obj) =
             let rankA = rankOf a
             let rankB = rankOf b
@@ -78,7 +87,8 @@ namespace IronKernel
                     | 1 -> Ints(toInt a, toInt b)
                     | 2 -> Longs(toLong a, toLong b)
                     | 3 -> Singles(toSingle a, toSingle b)
-                    | _ -> Doubles(toDouble a, toDouble b))
+                    | 4 -> Doubles(toDouble a, toDouble b)
+                    | _ -> Complexes(toComplex a, toComplex b))
 
         /// No exception handler and no validation hook on this path. F# addition,
         /// subtraction and multiplication are unchecked and wrap rather than raise, so
@@ -97,11 +107,17 @@ namespace IronKernel
             | Obj _, found -> throwError (TypeMismatch("object", found))
             | found, _ -> throwError (TypeMismatch("object", found))
 
+        /// `apply` returns `None` when the comparison is undefined for the operands.
+        /// Complex numbers are not ordered, and R-1RK confines <? and friends to reals
+        /// (12.5.3), so ordering a complex is an error rather than some default.
         let private comparisonBinaryOp apply (a': LispVal) (b': LispVal) =
             match a', b' with
             | Obj a, Obj b ->
                 match widen a b with
-                | Choice2Of2 widened -> returnM (Bool(apply widened))
+                | Choice2Of2 widened ->
+                    match apply widened with
+                    | Some result -> returnM (Bool result)
+                    | None -> throwError (Default "complex numbers are not ordered")
                 | Choice1Of2 FirstOperand ->
                     throwError (TypeMismatch(b.GetType().Name, Obj a))
                 | Choice1Of2 SecondOperand ->
@@ -109,12 +125,19 @@ namespace IronKernel
             | Obj _, found -> throwError (TypeMismatch("object", found))
             | found, _ -> throwError (TypeMismatch("object", found))
 
+        /// A complex result with a zero imaginary part collapses back to a real, so
+        /// arithmetic that happens to leave the imaginary axis does not leave every
+        /// later operation working in complex.
+        let private ofComplex (value: Numerics.Complex) : obj =
+            if value.Imaginary = 0.0 then box value.Real else box value
+
         let private addWidened = function
             | Bytes(x, y) -> box (x + y)
             | Ints(x, y) -> box (x + y)
             | Longs(x, y) -> box (x + y)
             | Singles(x, y) -> box (x + y)
             | Doubles(x, y) -> box (x + y)
+            | Complexes(x, y) -> ofComplex (x + y)
 
         let private subtractWidened = function
             | Bytes(x, y) -> box (x - y)
@@ -122,6 +145,7 @@ namespace IronKernel
             | Longs(x, y) -> box (x - y)
             | Singles(x, y) -> box (x - y)
             | Doubles(x, y) -> box (x - y)
+            | Complexes(x, y) -> ofComplex (x - y)
 
         let private multiplyWidened = function
             | Bytes(x, y) -> box (x * y)
@@ -129,6 +153,7 @@ namespace IronKernel
             | Longs(x, y) -> box (x * y)
             | Singles(x, y) -> box (x * y)
             | Doubles(x, y) -> box (x * y)
+            | Complexes(x, y) -> ofComplex (x * y)
 
         /// Integer division only stays integral when it divides evenly. R-1RK 12.8.2
         /// makes `/` ordinary division, not the truncating quotient: (/ 1 3) is a third,
@@ -141,20 +166,23 @@ namespace IronKernel
             | Longs(x, y) -> if x % y = 0L then box (x / y) else box (float x / float y)
             | Singles(x, y) -> box (x / y)
             | Doubles(x, y) -> box (x / y)
+            | Complexes(x, y) -> ofComplex (x / y)
 
         let private lessThanWidened = function
-            | Bytes(x, y) -> x < y
-            | Ints(x, y) -> x < y
-            | Longs(x, y) -> x < y
-            | Singles(x, y) -> x < y
-            | Doubles(x, y) -> x < y
+            | Bytes(x, y) -> Some(x < y)
+            | Ints(x, y) -> Some(x < y)
+            | Longs(x, y) -> Some(x < y)
+            | Singles(x, y) -> Some(x < y)
+            | Doubles(x, y) -> Some(x < y)
+            | Complexes _ -> None
 
         let private lessThanOrEqualWidened = function
-            | Bytes(x, y) -> x <= y
-            | Ints(x, y) -> x <= y
-            | Longs(x, y) -> x <= y
-            | Singles(x, y) -> x <= y
-            | Doubles(x, y) -> x <= y
+            | Bytes(x, y) -> Some(x <= y)
+            | Ints(x, y) -> Some(x <= y)
+            | Longs(x, y) -> Some(x <= y)
+            | Singles(x, y) -> Some(x <= y)
+            | Doubles(x, y) -> Some(x <= y)
+            | Complexes _ -> None
 
         let opAdd a' b' =
             match a', b' with
@@ -180,6 +208,7 @@ namespace IronKernel
             | Longs(_, y) -> y = 0L
             | Singles(_, y) -> y = 0.0f
             | Doubles(_, y) -> y = 0.0
+            | Complexes(_, y) -> y = Numerics.Complex.Zero
 
         /// R-1RK 12.8.2: dividing by zero signals an error. The check is explicit
         /// because .NET disagrees with the report in both directions -- integer
@@ -241,11 +270,21 @@ namespace IronKernel
                 let q0 = System.Math.Truncate(x / y)
                 let q, r = adjust q0 (x - y * q0) y
                 box q, box r
+            | Complexes _ ->
+                // Unreachable: opDivAndMod rejects complex operands before widening
+                // reaches here. R-1RK 12.5.8 defines div and mod on reals.
+                failwith "div and mod are defined on reals"
+
+        let private isComplexWidened = function
+            | Complexes _ -> true
+            | _ -> false
 
         let opDivAndMod a' b' =
             match a', b' with
             | Obj a, Obj b ->
                 match widen a b with
+                | Choice2Of2 widened when isComplexWidened widened ->
+                    throwError (Default "div and mod are defined on reals")
                 | Choice2Of2 widened when divisorIsZero widened ->
                     throwError (Default "division by zero")
                 | Choice2Of2 widened ->
