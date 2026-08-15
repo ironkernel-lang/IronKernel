@@ -78,13 +78,13 @@ module CorePackage =
             List.init count (fun _ -> readValue (depth + 1) reader)
         match reader.ReadByte() with
         | 0uy -> Atom(readString reader)
-        | 1uy -> List(readValues ())
-        | 2uy -> DottedList(readValues (), readValue (depth + 1) reader)
+        | 1uy -> ofList(readValues ())
+        | 2uy -> ofDotted (readValues ()) (readValue (depth + 1) reader)
         | 3uy -> Bool(reader.ReadBoolean())
         | 4uy -> Inert
         // Normalised to the `List` spelling of the empty list: a decoded `Nil` was not
         // `eqv?` to an empty list built at runtime. See Eval's note.
-        | 5uy -> List []
+        | 5uy -> ofList []
         | 6uy -> Keyword(readString reader)
         | 7uy -> Obj null
         | 8uy -> Obj(box (readString reader))

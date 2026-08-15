@@ -28,7 +28,7 @@ module Contracts =
 
     /// Homoiconic shape rendering for `contract-of`: composite shapes become lists.
     let rec shapeValue = function
-        | OneOfShape shapes -> List(shapes |> List.map shapeValue)
+        | OneOfShape shapes -> ofList(shapes |> List.map shapeValue)
         | shape -> Atom(shapeName shape)
 
     let rec shapeMatches shape value =

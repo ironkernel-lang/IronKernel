@@ -61,14 +61,14 @@ let ``shift and reset core`` () =
 [<Fact>]
 let ``shift and reset with lists`` () =
     evalSessionKernel [
-        "(cons 1 (reset (cons 2 (shift (lambda (k) (cons 3 '()))))))", List [Obj 1; Obj 3]
-        "(cons 1 (reset (cons 2 '())))", List [Obj 1; Obj 2]
+        "(cons 1 (reset (cons 2 (shift (lambda (k) (cons 3 '()))))))", ofList [Obj 1; Obj 3]
+        "(cons 1 (reset (cons 2 '())))", ofList [Obj 1; Obj 2]
         "(cons 'a (reset (cons 'b (shift (lambda (k) (cons 1 (k (k (cons 'c '())))))))))",
-            List [Atom "a"; Obj 1; Atom "b"; Atom "b"; Atom "c"]
+            ofList [Atom "a"; Obj 1; Atom "b"; Atom "b"; Atom "c"]
         "(cons 1 (reset (cons 2 (shift (lambda (k) (cons 3 (k (cons 4 '()))))))))",
-            List [Obj 1; Obj 3; Obj 2; Obj 4]
+            ofList [Obj 1; Obj 3; Obj 2; Obj 4]
         "(cons 1 (reset (cons 2 (shift (lambda (k) (cons 3 (k (k (cons 4 '())))))))))",
-            List [Obj 1; Obj 3; Obj 2; Obj 2; Obj 4]
+            ofList [Obj 1; Obj 3; Obj 2; Obj 2; Obj 4]
     ]
 
 [<Fact>]
@@ -149,7 +149,7 @@ let ``tagged prompt lookup handles deeply nested prompt frames`` () =
 let ``generator style yield via shift`` () =
     evalSessionKernel [
         "(defn (yield x) (shift (lambda (k) (cons x (k (#inert))))))", Inert
-        "(reset (begin (yield 1) (yield 2) (yield 3) ()))", List [Obj 1; Obj 2; Obj 3]
+        "(reset (begin (yield 1) (yield 2) (yield 3) ()))", ofList [Obj 1; Obj 2; Obj 3]
     ]
 
 [<Fact>]

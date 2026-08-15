@@ -58,7 +58,7 @@ module PartialEval =
                     let folded =
                         match tryCreateContractGuard env name with
                         | Some (guard, _) ->
-                            match eval env (newContinuation env) (List(Atom name :: operands)) with
+                            match eval env (newContinuation env) (ofList(Atom name :: operands)) with
                             | Choice2Of2 value when isFoldedValue value ->
                                 CContractFold(guard, value, fallback)
                             | _ -> fallback

@@ -61,7 +61,7 @@ module Analyze =
             | IOFunc _
             | Port _
             | Status _ -> result <- Some(CLit current)
-            | List [] -> result <- Some(CLit(List []))
+            | List [] -> result <- Some(CLit(ofList []))
             | DottedList _ as form -> result <- Some(CResidual form)
             | List (Atom name :: args) ->
                 // Desugar Clojure-style CLR calls before binding analysis so the
@@ -288,7 +288,7 @@ module Analyze =
                 match current with
                 | CLit value -> completed <- value :: completed
                 | CVar name -> completed <- Atom name :: completed
-                | CQuote value -> completed <- List [Atom "quote"; value] :: completed
+                | CQuote value -> completed <- ofList [Atom "quote"; value] :: completed
                 | CIf(condition, consequent, alternative) ->
                     pending <-
                         Reify condition
@@ -314,9 +314,9 @@ module Analyze =
                 | COperate(operator, operands) ->
                     pending <- Reify operator :: BuildOperate operands :: pending
                 | CIntrinsicOperate(PrimitiveIf, operands) ->
-                    completed <- List (Atom "if" :: operands) :: completed
+                    completed <- ofList (Atom "if" :: operands) :: completed
                 | CIntrinsicOperate(PrimitiveDefine, operands) ->
-                    completed <- List (Atom "define" :: operands) :: completed
+                    completed <- ofList (Atom "define" :: operands) :: completed
                 | CGuarded(_, _, fallback)
                 | CContractFold(_, _, fallback) ->
                     pending <- Reify fallback :: pending
@@ -332,32 +332,32 @@ module Analyze =
             | BuildIf ->
                 match takeCompleted 3 with
                 | [condition; consequent; alternative] ->
-                    completed <- List [Atom "if"; condition; consequent; alternative] :: completed
+                    completed <- ofList [Atom "if"; condition; consequent; alternative] :: completed
                 | _ -> invalidOp "Conditional reification is incomplete"
             | BuildSequence count ->
-                completed <- List (Atom "sequence" :: takeCompleted count) :: completed
+                completed <- ofList (Atom "sequence" :: takeCompleted count) :: completed
             | BuildDefine ->
                 match takeCompleted 2 with
-                | [lhs; rhs] -> completed <- List [Atom "define"; lhs; rhs] :: completed
+                | [lhs; rhs] -> completed <- ofList [Atom "define"; lhs; rhs] :: completed
                 | _ -> invalidOp "Definition reification is incomplete"
             | BuildVau(formals, envarg, bodyCount) ->
                 completed <-
-                    List (Atom "vau" :: formals :: Atom envarg :: takeCompleted bodyCount)
+                    ofList (Atom "vau" :: formals :: Atom envarg :: takeCompleted bodyCount)
                     :: completed
             | BuildApp argumentCount ->
-                completed <- List (takeCompleted (argumentCount + 1)) :: completed
+                completed <- ofList (takeCompleted (argumentCount + 1)) :: completed
             | BuildOperate operands ->
                 match takeCompleted 1 with
-                | [operator] -> completed <- List (operator :: operands) :: completed
+                | [operator] -> completed <- ofList (operator :: operands) :: completed
                 | _ -> invalidOp "Operation reification is incomplete"
             | BuildEval ->
                 match takeCompleted 2 with
                 | [environmentExpression; valueExpression] ->
-                    completed <- List [Atom "eval"; environmentExpression; valueExpression] :: completed
+                    completed <- ofList [Atom "eval"; environmentExpression; valueExpression] :: completed
                 | _ -> invalidOp "Eval reification is incomplete"
             | BuildReset ->
                 match takeCompleted 1 with
-                | [body] -> completed <- List [Atom "reset"; body] :: completed
+                | [body] -> completed <- ofList [Atom "reset"; body] :: completed
                 | _ -> invalidOp "Reset reification is incomplete"
 
         match completed with

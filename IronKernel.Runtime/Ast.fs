@@ -233,8 +233,10 @@ module Ast =
     }
     and LispVal = 
         | Atom of string 
-        | List of LispVal list
-        | DottedList of (LispVal list * LispVal)
+        /// R-1RK's pair. A list is a chain of these ending at Nil; an improper list
+        /// ends at anything else. ADR 0005: the cell is mutable so that set-car! and
+        /// set-cdr! have somewhere to write, though nothing mutates one yet.
+        | Pair of PairCell
         | Bool of bool
         | Environment of EnvironmentRecord
         | PrimitiveOperative of PrimitiveOperativeRecord
@@ -255,6 +257,18 @@ module Ast =
         | Encapsulation of EncapsulationRecord
         /// CLR-compiled combiner (Expression / IL).
         | CompiledCombiner of (LispVal -> LispVal -> LispVal list -> Step)
+
+    /// Reference equality, not structural: two cells are the same pair only if they
+    /// are the same object, which is what `eq?` will come to mean (ADR 0005 phase 2).
+    /// It also keeps the compiler-generated equality on LispVal from walking a cycle
+    /// once one can exist.
+    and [<ReferenceEquality>] PairCell = {
+        mutable car : LispVal
+        mutable cdr : LispVal
+        /// R-1RK distinguishes mutable from immutable pairs (4.7.2). Everything is
+        /// built immutable until phase 3 gives set-car! something to refuse.
+        mutable immutable : bool
+    }
 
     and LispError = 
        | NumArgs of int * LispVal list
@@ -295,6 +309,65 @@ module Ast =
     /// Identity today, and deliberately not `List.map acquireImmutable`: that would
     /// allocate a new list on every operative construction to no effect.
     let acquireImmutableForms (forms: LispVal list) = forms
+
+    /// The pair constructors. Kernel structure is built immutable throughout phase 1,
+    /// so nothing observable changes; phase 3 adds the mutable constructors that
+    /// `cons` and `list` will use.
+    let consImmutable car cdr = Pair { car = car; cdr = cdr; immutable = true }
+
+    let ofList (values: LispVal list) = List.foldBack consImmutable values Nil
+
+    let ofDotted (values: LispVal list) (tail: LispVal) =
+        List.foldBack consImmutable values tail
+
+    /// A bound on how far the list patterns walk. Nothing builds a cycle yet, but the
+    /// patterns answer "is this a proper list of the shape I expect", and once
+    /// `encycle!` exists (phase 5) the honest answer for a cyclic argument is no
+    /// rather than a hang.
+    let private chainLimit = 10_000_000
+
+    /// Matches a proper list -- a chain of pairs ending at Nil -- and yields its
+    /// elements. `Nil` matches as the empty list, so `| List [] ->` still reads the
+    /// empty list and `| List (x :: rest) ->` still destructures a non-empty one.
+    let (|List|_|) (value: LispVal) : LispVal list option =
+        let mutable current = value
+        let mutable acc = []
+        let mutable steps = 0
+        let mutable result = None
+        let mutable walking = true
+        while walking do
+            match current with
+            | Nil ->
+                result <- Some(List.rev acc)
+                walking <- false
+            | Pair cell when steps < chainLimit ->
+                acc <- cell.car :: acc
+                current <- cell.cdr
+                steps <- steps + 1
+            | _ -> walking <- false
+        result
+
+    /// Matches an improper list: at least one pair, ending at something other than
+    /// Nil. Yields the elements before the tail, and the tail.
+    let (|DottedList|_|) (value: LispVal) : (LispVal list * LispVal) option =
+        let mutable current = value
+        let mutable acc = []
+        let mutable steps = 0
+        let mutable result = None
+        let mutable walking = true
+        while walking do
+            match current with
+            | Pair cell when steps < chainLimit ->
+                acc <- cell.car :: acc
+                current <- cell.cdr
+                steps <- steps + 1
+            | Nil -> walking <- false
+            | tail ->
+                if List.isEmpty acc then walking <- false
+                else
+                    result <- Some(List.rev acc, tail)
+                    walking <- false
+        result
 
     let makeObj = (fun x -> x :> obj  |> Obj)
 
@@ -417,6 +490,10 @@ module Ast =
                     pending <- Append " & " :: pending
                     prependValues head
                     pending <- Append "(" :: pending
+                // A pair that is neither proper nor improper has come back on itself.
+                // Nothing builds one yet; ADR 0005 phase 4 gives cyclic structure its
+                // external representation, and until then saying so beats looping.
+                | Pair _ -> output.Append("<circular list>") |> ignore
                 | Applicative applicative ->
                     pending <- Render applicative :: Append " >" :: pending
                     pending <- Append "<applicative " :: pending

@@ -61,17 +61,17 @@
             | badArgList -> fail (NumArgs(1,badArgList))
 
         let cdr env cont = function 
-            | [List(_::xs)] -> bounceContinue env cont (List xs)
+            | [List(_::xs)] -> bounceContinue env cont (ofList xs)
             | [DottedList([_],x)] -> bounceContinue env cont x
-            | [DottedList(_::xs,x)] -> bounceContinue env cont (DottedList(xs, x))
+            | [DottedList(_::xs,x)] -> bounceContinue env cont (ofDotted xs x)
             | [badArg] -> fail (TypeMismatch("pair",badArg))
             | badArgList -> fail (NumArgs(1,badArgList))
 
         let cons env cont = function
-            | [x; List []] -> bounceContinue env cont (List[x])
-            | [x; List(xs)] -> bounceContinue env cont (List(x::xs))
-            | [x;DottedList(xs,xlast)] -> bounceContinue env cont (DottedList(x::xs,xlast))
-            | [x1;x2] -> bounceContinue env cont (DottedList([x1],x2))
+            | [x; List []] -> bounceContinue env cont (ofList[x])
+            | [x; List(xs)] -> bounceContinue env cont (ofList(x::xs))
+            | [x;DottedList(xs,xlast)] -> bounceContinue env cont (ofDotted (x::xs) xlast)
+            | [x1;x2] -> bounceContinue env cont (ofDotted [x1] x2)
             | badArgList -> fail (NumArgs(2,badArgList))
 
         let private eqvValue left right =
@@ -96,14 +96,13 @@
                 | Bool arg1, Bool arg2 -> equal <- arg1 = arg2
                 | Atom arg1, Atom arg2 -> equal <- arg1 = arg2
                 | PromptTag arg1, PromptTag arg2 -> equal <- arg1 = arg2
-                | DottedList (xs, x), DottedList (ys, y) ->
-                    pending.Push(x, y)
-                    pushLists xs ys
-                | List xs, List ys -> pushLists xs ys
-                // Both spellings of the empty list, and either against the other. Left
-                // out, `Nil` was not even equal to itself, which breaks the reflexivity
-                // R-1RK 4.3.1 requires of an equivalence predicate.
-                | Nil, Nil | Nil, List [] | List [], Nil -> ()
+                // Compared cell by cell rather than through the list patterns, which
+                // materialised both chains before comparing them and walked each value
+                // twice over -- once failing DottedList, once matching List.
+                | Pair left, Pair right ->
+                    pending.Push(left.cdr, right.cdr)
+                    pending.Push(left.car, right.car)
+                | Nil, Nil -> ()
                 | _ -> equal <- false
 
             equal
@@ -176,7 +175,7 @@
                 either {
                     let! path = cast filename
                     let! expressions = load path
-                    return List expressions
+                    return ofList expressions
                 }
             | [found] -> throwError(TypeMismatch("string", found))
             | bad -> throwError(NumArgs(1, bad))
@@ -211,11 +210,10 @@
                     ("read-contents", readContents);
                     ("read-all", readAll) ]
 
+        // Nil is the empty list, so this is one comparison. Spelled `List []` it went
+        // through the list pattern, which walks a whole chain to build its elements
+        // before discovering they are not empty -- O(n) for a question about one cell.
         let isNull env cont = function 
-            | [List[]]   -> bounceContinue env cont <| Bool(true) 
-            // The producers normalise to `List []`, but the predicate accepts the bare
-            // case too, so that a future one cannot quietly reintroduce a value that is
-            // not `null?`.
             | [Nil]      -> bounceContinue env cont <| Bool(true) 
             | _          -> bounceContinue env cont <| Bool(false)
 
@@ -227,9 +225,11 @@
             | [Vector _ ]   -> bounceContinue env cont <| Bool(true) 
             | _          -> bounceContinue env cont <| Bool(false)
 
+        // Likewise: a pair is one cell. Asking through the list patterns walked the
+        // chain twice -- once to fail DottedList, once to match List -- which made
+        // every (pair? xs) in the list library linear in the list.
         let isPair env cont = function 
-            | [DottedList _]    -> bounceContinue env cont <| Bool(true) 
-            | [List (_::_) ]    -> bounceContinue env cont <| Bool(true) 
+            | [Pair _]          -> bounceContinue env cont <| Bool(true) 
             | _                 -> bounceContinue env cont <| Bool(false)
 
         /// R-1RK 12.5.1. `number?` and `integer?` are type predicates, so a
@@ -440,7 +440,7 @@
             | [ l; r ] ->
                 let cps e c result _ = bounceBind e c l result
                 bounceEval env (makeCPS env cont cps) r 
-            | badForm -> fail (BadSpecialForm("invalid arguments",List(badForm)))
+            | badForm -> fail (BadSpecialForm("invalid arguments",ofList(badForm)))
 
         let rec private parseContractShape = function
             | Atom "any" -> Some AnyShape
@@ -523,9 +523,9 @@
                     bounceContinue
                         env
                         cont
-                        (List
+                        (ofList
                             [ mode
-                              List(List.map shapeValue contract.operands)
+                              ofList(List.map shapeValue contract.operands)
                               shapeValue contract.result
                               effect
                               Bool contract.inlineable
@@ -693,7 +693,7 @@
             Applicative(
                 PrimitiveOperative
                     { identity = None
-                      invoke = fun e c args -> passAbnormally e c target (List args) })
+                      invoke = fun e c args -> passAbnormally e c target (ofList args) })
 
         /// The whole chain of interceptions is scheduled at once as *normal* passes, so
         /// that handing the value from one interceptor to the next is not itself subject
@@ -1368,7 +1368,7 @@
                         List.length items, (match tail with List [] -> 1 | _ -> 0)
                     | _ -> 0, 0
                 let counted n = Obj(box n)
-                bounceContinue env cont (List [counted pairs; counted nils; counted pairs; counted 0])
+                bounceContinue env cont (ofList [counted pairs; counted nils; counted pairs; counted 0])
             | _ -> fail (NumArgs(1, args))
 
         /// R-1RK 12.10. Like 12.9 the report gives these signatures only, so they take
@@ -1615,18 +1615,18 @@
         let getRealInternalBounds env cont args =
             realArgument args (fun value ->
                 if isExactValue value then
-                    bounceContinue env cont (List [Obj value; Obj value])
+                    bounceContinue env cont (ofList [Obj value; Obj value])
                 else
                     bounceContinue env cont (
-                        List [Obj(internalInfinity value false); Obj(internalInfinity value true)]))
+                        ofList [Obj(internalInfinity value false); Obj(internalInfinity value true)]))
 
         let getRealExactBounds env cont args =
             realArgument args (fun value ->
                 if isExactValue value then
-                    bounceContinue env cont (List [Obj value; Obj value])
+                    bounceContinue env cont (ofList [Obj value; Obj value])
                 else
                     bounceContinue env cont (
-                        List [Obj(box ExactNegativeInfinity); Obj(box ExactPositiveInfinity)]))
+                        ofList [Obj(box ExactNegativeInfinity); Obj(box ExactPositiveInfinity)]))
 
         /// R-1RK 12.6.3. Both signal an error when there is no primary value, which
         /// keeps get-real-exact-primary's promise to return an exact real and
@@ -1691,7 +1691,7 @@
                     [lower; primary; upper]
                     |> List.forall (fun v -> isNumberValue v && not (v :? Numerics.Complex)) ->
                 bounceContinue env cont (Obj(inexactValueOf primary))
-            | [_; _; _] -> fail (TypeMismatch("real", List args))
+            | [_; _; _] -> fail (TypeMismatch("real", ofList args))
             | _ -> fail (NumArgs(3, args))
 
         /// R-1RK 12.6.6 and 12.7.1 are each "the binder and accessor of" a keyed
@@ -1745,7 +1745,7 @@
             | [a; b] ->
                 match opDivAndMod a b with
                 | Choice2Of2 (quotient, remainder) ->
-                    bounceContinue env cont (List [quotient; remainder])
+                    bounceContinue env cont (ofList [quotient; remainder])
                 | Choice1Of2 error -> fail error
             | _ -> fail (NumArgs(2, args))
 
@@ -1820,7 +1820,7 @@
                             | [_] -> fail(Default "encapsulation type mismatch")
                             | bad -> fail(NumArgs(1, bad))))
 
-                List [encapsulator; predicate; decapsulator] |> bounceContinue env cont
+                ofList [encapsulator; predicate; decapsulator] |> bounceContinue env cont
             | bad -> fail(NumArgs(0, bad))
 
         /// R-1RK 10.1.1. Each call returns a fresh `(binder accessor)` pair sharing a
@@ -1860,7 +1860,7 @@
                                     fail (Default "keyed dynamic variable is unbound here")
                             | bad -> fail (NumArgs(0, bad))))
 
-                List [binder; accessor] |> bounceContinue env cont
+                ofList [binder; accessor] |> bounceContinue env cont
             | bad -> fail(NumArgs(0, bad))
 
         /// R-1RK 11.1.1, the static counterpart of 10.1.1. Each call returns a fresh
@@ -1904,7 +1904,7 @@
                                 | None -> fail (Default "keyed static variable is unbound here")
                             | bad -> fail (NumArgs(0, bad))))
 
-                List [binder; accessor] |> bounceContinue env cont
+                ofList [binder; accessor] |> bounceContinue env cont
             | bad -> fail(NumArgs(0, bad))
 
         let primitiveApplicatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =

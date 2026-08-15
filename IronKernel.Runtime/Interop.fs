@@ -292,10 +292,10 @@
         let clr_opens env cont = function
             | [] ->
                 match clrState env with
-                | None -> bounceContinue env cont (List [])
+                | None -> bounceContinue env cont (ofList [])
                 | Some record ->
                     let names = !record.clrNamespaces |> List.map Atom
-                    bounceContinue env cont (List names)
+                    bounceContinue env cont (ofList names)
             | bad -> fail (NumArgs(0, bad))
 
         let print env cont (prms : LispVal list) =

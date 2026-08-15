@@ -39,7 +39,7 @@ let ``analysis handles deeply nested operator positions`` () =
     let depth = 100_000
     let mutable form = Atom "deep-operator"
     for _ in 1..depth do
-        form <- List [form]
+        form <- ofList [form]
 
     let assertShape analyzed =
         let mutable current = analyzed

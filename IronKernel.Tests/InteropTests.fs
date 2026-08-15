@@ -106,8 +106,8 @@ let ``single-parent environments copy CLR namespace state`` () =
     let child = newEnv [parent]
     ignore (evalIn child "(clr-open System.Text)")
 
-    assertEval parent "(clr-opens)" (List [Atom "System"])
-    assertEval child "(clr-opens)" (List [Atom "System"; Atom "System.Text"])
+    assertEval parent "(clr-opens)" (ofList [Atom "System"])
+    assertEval child "(clr-opens)" (ofList [Atom "System"; Atom "System.Text"])
 
 [<Fact>]
 let ``clr-alias binds a short type name`` () =

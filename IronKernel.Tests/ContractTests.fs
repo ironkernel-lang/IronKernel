@@ -17,7 +17,7 @@ let ``operative contract validates raw operand syntax`` () =
     withKernel (fun env ->
         ignore (evalIn env "(define raw (vau operands _ operands))")
         ignore (evalIn env "(contract raw operative (any) any pure #t)")
-        assertEval env "(raw (+ 1 2))" (List [List [Atom "+"; Obj (1 :> obj); Obj (2 :> obj)]])
+        assertEval env "(raw (+ 1 2))" (ofList [ofList [Atom "+"; Obj (1 :> obj); Obj (2 :> obj)]])
 
         match evalRaw Interpreted env "(raw 1 2)" with
         | Choice1Of2 (ContractViolation message) -> Assert.Contains("expected 1 operands", message)
@@ -32,9 +32,9 @@ let ``applicative contract validates argument and result values`` () =
         assertEval
             env
             "(contract-of double)"
-            (List
+            (ofList
                 [ Atom "applicative"
-                  List [Atom "number"]
+                  ofList [Atom "number"]
                   Atom "number"
                   Atom "pure"
                   Bool true
@@ -64,7 +64,7 @@ let ``wrap preserves contract metadata with eager argument policy`` () =
         [ "(define raw (vau operands _ operands))", Inert
           "(contract raw operative (number) list pure #t)", Inert
           "(define eager (wrap raw))", Inert
-          "(eager (+ 1 2))", List [Obj (3 :> obj)] ]
+          "(eager (+ 1 2))", ofList [Obj (3 :> obj)] ]
 
 [<Fact>]
 let ``wrap preserves applicative contract metadata without nesting`` () =
@@ -75,9 +75,9 @@ let ``wrap preserves applicative contract metadata without nesting`` () =
         assertEval
             env
             "(contract-of wrapped)"
-            (List
+            (ofList
                 [ Atom "applicative"
-                  List [Atom "number"]
+                  ofList [Atom "number"]
                   Atom "number"
                   Atom "pure"
                   Bool true
@@ -88,11 +88,11 @@ let ``wrap preserves applicative contract metadata without nesting`` () =
         assertEval
             env
             "(contract-of wrapped-plus)"
-            (List
+            (ofList
                 [ Atom "applicative"
-                  List
-                      [ List [Atom "number"; Atom "datetime"]
-                        List [Atom "number"; Atom "timespan"] ]
+                  ofList
+                      [ ofList [Atom "number"; Atom "datetime"]
+                        ofList [Atom "number"; Atom "timespan"] ]
                   Atom "any"
                   Atom "pure"
                   Bool true

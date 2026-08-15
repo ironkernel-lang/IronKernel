@@ -404,7 +404,7 @@ module Eval =
                         Nil)
 
             let newEnv = newEnv [closure]
-            match bind newEnv (newContinuation _env) prms (List args) with
+            match bind newEnv (newContinuation _env) prms (ofList args) with
             | Choice1Of2 error -> fail error
             | Choice2Of2 _ ->
                 match defineVar newEnv envarg _env with
@@ -415,7 +415,7 @@ module Eval =
         // nor `eqv?` to itself, because the predicates and the equivalence walk only
         // know the `List` spelling. ADR 0005 phase 1 removes the duplicate case; until
         // then the producers normalise.
-        | Inert -> More (fun () -> continueEvalStep _env cont (List []))
+        | Inert -> More (fun () -> continueEvalStep _env cont (ofList []))
         | _ -> fail (BadSpecialForm ("Expecting a combiner, got ", func))
 
     and bindStep env cont lf rf : Step =
@@ -437,7 +437,7 @@ module Eval =
             | List (head :: tail) ->
                 match value with
                 | List (valueHead :: valueTail) ->
-                    pending <- (head, valueHead) :: (List tail, List valueTail) :: pending
+                    pending <- (head, valueHead) :: (ofList tail, ofList valueTail) :: pending
                 | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
             | DottedList ([], rest) ->
                 match value with
@@ -447,11 +447,11 @@ module Eval =
                 match value with
                 | List (valueHead :: valueTail) ->
                     pending <-
-                        (head, valueHead) :: (DottedList(tail, rest), List valueTail) :: pending
+                        (head, valueHead) :: (ofDotted tail rest, ofList valueTail) :: pending
                 | DottedList (valueHead :: valueTail, valueRest) ->
                     pending <-
                         (head, valueHead)
-                        :: (DottedList(tail, rest), DottedList(valueTail, valueRest))
+                        :: (ofDotted tail rest, ofDotted valueTail valueRest)
                         :: pending
                 | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
             | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
