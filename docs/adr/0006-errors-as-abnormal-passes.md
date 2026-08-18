@@ -1,6 +1,6 @@
 # ADR 0006: Errors as abnormal passes
 
-Status: Proposed
+Status: Accepted — phase 1 done, phases 2-4 outstanding
 
 ## Decision
 
@@ -145,11 +145,26 @@ good check on the migration rather than a formality.
 
 ## Plan
 
-**Phase 1 — a signalling seam.** Introduce `signal cont error` alongside `fail`,
-defined as `fail` ignoring its continuation. Migrate the 199 sites to it
-mechanically, with no behaviour change. This is the phase-0-and-1 pattern from ADR
-0005: land the plumbing while it does nothing, so the phase that changes behaviour
-is small and reviewable.
+**Phase 1 — a signalling seam.** *Done.* `signal cont error` sits beside `fail` and
+ignores its continuation, so nothing changes yet. 200 sites now signal; 8 still
+`fail`, and those are exactly the ones with no continuation to signal from -- six
+where the continuation *argument* is itself malformed, and the internal error for a
+metacontinuation in the wrong position.
+
+The migration was not quite as mechanical as this plan assumed, and the part that
+was not is the part phase 2 depends on. `signal` takes the continuation the failing
+operation would have returned to, which is the *innermost* one in scope, and eleven
+sites sit inside a CPS callback that binds its own -- the guard interceptor, the
+port-closing callbacks, the encapsulation and keyed-variable constructors. At those,
+the enclosing primitive's `cont` is also in scope, so a blanket rewrite compiles and
+is silently wrong. They were found by scanning for callback binders rather than by
+the compiler, and are the reason this phase is worth doing before the behaviour
+changes rather than during.
+
+Two other things the sweep turned up: four sites had no continuation in scope at all
+and one of them, `realArgument`, needed one threaded in from its callers; and a
+handful spelled the call `fail(` without a space, so a pattern requiring one missed
+them.
 
 **Phase 2 — route through the machinery.** Make `signal` perform the abnormal pass.
 With no guards installed, every existing test must still pass unchanged; that suite

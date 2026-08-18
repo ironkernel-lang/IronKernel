@@ -44,7 +44,7 @@
                 match op a b with
                 | Choice2Of2 result -> bounceContinue env cont result
                 | Choice1Of2 error -> fail error
-            | _ -> fail (NumArgs(2,prms))
+            | _ -> signal cont (NumArgs(2,prms))
 
         let numBoolBinop env cont (op: LispVal -> LispVal -> ThrowsError<LispVal>) prms : Step = 
             match prms with 
@@ -52,7 +52,7 @@
                 match op a b with
                 | Choice2Of2 result -> bounceContinue env cont result
                 | Choice1Of2 error -> fail error
-            | _ -> fail (NumArgs(2,prms))
+            | _ -> signal cont (NumArgs(2,prms))
 
         // The three fundamental operations, each one cell access. Asked through the
         // list patterns they were linear: `car` walked a whole chain to read its first
@@ -62,17 +62,17 @@
         // and what set-cdr! will need in phase 3.
         let car env cont = function
             | [Pair cell] -> bounceContinue env cont cell.car
-            | [badArg] -> fail (TypeMismatch("pair",badArg))
-            | badArgList -> fail (NumArgs(1,badArgList))
+            | [badArg] -> signal cont (TypeMismatch("pair",badArg))
+            | badArgList -> signal cont (NumArgs(1,badArgList))
 
         let cdr env cont = function 
             | [Pair cell] -> bounceContinue env cont cell.cdr
-            | [badArg] -> fail (TypeMismatch("pair",badArg))
-            | badArgList -> fail (NumArgs(1,badArgList))
+            | [badArg] -> signal cont (TypeMismatch("pair",badArg))
+            | badArgList -> signal cont (NumArgs(1,badArgList))
 
         let cons env cont = function
             | [x; y] -> bounceContinue env cont (cons x y)
-            | badArgList -> fail (NumArgs(2,badArgList))
+            | badArgList -> signal cont (NumArgs(2,badArgList))
 
         /// R-1RK 4.2.1 and 4.3.1. One walk serves both predicates; `pairsByIdentity`
         /// is what separates them.
@@ -147,12 +147,12 @@
             match args with
             | [Pair cell; object'] ->
                 if cell.immutable then
-                    fail (Default(name + ": pair is immutable"))
+                    signal cont (Default(name + ": pair is immutable"))
                 else
                     assign cell object'
                     bounceContinue env cont Inert
-            | [found; _] -> fail (TypeMismatch("pair", found))
-            | _ -> fail (NumArgs(2, args))
+            | [found; _] -> signal cont (TypeMismatch("pair", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         let setCar env cont args =
             setPairPart "set-car!" (fun cell value -> cell.car <- value) env cont args
@@ -309,12 +309,12 @@
         let private closeFile name wanted env cont args =
             match args with
             | [Port stream as port] ->
-                if not (wanted stream) then fail (TypeMismatch(name + " port", port))
+                if not (wanted stream) then signal cont (TypeMismatch(name + " port", port))
                 else
                     try stream.Close() with _ -> ()
                     bounceContinue env cont Inert
-            | [found] -> fail (TypeMismatch("port", found))
-            | _ -> fail (NumArgs(1, args))
+            | [found] -> signal cont (TypeMismatch("port", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         let closeInputFile env cont args =
             closeFile "input" (fun (s: IO.Stream) -> s.CanRead) env cont args
@@ -325,12 +325,12 @@
         let getCurrentInputPort env cont args =
             match args with
             | [] -> bounceContinue env cont (currentInput cont)
-            | _ -> fail (NumArgs(0, args))
+            | _ -> signal cont (NumArgs(0, args))
 
         let getCurrentOutputPort env cont args =
             match args with
             | [] -> bounceContinue env cont (currentOutput cont)
-            | _ -> fail (NumArgs(0, args))
+            | _ -> signal cont (NumArgs(0, args))
 
         let ioPrimitives : (string * (LispVal list -> ThrowsError<LispVal>)) list =
             [
@@ -424,8 +424,8 @@
                     match isFiniteValue value with
                     | Some true -> loop rest
                     | Some false -> bounceContinue env cont (Bool false)
-                    | None -> fail (TypeMismatch("number", Obj value))
-                | found :: _ -> fail (TypeMismatch("number", found))
+                    | None -> signal cont (TypeMismatch("number", Obj value))
+                | found :: _ -> signal cont (TypeMismatch("number", found))
             loop args
 
         /// Signals an error from Kernel code. Not a feature of the report's required
@@ -435,9 +435,9 @@
         let raiseError _ cont args =
             ignore cont
             match args with
-            | [Obj message] -> fail (Default(string message))
-            | [] -> fail (Default "error")
-            | values -> fail (Default(String.Join(" ", values |> List.map showVal)))
+            | [Obj message] -> signal cont (Default(string message))
+            | [] -> signal cont (Default "error")
+            | values -> signal cont (Default(String.Join(" ", values |> List.map showVal)))
 
         /// R-1RK 12.5.7: (zero? . numbers), true when every argument is zero. A
         /// non-number is an error rather than false: zero? is not a type predicate.
@@ -459,7 +459,7 @@
                         | :? Numerics.Complex as c -> c = Numerics.Complex.Zero
                         | _ -> false
                     if isZeroValue then loop rest else bounceContinue env cont (Bool false)
-                | found :: _ -> fail (TypeMismatch("number", found))
+                | found :: _ -> signal cont (TypeMismatch("number", found))
             loop args
         
         open Arithmetic
@@ -480,7 +480,7 @@
                         Applicative(ContractedCombiner(withEagerMode contracted))
                     | _ -> Applicative combiner
                 bounceContinue env cont wrapped
-            | bad -> fail(NumArgs(1, bad))
+            | bad -> signal cont (NumArgs(1, bad))
 
         let unwrap env cont = function
             | Applicative (ContractedCombiner contracted) :: _ ->
@@ -493,13 +493,13 @@
                                 { contracted.contract with
                                     mode = RawOperands } })
             | Applicative c :: _ -> bounceContinue env cont c
-            | a :: _ -> fail (TypeMismatch("applicative",a))
-            | [] -> fail (NumArgs(1, []))
+            | a :: _ -> signal cont (TypeMismatch("applicative",a))
+            | [] -> signal cont (NumArgs(1, []))
 
         /// R-1RK 4.8.3: (eval expression environment).
         let evaluate _ cont = function
             | (expression::environment::_) -> bounceEval environment cont expression
-            | badArgList -> fail (NumArgs(2, badArgList))
+            | badArgList -> signal cont (NumArgs(2, badArgList))
 
         let makeEnvironment env cont parents =
             let parentCapabilities =
@@ -522,13 +522,13 @@
                      match r with
                         |Bool(true) -> bounceEval e cn b 
                         |Bool(false) -> bounceEval e cn c
-                        |found -> fail (TypeMismatch("bool",found))
+                        |found -> signal cont (TypeMismatch("bool",found))
                 bounceEval env (makeCPS env cont cps) cond
-            |_ -> fail (NumArgs(3,args))
+            |_ -> signal cont (NumArgs(3,args))
 
         let loadAndEval env cont = function
             | _ when not (has SourceLoading env) ->
-                fail (CapabilityDenied "source loading requires SourceLoading")
+                signal cont (CapabilityDenied "source loading requires SourceLoading")
             | [Obj(filename)] ->
                 match cast filename with
                 | Choice1Of2 e -> fail e
@@ -549,7 +549,7 @@
                         match sequence (List.map evaluateForm lisp) [] with
                         | Choice1Of2 e -> fail e
                         | Choice2Of2 _ -> bounceContinue env cont Inert
-            | badform -> fail (NumArgs(1, badform))
+            | badform -> signal cont (NumArgs(1, badform))
 
         /// R-1RK 4.10.3. The parameter tree and the body are acquired immutably, per
         /// 4.7.2: an operative must not change under whoever captured it. See ADR 0005
@@ -571,14 +571,14 @@
             match xs with
             | prms :: Atom e :: body -> build prms e body
             | prms :: Ignore :: body -> build prms ignoredEnvironmentName body
-            | _ -> fail (Default("invalid arguments"))
+            | _ -> signal cont (Default("invalid arguments"))
 
         let define env cont xs = 
             match xs with 
             | [ l; r ] ->
                 let cps e c result _ = bounceBind e c l result
                 bounceEval env (makeCPS env cont cps) r 
-            | badForm -> fail (BadSpecialForm("invalid arguments",ofList(badForm)))
+            | badForm -> signal cont (BadSpecialForm("invalid arguments",ofList(badForm)))
 
         let rec private parseContractShape = function
             | Atom "any" -> Some AnyShape
@@ -636,10 +636,10 @@
                         | Choice1Of2 error -> fail error
                         | Choice2Of2 _ -> bounceContinue env cont Inert
                     | None ->
-                        fail (ContractViolation(name + " contract mode does not match its combiner"))
+                        signal cont (ContractViolation(name + " contract mode does not match its combiner"))
                 | _, _, _, Choice1Of2 error -> fail error
-                | _ -> fail (ContractViolation("invalid contract specification for " + name))
-            | bad -> fail (NumArgs(6, bad))
+                | _ -> signal cont (ContractViolation("invalid contract specification for " + name))
+            | bad -> signal cont (NumArgs(6, bad))
 
         let contractOf env cont = function
             | [value] ->
@@ -668,7 +668,7 @@
                               effect
                               Bool contract.inlineable
                               trust ])
-            | bad -> fail (NumArgs(1, bad))
+            | bad -> signal cont (NumArgs(1, bad))
 
         let reset env cont = function
             | [body] ->
@@ -678,9 +678,9 @@
                     match tag with
                     | PromptTag id ->
                         bounceEval e (promptContinuation e c (Some id) None) body
-                    | found -> fail (TypeMismatch("prompt-tag", found))
+                    | found -> signal cont (TypeMismatch("prompt-tag", found))
                 bounceEval env (makeCPS env cont install) tagExpression
-            | badform -> fail (NumArgs(1,badform))
+            | badform -> signal cont (NumArgs(1,badform))
 
         let prompt env cont = function
             | [tagExpression; handlerExpression; body] ->
@@ -698,11 +698,11 @@
                                         (Some id)
                                         (Some handler))
                                     body
-                            | found -> fail (TypeMismatch("applicative handler", found))
+                            | found -> signal cont (TypeMismatch("applicative handler", found))
                         bounceEval e (makeCPS e c captureHandler) handlerExpression
-                    | found -> fail (TypeMismatch("prompt-tag", found))
+                    | found -> signal cont (TypeMismatch("prompt-tag", found))
                 bounceEval env (makeCPS env cont captureTag) tagExpression
-            | badform -> fail (NumArgs(3, badform))
+            | badform -> signal cont (NumArgs(3, badform))
          
         /// R-1RK 6.7.1. Operative: the first operand is evaluated in the dynamic
         /// environment and must be an environment; the rest are symbols, and the
@@ -725,11 +725,11 @@
                                 else More(fun () -> continueEvalStep env resultCont (Bool false))
                             // A non-symbol operand is a type error rather than false:
                             // the question "is this bound" has no meaning for it.
-                            | found :: _ -> fail (TypeMismatch("symbol", found))
+                            | found :: _ -> signal cont (TypeMismatch("symbol", found))
                         loop symbols
-                    | found -> fail (TypeMismatch("environment", found))
+                    | found -> signal cont (TypeMismatch("environment", found))
                 bounceEval env (makeCPS env cont decide) environmentExpression
-            | [] -> fail (NumArgs(1, args))
+            | [] -> signal cont (NumArgs(1, args))
 
         let primitiveOperatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [
@@ -893,14 +893,14 @@
                         | Applicative underlying ->
                             More(fun () ->
                                 operateStep guardEnv resultCont underlying [v; abnormalPass outer])
-                        | _ -> fail (TypeMismatch("applicative", interceptor))
+                        | _ -> signal resultCont (TypeMismatch("applicative", interceptor))
             chain interceptions value
 
         let continuationToApplicative env cont args =
             match args with
             | [Continuation _ as target] -> bounceContinue env cont (abnormalPass target)
-            | [found] -> fail (TypeMismatch("continuation", found))
-            | _ -> fail (NumArgs(1, args))
+            | [found] -> signal cont (TypeMismatch("continuation", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 7.3.1: (apply-continuation continuation object). Derived in the report
         /// from continuation->applicative and apply, but written directly here so that
@@ -909,8 +909,8 @@
         let applyContinuation env cont args =
             match args with
             | [Continuation _ as target; value] -> passAbnormally env cont target value
-            | [found; _] -> fail (TypeMismatch("continuation", found))
-            | _ -> fail (NumArgs(2, args))
+            | [found; _] -> signal cont (TypeMismatch("continuation", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         /// R-1RK 7.2.3. A child of `target` that, on normally receiving v, calls the
         /// underlying combiner of `applicative` with dynamic environment `dynamicEnv`
@@ -950,8 +950,8 @@
                 extend target applicative dynamicEnv
             | [target; applicative] ->
                 extend target applicative (newEnvWithClr (ofEnvironment env) [] [])
-            | [_; _; found] -> fail (TypeMismatch("environment", found))
-            | _ -> fail (NumArgs(2, args))
+            | [_; _; found] -> signal cont (TypeMismatch("environment", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         /// R-1RK 7.2.4. Each clause is (selector interceptor): a continuation, and an
         /// applicative whose underlying combiner is operative. The clauses are taken
@@ -1037,7 +1037,7 @@
                 | value :: _ ->
                     try stream.Close() with _ -> ()
                     More(fun () -> continueEvalStep e c value)
-                | [] -> fail (NumArgs(2, args))
+                | [] -> signal c (NumArgs(2, args))
             ofList [ofList [rootContinuation (); Applicative(PrimitiveOperative { identity = None; invoke = intercept })]]
 
         let private withPortFromFile name access key env cont args =
@@ -1059,9 +1059,9 @@
                             (makeDynamicBinding env guarded (key ()) port)
                             combiner
                             []
-                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
-            | [found; _] -> fail (TypeMismatch("string", found))
-            | _ -> fail (NumArgs(2, args))
+                | Choice2Of2 _ -> signal cont (Default(name + ": could not open the file"))
+            | [found; _] -> signal cont (TypeMismatch("string", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         let withInputFromFile env cont args =
             withPortFromFile "with-input-from-file" IO.FileAccess.Read currentInputKey env cont args
@@ -1084,9 +1084,9 @@
                     match buildGuarded env afterCall Nil (closingGuard stream) with
                     | Choice1Of2 error -> fail error
                     | Choice2Of2 guarded -> bounceOperate env guarded combiner [port]
-                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
-            | [found; _] -> fail (TypeMismatch("string", found))
-            | _ -> fail (NumArgs(2, args))
+                | Choice2Of2 _ -> signal cont (Default(name + ": could not open the file"))
+            | [found; _] -> signal cont (TypeMismatch("string", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         let callWithInputFile env cont args =
             callWithFile "call-with-input-file" IO.FileAccess.Read env cont args
@@ -1128,8 +1128,8 @@
             match args with
             | [value] -> finish (writeTo (currentOutput cont) value)
             | [value; (Port _ as port)] -> finish (writeTo port value)
-            | [_; found] -> fail (TypeMismatch("port", found))
-            | _ -> fail (NumArgs(1, args))
+            | [_; found] -> signal cont (TypeMismatch("port", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 15.1.7, and the counterpart of write: with no port the current input
         /// port is read, which is how `with-input-from-file` takes effect.
@@ -1163,8 +1163,8 @@
             match args with
             | [] -> finish (readFrom (currentInput cont))
             | [Port _ as port] -> finish (readFrom port)
-            | [found] -> fail (TypeMismatch("port", found))
-            | _ -> fail (NumArgs(0, args))
+            | [found] -> signal cont (TypeMismatch("port", found))
+            | _ -> signal cont (NumArgs(0, args))
           
         let guardContinuation env cont args =
             match args with
@@ -1172,8 +1172,8 @@
                 match buildGuarded env target entry exit with
                 | Choice2Of2 inner -> bounceContinue env cont inner
                 | Choice1Of2 error -> fail error
-            | [_; found; _] -> fail (TypeMismatch("continuation", found))
-            | _ -> fail (NumArgs(3, args))
+            | [_; found; _] -> signal cont (TypeMismatch("continuation", found))
+            | _ -> signal cont (NumArgs(3, args))
 
         /// R-1RK 7.3.3: extends the current continuation with the guards and calls
         /// combiner in the dynamic extent of the new continuation, with no operands and
@@ -1193,15 +1193,15 @@
                 match buildGuarded env cont entry exit with
                 | Choice1Of2 error -> fail error
                 | Choice2Of2 inner -> bounceOperate env inner combiner []
-            | _ -> fail (NumArgs(3, args))
+            | _ -> signal cont (NumArgs(3, args))
 
         let callcc env cont  = function 
             | [func] -> 
                 match func with 
                 | Continuation _    -> bounceContinue env func cont 
                 | Applicative f     -> bounceOperate env cont f [cont]
-                | badForm -> fail (TypeMismatch("continuation",badForm))
-            | badForm -> fail (NumArgs(1,badForm))
+                | badForm -> signal cont (TypeMismatch("continuation",badForm))
+            | badForm -> signal cont (NumArgs(1,badForm))
 
         let private captureShift env cont tag f =
             match findPrompt tag cont with
@@ -1216,17 +1216,17 @@
                     match tag with
                     | None -> "untagged prompt"
                     | Some _ -> "matching tagged prompt"
-                fail (Default("shift requires a " + description))
+                signal cont (Default("shift requires a " + description))
 
         let shift env cont = function
             | [Applicative f] -> captureShift env cont None f
             | [PromptTag tag; Applicative f] ->
                 captureShift env cont (Some tag) f
-            | bad -> fail (NumArgs(1, bad))
+            | bad -> signal cont (NumArgs(1, bad))
 
         let makePromptTag env cont = function
             | [] -> bounceContinue env cont (PromptTag(Guid.NewGuid()))
-            | bad -> fail (NumArgs(0, bad))
+            | bad -> signal cont (NumArgs(0, bad))
 
         let perform env cont = function
             | [PromptTag tag; value] ->
@@ -1250,16 +1250,16 @@
                         (makeCPS env frame.parentCont invalidateOnAbort)
                         handler
                         [value; resumption]
-                | Some _ -> fail (Default "matching prompt has no effect handler")
-                | None -> fail (Default "perform requires a matching tagged handler")
-            | [found; _] -> fail (TypeMismatch("prompt-tag", found))
-            | bad -> fail (NumArgs(2, bad))
+                | Some _ -> signal cont (Default "matching prompt has no effect handler")
+                | None -> signal cont (Default "perform requires a matching tagged handler")
+            | [found; _] -> signal cont (TypeMismatch("prompt-tag", found))
+            | bad -> signal cont (NumArgs(2, bad))
 
         let resume env cont = function
             | [Resumption resumption; value] ->
                 resumeEvaluatedStep env cont resumption value
-            | [found; _] -> fail (TypeMismatch("resumption", found))
-            | bad -> fail (NumArgs(2, bad))
+            | [found; _] -> signal cont (TypeMismatch("resumption", found))
+            | bad -> signal cont (NumArgs(2, bad))
 
         /// The result type has to be found by walking the base types, not by testing
         /// the concrete one. An F# `task { ... return v }` is an
@@ -1297,7 +1297,7 @@
 
         let awaitTask env cont = function
             | _ when not (has HostAsync env) ->
-                fail (CapabilityDenied "await-task requires HostAsync")
+                signal cont (CapabilityDenied "await-task requires HostAsync")
             | [Obj (:? Task as pending)] ->
                 Await
                     { register =
@@ -1312,12 +1312,12 @@
                         function
                         | Choice1Of2 error -> fail error
                         | Choice2Of2 value -> bounceContinue env cont value }
-            | [found] -> fail (TypeMismatch("Task", found))
-            | bad -> fail (NumArgs(1, bad))
+            | [found] -> signal cont (TypeMismatch("Task", found))
+            | bad -> signal cont (NumArgs(1, bad))
 
         let taskDelay env cont = function
             | _ when not (has HostAsync env) ->
-                fail (CapabilityDenied "task-delay requires HostAsync")
+                signal cont (CapabilityDenied "task-delay requires HostAsync")
             | [Obj (:? int as milliseconds); value] when milliseconds >= 0 ->
                 let pending =
                     task {
@@ -1325,8 +1325,8 @@
                         return value
                     }
                 bounceContinue env cont (Obj(pending :> obj))
-            | [found; _] -> fail (TypeMismatch("non-negative int", found))
-            | bad -> fail (NumArgs(2, bad))
+            | [found; _] -> signal cont (TypeMismatch("non-negative int", found))
+            | bad -> signal cont (NumArgs(2, bad))
 
         /// R-1RK 12.6.6. strict-arithmetic is a keyed dynamic variable like any other
         /// (chapter 10), except that its accessor answers even with no binder in scope.
@@ -1409,9 +1409,9 @@
         let private continueNumericFrom operands env cont value =
             match value with
             | Obj result when hasNoPrimaryValue result && isStrictArithmetic cont ->
-                fail (Default "arithmetic result has no primary value")
+                signal cont (Default "arithmetic result has no primary value")
             | Obj result when overflowed operands result && isStrictArithmetic cont ->
-                fail (Default "arithmetic overflow")
+                signal cont (Default "arithmetic overflow")
             | _ -> bounceContinue env cont value
 
         let private continueNumeric env cont value = continueNumericFrom [] env cont value
@@ -1453,7 +1453,7 @@
             match args with
             | [_; _] -> binaryOrFold opMinus (box 0) env cont args
             | _ :: _ :: _ -> foldNumeric opMinus (box 0) env cont args
-            | _ -> fail (NumArgs(2, args))
+            | _ -> signal cont (NumArgs(2, args))
         /// R-1RK 12.8.2: (/ number . numbers) divides number by the *product* of the
         /// rest, so (/ 24 2 3) is 4, not (24/2)/3 computed stepwise -- which agrees
         /// here, but the product is what the report specifies and it is what decides
@@ -1477,7 +1477,7 @@
                     match opDivide numerator divisor with
                     | Choice2Of2 result -> continueNumericFrom args env cont result
                     | Choice1Of2 error -> fail error
-            | _ -> fail (NumArgs(2, args))
+            | _ -> signal cont (NumArgs(2, args))
         /// R-1RK 12.9. The report gives these entries signatures only: Appendix A.2
         /// records that it is an incomplete draft whose unwritten portions were "only
         /// planned in rough outline". They therefore carry their standard mathematical
@@ -1539,7 +1539,7 @@
                     bounceContinue env cont (ofComplexValue (applyComplex c))
                 | _ ->
                     match toFloat value with
-                    | None -> fail (TypeMismatch("number", Obj value))
+                    | None -> signal cont (TypeMismatch("number", Obj value))
                     | Some input ->
                         let result = apply input
                         if Double.IsNaN result && not (Double.IsNaN input) then
@@ -1549,12 +1549,12 @@
                                 // 12.2's rule applies here as it does to arithmetic:
                                 // strict signals, non-strict returns the NaN.
                                 if isStrictArithmetic cont then
-                                    fail (Default(name + ": argument is outside the domain"))
+                                    signal cont (Default(name + ": argument is outside the domain"))
                                 else bounceContinue env cont (Obj(box result))
                             else bounceContinue env cont (ofComplexValue complex)
                         else bounceContinue env cont (Obj(box result))
-            | [found] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(1, args))
+            | [found] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 12.9.1: a complex is real iff its imaginary part is zero. Arithmetic
         /// collapses a zero-imaginary result back to a real, so a surviving Complex
@@ -1589,10 +1589,10 @@
             | [Obj y; Obj x] ->
                 match toFloat y, toFloat x with
                 | Some y', Some x' -> bounceContinue env cont (Obj(box (Math.Atan2(y', x'))))
-                | None, _ -> fail (TypeMismatch("number", Obj y))
-                | _, None -> fail (TypeMismatch("number", Obj x))
-            | [found; _] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(1, args))
+                | None, _ -> signal cont (TypeMismatch("number", Obj y))
+                | _, None -> signal cont (TypeMismatch("number", Obj x))
+            | [found; _] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// The numerator and denominator of an exact argument; None for an inexact one.
         let private asExact (value: obj) =
@@ -1637,7 +1637,7 @@
                     // An exact zero to a negative power divides by zero, which R-1RK
                     // 12.8.2 makes an error rather than an infinity.
                     | Some(_, denominator) when denominator.IsZero ->
-                        fail (Default "division by zero")
+                        signal cont (Default "division by zero")
                     | Some(numerator, denominator) ->
                         bounceContinue env cont (Obj(ofRatio numerator denominator))
                     | None ->
@@ -1648,13 +1648,13 @@
                                 Numerics.Complex.Pow(
                                     Numerics.Complex(baseValue, 0.0), Numerics.Complex(exponent, 0.0))
                             if Double.IsNaN complex.Real || Double.IsNaN complex.Imaginary then
-                                fail (Default "expt: argument is outside the domain")
+                                signal cont (Default "expt: argument is outside the domain")
                             else bounceContinue env cont (ofComplexValue complex)
                         else bounceContinue env cont (Obj(box result))
-                | None, _ -> fail (TypeMismatch("number", Obj b))
-                | _, None -> fail (TypeMismatch("number", Obj e))
-            | [found; _] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(2, args))
+                | None, _ -> signal cont (TypeMismatch("number", Obj b))
+                | _, None -> signal cont (TypeMismatch("number", Obj e))
+            | [found; _] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         /// Type predicates from chapters 4 and 6. Each is variadic and true for an
         /// empty argument list, matching the report's "every element" phrasing.
@@ -1682,8 +1682,8 @@
         let stringToSymbol env cont args =
             match args with
             | [Obj value] when (value :? string) -> bounceContinue env cont (Atom(value :?> string))
-            | [found] -> fail (TypeMismatch("string", found))
-            | _ -> fail (NumArgs(1, args))
+            | [found] -> signal cont (TypeMismatch("string", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 4.7.2. The result must have an immutable evaluation structure and be
         /// initially equal? to the argument. A mutable argument is therefore copied --
@@ -1694,7 +1694,7 @@
         let copyEsImmutable env cont args =
             match args with
             | [object'] -> bounceContinue env cont (acquireImmutable object')
-            | _ -> fail (NumArgs(1, args))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 4.6: whether a pair may be mutated. Not a report feature -- it has no
         /// predicate for this -- but the distinction is now observable through
@@ -1704,7 +1704,7 @@
             match args with
             | [Pair cell] -> bounceContinue env cont (Bool cell.immutable)
             | [_] -> bounceContinue env cont (Bool false)
-            | _ -> fail (NumArgs(1, args))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 7.2.1: the primitive type predicate for type continuation.
         let isContinuation env cont args =
@@ -1802,7 +1802,7 @@
                 let counted (n: int) = Obj(box n)
                 bounceContinue env cont (
                     ofList [counted pairs; counted nils; counted acyclic; counted cycle])
-            | _ -> fail (NumArgs(1, args))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 12.10. Like 12.9 the report gives these signatures only, so they take
         /// their standard meanings. A complex whose imaginary part is zero is a real,
@@ -1816,10 +1816,10 @@
             | [Obj a; Obj b] ->
                 match toFloat a, toFloat b with
                 | Some x, Some y -> bounceContinue env cont (ofComplexValue (build x y))
-                | None, _ -> fail (TypeMismatch("number", Obj a))
-                | _, None -> fail (TypeMismatch("number", Obj b))
-            | [found; _] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(2, args))
+                | None, _ -> signal cont (TypeMismatch("number", Obj a))
+                | _, None -> signal cont (TypeMismatch("number", Obj b))
+            | [found; _] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         let makeRectangular env cont args =
             complexFromParts (fun real imaginary -> Numerics.Complex(real, imaginary)) env cont args
@@ -1834,9 +1834,9 @@
             | [Obj value] ->
                 match asComplex value with
                 | Some c -> bounceContinue env cont (Obj(box (pick c)))
-                | None -> fail (TypeMismatch("number", Obj value))
-            | [found] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(1, args))
+                | None -> signal cont (TypeMismatch("number", Obj value))
+            | [found] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         let realPart env cont args = complexPart "real-part" (fun c -> c.Real) env cont args
         let imagPart env cont args = complexPart "imag-part" (fun c -> c.Imaginary) env cont args
@@ -1917,9 +1917,9 @@
                 | :? ExactInfinity -> bounceContinue env cont (Obj value)
                 | :? float32 as f -> bounceContinue env cont (Obj(box (float32 (apply (float f)))))
                 | :? float as d -> bounceContinue env cont (Obj(box (apply d)))
-                | _ -> fail (TypeMismatch("number", Obj value))
-            | [found] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(1, args))
+                | _ -> signal cont (TypeMismatch("number", Obj value))
+            | [found] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         let floorReal env cont args = roundingPrimitive floorExact Math.Floor env cont args
         let ceilingReal env cont args = roundingPrimitive ceilingExact Math.Ceiling env cont args
@@ -1960,18 +1960,18 @@
                 | :? Numerics.BigInteger as v -> bounceContinue env cont (ofInteger v)
                 | :? ExactRatio as ratio -> bounceContinue env cont (pick ratio)
                 // R-1RK 12.8.3 is defined on rationals, which an infinity is not.
-                | :? ExactInfinity -> fail (TypeMismatch("rational", Obj value))
+                | :? ExactInfinity -> signal cont (TypeMismatch("rational", Obj value))
                 | :? float32 as f ->
                     match exactRatioOf (float f) with
                     | Some ratio -> bounceContinue env cont (pick ratio)
-                    | None -> fail (TypeMismatch("rational", Obj value))
+                    | None -> signal cont (TypeMismatch("rational", Obj value))
                 | :? float as d ->
                     match exactRatioOf d with
                     | Some ratio -> bounceContinue env cont (pick ratio)
-                    | None -> fail (TypeMismatch("rational", Obj value))
-                | _ -> fail (TypeMismatch("number", Obj value))
-            | [found] -> fail (TypeMismatch("number", found))
-            | _ -> fail (NumArgs(1, args))
+                    | None -> signal cont (TypeMismatch("rational", Obj value))
+                | _ -> signal cont (TypeMismatch("number", Obj value))
+            | [found] -> signal cont (TypeMismatch("number", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         // --- R-1RK 12.6, module Inexact -----------------------------------------
         //
@@ -2005,7 +2005,7 @@
                 | [] -> bounceContinue env cont (Bool true)
                 | Obj value :: rest when isNumberValue value ->
                     if test value then loop rest else bounceContinue env cont (Bool false)
-                | found :: _ -> fail (TypeMismatch("number", found))
+                | found :: _ -> signal cont (TypeMismatch("number", found))
             loop args
 
         let isExact env cont args = numberPredicate isExactValue env cont args
@@ -2035,18 +2035,18 @@
         /// The 12.6.2 and 12.6.3 applicatives take a real, so a complex -- which the
         /// report leaves out pending "deeper analysis of the complex-representation
         /// issues involved" -- is a type error rather than a component-wise answer.
-        let private realArgument args (apply: obj -> Step) =
+        let private realArgument cont args (apply: obj -> Step) =
             match args with
             | [Obj value] when isNumberValue value && not (value :? Numerics.Complex) ->
                 apply value
-            | [found] -> fail (TypeMismatch("real", found))
-            | _ -> fail (NumArgs(1, args))
+            | [found] -> signal cont (TypeMismatch("real", found))
+            | _ -> signal cont (NumArgs(1, args))
 
         /// R-1RK 12.6.2. An exact real is its own bounds. An inexact real is bounded
         /// only by the infinities, in the internal format of its primary value here and
         /// by the exact infinities of 12.3.2 for the exact form.
         let getRealInternalBounds env cont args =
-            realArgument args (fun value ->
+            realArgument cont args (fun value ->
                 if isExactValue value then
                     bounceContinue env cont (ofList [Obj value; Obj value])
                 else
@@ -2054,7 +2054,7 @@
                         ofList [Obj(internalInfinity value false); Obj(internalInfinity value true)]))
 
         let getRealExactBounds env cont args =
-            realArgument args (fun value ->
+            realArgument cont args (fun value ->
                 if isExactValue value then
                     bounceContinue env cont (ofList [Obj value; Obj value])
                 else
@@ -2066,9 +2066,9 @@
         /// get-real-internal-primary's to return a real whose primary is within its
         /// bounds.
         let getRealInternalPrimary env cont args =
-            realArgument args (fun value ->
+            realArgument cont args (fun value ->
                 if hasNoPrimaryValue value then
-                    fail (Default "get-real-internal-primary: no primary value")
+                    signal cont (Default "get-real-internal-primary: no primary value")
                 else bounceContinue env cont (Obj value))
 
         /// The exact value of a double is exact: a finite one is a dyadic rational, and
@@ -2090,10 +2090,10 @@
                     |> Option.map (fun ratio -> ofRatio ratio.Numerator ratio.Denominator)
 
         let getRealExactPrimary env cont args =
-            realArgument args (fun value ->
+            realArgument cont args (fun value ->
                 match exactValueOf value with
                 | Some exact -> bounceContinue env cont (Obj exact)
-                | None -> fail (Default "get-real-exact-primary: no primary value"))
+                | None -> signal cont (Default "get-real-exact-primary: no primary value"))
 
         /// R-1RK 12.6.5. real->exact behaves just as get-real-exact-primary.
         let realToExact env cont args = getRealExactPrimary env cont args
@@ -2111,7 +2111,7 @@
             else value
 
         let realToInexact env cont args =
-            realArgument args (fun value ->
+            realArgument cont args (fun value ->
                 bounceContinue env cont (Obj(inexactValueOf value)))
 
         /// R-1RK 12.6.4. The result takes its primary value and robustness from real2;
@@ -2124,8 +2124,8 @@
                     [lower; primary; upper]
                     |> List.forall (fun v -> isNumberValue v && not (v :? Numerics.Complex)) ->
                 bounceContinue env cont (Obj(inexactValueOf primary))
-            | [_; _; _] -> fail (TypeMismatch("real", ofList args))
-            | _ -> fail (NumArgs(3, args))
+            | [_; _; _] -> signal cont (TypeMismatch("real", ofList args))
+            | _ -> signal cont (NumArgs(3, args))
 
         /// R-1RK 12.6.6 and 12.7.1 are each "the binder and accessor of" a keyed
         /// dynamic variable, so the binder is one from 10.1.1 -- the setting follows the
@@ -2141,13 +2141,13 @@
                     (makeDynamicBinding env cont (key ()) flag)
                     combiner
                     []
-            | [found; _] -> fail (TypeMismatch("boolean", found))
-            | _ -> fail (NumArgs(2, args))
+            | [found; _] -> signal cont (TypeMismatch("boolean", found))
+            | _ -> signal cont (NumArgs(2, args))
 
         let private getBooleanVariable read env cont args =
             match args with
             | [] -> bounceContinue env cont (Bool(read cont))
-            | _ -> fail (NumArgs(0, args))
+            | _ -> signal cont (NumArgs(0, args))
 
         let withStrictArithmetic env cont args =
             withBooleanVariable strictArithmeticKey env cont args
@@ -2180,7 +2180,7 @@
                 | Choice2Of2 (quotient, remainder) ->
                     bounceContinue env cont (ofList [quotient; remainder])
                 | Choice1Of2 error -> fail error
-            | _ -> fail (NumArgs(2, args))
+            | _ -> signal cont (NumArgs(2, args))
 
         let lessThan env cont args = numBoolBinop env cont opLessThan args
         let lessThanOrEqual env cont args = numBoolBinop env cont opLessThanOrEqual args
@@ -2208,8 +2208,8 @@
                 | None ->
                     arr.[index] <- value
                     bounceContinue env cont Inert
-            | [_; pos; _] -> fail (TypeMismatch("vector/int", pos))
-            | _ -> fail (NumArgs(3, args))
+            | [_; pos; _] -> signal cont (TypeMismatch("vector/int", pos))
+            | _ -> signal cont (NumArgs(3, args))
 
         let vector_ref env cont args =
             match args with
@@ -2218,15 +2218,15 @@
                 match checkedIndex arr index "vector-ref" with
                 | Some error -> fail error
                 | None -> arr.[index] |> bounceContinue env cont
-            | [_; pos] -> fail (TypeMismatch("vector/int", pos))
-            | _ -> fail (NumArgs(2, args))
+            | [_; pos] -> signal cont (TypeMismatch("vector/int", pos))
+            | _ -> signal cont (NumArgs(2, args))
 
         let make_vector env cont args =
             match args with
             | [Obj size'; v] when typeof<int> = size'.GetType() ->
                 Vector(Array.create (size' :?> int) v) |> bounceContinue env cont
-            | [size; _] -> fail (TypeMismatch("int", size))
-            | _ -> fail (NumArgs(2, args))
+            | [size; _] -> signal cont (TypeMismatch("int", size))
+            | _ -> signal cont (NumArgs(2, args))
 
         let make_encapsulation_type env cont = function
             | [] ->
@@ -2237,24 +2237,24 @@
                     Applicative(
                         primitive (fun e c -> function
                             | [value] -> bounceContinue e c (Encapsulation { tag = tag; value = value })
-                            | bad -> fail(NumArgs(1, bad))))
+                            | bad -> signal c (NumArgs(1, bad))))
                 let predicate =
                     Applicative(
                         primitive (fun e c -> function
                             | [Encapsulation encapsulation] ->
                                 bounceContinue e c (Bool(tag.Equals(encapsulation.tag)))
                             | [_] -> bounceContinue e c (Bool false)
-                            | bad -> fail(NumArgs(1, bad))))
+                            | bad -> signal c (NumArgs(1, bad))))
                 let decapsulator =
                     Applicative(
                         primitive (fun e c -> function
                             | [Encapsulation encapsulation] when tag.Equals(encapsulation.tag) ->
                                 bounceContinue e c encapsulation.value
-                            | [_] -> fail(Default "encapsulation type mismatch")
-                            | bad -> fail(NumArgs(1, bad))))
+                            | [_] -> signal c (Default "encapsulation type mismatch")
+                            | bad -> signal c (NumArgs(1, bad))))
 
                 ofList [encapsulator; predicate; decapsulator] |> bounceContinue env cont
-            | bad -> fail(NumArgs(0, bad))
+            | bad -> signal cont (NumArgs(0, bad))
 
         /// R-1RK 10.1.1. Each call returns a fresh `(binder accessor)` pair sharing a
         /// private key. The binder takes an object and a combiner, and calls the
@@ -2282,7 +2282,7 @@
                                 // must not be a way to widen what its caller may do.
                                 let isolated = newEnvWithClr (ofEnvironment e) [] []
                                 bounceOperate isolated (makeDynamicBinding e c key value) combiner []
-                            | bad -> fail (NumArgs(2, bad))))
+                            | bad -> signal c (NumArgs(2, bad))))
                 let accessor =
                     Applicative(
                         primitive (fun e c -> function
@@ -2290,11 +2290,11 @@
                                 match findDynamicBinding key c with
                                 | Some value -> bounceContinue e c value
                                 | None ->
-                                    fail (Default "keyed dynamic variable is unbound here")
-                            | bad -> fail (NumArgs(0, bad))))
+                                    signal c (Default "keyed dynamic variable is unbound here")
+                            | bad -> signal c (NumArgs(0, bad))))
 
                 ofList [binder; accessor] |> bounceContinue env cont
-            | bad -> fail(NumArgs(0, bad))
+            | bad -> signal cont (NumArgs(0, bad))
 
         /// R-1RK 11.1.1, the static counterpart of 10.1.1. Each call returns a fresh
         /// `(binder accessor)` pair sharing a private key. The binder takes an object
@@ -2326,8 +2326,8 @@
                                 match defineVar child key value with
                                 | Choice1Of2 error -> fail error
                                 | Choice2Of2 _ -> bounceContinue e c child
-                            | [_; found] -> fail (TypeMismatch("environment", found))
-                            | bad -> fail (NumArgs(2, bad))))
+                            | [_; found] -> signal c (TypeMismatch("environment", found))
+                            | bad -> signal c (NumArgs(2, bad))))
                 let accessor =
                     Applicative(
                         // The environment here is the one the call appears in, which is
@@ -2338,11 +2338,11 @@
                             | [] ->
                                 match getVar' e key with
                                 | Some value -> bounceContinue e c value
-                                | None -> fail (Default "keyed static variable is unbound here")
-                            | bad -> fail (NumArgs(0, bad))))
+                                | None -> signal c (Default "keyed static variable is unbound here")
+                            | bad -> signal c (NumArgs(0, bad))))
 
                 ofList [binder; accessor] |> bounceContinue env cont
-            | bad -> fail(NumArgs(0, bad))
+            | bad -> signal cont (NumArgs(0, bad))
 
         let primitiveApplicatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [

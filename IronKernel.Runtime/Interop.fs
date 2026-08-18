@@ -85,14 +85,14 @@
 
         let new_object env cont = function
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "raw CLR construction requires RawClrInterop")
+                signal cont (CapabilityDenied "raw CLR construction requires RawClrInterop")
             | target :: args ->
                 try
                     match typeFromTarget env target with
                     | None ->
                         match target with
-                        | Atom t -> fail (Default("Couldn't find type '" + t + "'"))
-                        | _ -> fail (TypeMismatch("type name or type", target))
+                        | Atom t -> signal cont (Default("Couldn't find type '" + t + "'"))
+                        | _ -> signal cont (TypeMismatch("type name or type", target))
                     | Some typ ->
                         // Evaluate constructor arguments (operative operands arrive raw).
                         match sequence (List.map (eval env (newContinuation env)) args) [] with
@@ -105,10 +105,10 @@
                                     let obj = Activator.CreateInstance(typ, List.toArray mapargs)
                                     bounceContinue env cont (Obj obj)
                                 with ex ->
-                                    fail (Default("Couldn't create type '" + typ.FullName + "', " + ex.Message))
+                                    signal cont (Default("Couldn't create type '" + typ.FullName + "', " + ex.Message))
                 with :? InvalidOperationException as ex ->
-                    fail (Default ex.Message)
-            | bad -> fail (NumArgs(1, bad))
+                    signal cont (Default ex.Message)
+            | bad -> signal cont (NumArgs(1, bad))
 
         open System.Reflection
 
@@ -117,7 +117,7 @@
             if f = null then
                 let f = t.GetProperty(p)
                 if f = null then 
-                    fail (Default("field or property '" + p + "' does not exist"))
+                    signal cont (Default("field or property '" + p + "' does not exist"))
                 else
                     bounceContinue env cont (Obj(f.GetValue(o,null)))
             else
@@ -128,7 +128,7 @@
             if f = null then
                 let f = t.GetProperty(p)
                 if f = null then 
-                    fail (Default("field or property '" + p + "' does not exist"))
+                    signal cont (Default("field or property '" + p + "' does not exist"))
                 else
                     f.SetValue(o, v, null)
                     bounceContinue env cont Inert
@@ -139,7 +139,7 @@
         let rec dot_get env cont prms = 
             match prms with
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "raw CLR property access requires RawClrInterop")
+                signal cont (CapabilityDenied "raw CLR property access requires RawClrInterop")
             | (clazz::Atom(p)::tail) ->
                 try
                     match clazz with
@@ -157,21 +157,21 @@
                                 dot_get e c (result::Atom(p)::tail)
                              bounceEval env (makeCPS env cont cps) exp
                 with :? InvalidOperationException as ex ->
-                    fail (Default ex.Message)
-            | _ -> fail (NumArgs(2,prms))
+                    signal cont (Default ex.Message)
+            | _ -> signal cont (NumArgs(2,prms))
 
         let rec dot_set env cont prms = 
             match prms with
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "raw CLR property mutation requires RawClrInterop")
+                signal cont (CapabilityDenied "raw CLR property mutation requires RawClrInterop")
             | (clazz::Atom(p)::value::_) ->
                 try
                     let apply target evaluatedValue =
                         match target, evaluatedValue with
                         | Obj (:? Type as typ), Obj x -> set env cont typ null p x
                         | Obj o, Obj x -> set env cont (o.GetType()) o p x
-                        | _, Obj _ -> fail (TypeMismatch("object", target))
-                        | _, bad -> fail (TypeMismatch("object", bad))
+                        | _, Obj _ -> signal cont (TypeMismatch("object", target))
+                        | _, bad -> signal cont (TypeMismatch("object", bad))
                     let ensureValue target =
                         match value with
                         | Obj _ as ready -> apply target ready
@@ -181,7 +181,7 @@
                                 | Obj _ ->
                                     // Re-enter with evaluated value.
                                     dot_set e c (target :: Atom p :: evaluated :: [])
-                                | _ -> fail (TypeMismatch("object", target))
+                                | _ -> signal cont (TypeMismatch("object", target))
                             bounceEval env (makeCPS env cont cps) value
                     match clazz with
                     | Obj _ -> ensureValue clazz
@@ -197,8 +197,8 @@
                             dot_set e c (result :: Atom p :: value :: [])
                         bounceEval env (makeCPS env cont cps) exp
                 with :? InvalidOperationException as ex ->
-                    fail (Default ex.Message)
-            | _ -> fail (NumArgs(3,prms))
+                    signal cont (Default ex.Message)
+            | _ -> signal cont (NumArgs(3,prms))
 
         let invoke (t:Type) (o:obj) (m: string) args= 
             try
@@ -212,7 +212,7 @@
 
         let rec dot env cont = function
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "raw CLR invocation requires RawClrInterop")
+                signal cont (CapabilityDenied "raw CLR invocation requires RawClrInterop")
             | (clazz::Atom(m)::args) ->
                 try
                     match clazz with
@@ -245,15 +245,15 @@
                             dot e c (result :: Atom m :: args)
                         bounceEval env (makeCPS env cont cps) exp
                 with :? InvalidOperationException as ex ->
-                    fail (Default ex.Message)
-            | prms -> fail (NumArgs(2, prms))
+                    signal cont (Default ex.Message)
+            | prms -> signal cont (NumArgs(2, prms))
 
         let clr_open env cont = function
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "CLR namespace imports require RawClrInterop")
+                signal cont (CapabilityDenied "CLR namespace imports require RawClrInterop")
             | namespaces ->
                 match clrState env with
-                | None -> fail (TypeMismatch("environment", env))
+                | None -> signal cont (TypeMismatch("environment", env))
                 | Some record ->
                     let rec add = function
                         | [] -> bounceContinue env cont Inert
@@ -261,33 +261,33 @@
                             if not (List.contains ns !record.clrNamespaces) then
                                 record.clrNamespaces := !record.clrNamespaces @ [ns]
                             add rest
-                        | bad :: _ -> fail (TypeMismatch("namespace atom", bad))
+                        | bad :: _ -> signal cont (TypeMismatch("namespace atom", bad))
                     add namespaces
 
         let clr_alias env cont = function
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "CLR namespace imports require RawClrInterop")
+                signal cont (CapabilityDenied "CLR namespace imports require RawClrInterop")
             | [Atom shortName; Atom fullName] when shortName.Length > 0 && fullName.Length > 0 ->
                 match clrState env with
-                | None -> fail (TypeMismatch("environment", env))
+                | None -> signal cont (TypeMismatch("environment", env))
                 | Some record ->
                     record.clrAliases := Map.add shortName fullName !record.clrAliases
                     bounceContinue env cont Inert
-            | bad -> fail (NumArgs(2, bad))
+            | bad -> signal cont (NumArgs(2, bad))
 
         let clr_type env cont = function
             | _ when not (has RawClrInterop env) ->
-                fail (CapabilityDenied "clr-type requires RawClrInterop")
+                signal cont (CapabilityDenied "clr-type requires RawClrInterop")
             | [Atom name] ->
                 try
                     match tryResolveType env name with
                     | Some t -> bounceContinue env cont (Obj (t :> obj))
-                    | None -> fail (Default("Couldn't find type '" + name + "'"))
+                    | None -> signal cont (Default("Couldn't find type '" + name + "'"))
                 with :? InvalidOperationException as ex ->
-                    fail (Default ex.Message)
+                    signal cont (Default ex.Message)
             | [Obj (:? Type as t)] ->
                 bounceContinue env cont (Obj (t :> obj))
-            | bad -> fail (NumArgs(1, bad))
+            | bad -> signal cont (NumArgs(1, bad))
 
         let clr_opens env cont = function
             | [] ->
@@ -296,21 +296,21 @@
                 | Some record ->
                     let names = !record.clrNamespaces |> List.map Atom
                     bounceContinue env cont (ofList names)
-            | bad -> fail (NumArgs(0, bad))
+            | bad -> signal cont (NumArgs(0, bad))
 
         let print env cont (prms : LispVal list) =
           match prms with
           | _ when not (has HostIO env) ->
-                fail (CapabilityDenied "host output requires HostIO")
+                signal cont (CapabilityDenied "host output requires HostIO")
           | [Obj(sf)] ->
                 System.Console.Write(sf.ToString())
                 bounceContinue env cont Inert
-          | _ -> fail (NumArgs(1,prms))
+          | _ -> signal cont (NumArgs(1,prms))
 
         let printf' env cont (prms : LispVal list) =
           match prms with
           | _ when not (has HostIO env) ->
-                fail (CapabilityDenied "host output requires HostIO")
+                signal cont (CapabilityDenied "host output requires HostIO")
           | Obj(sf)::tail when typeof<string> = sf.GetType() -> 
                 match sequence (List.map toObjects tail) [] with
                 | Choice1Of2 e -> fail e
@@ -322,17 +322,17 @@
                         (try Choice2Of2(String.Format(sf :?> string, List.toArray mapargs))
                          with ex -> Choice1Of2 ex)
                         with
-                    | Choice1Of2 ex -> fail (Default("printf: " + ex.Message))
+                    | Choice1Of2 ex -> signal cont (Default("printf: " + ex.Message))
                     | Choice2Of2 str ->
                         System.Console.Write(str)
                         bounceContinue env cont Inert
-          | _ -> fail (NumArgs(2,prms))
+          | _ -> signal cont (NumArgs(2,prms))
 
         let show env cont (prms : LispVal list) =
           match prms with
           | _ when not (has HostIO env) ->
-              fail (CapabilityDenied "host output requires HostIO")
+              signal cont (CapabilityDenied "host output requires HostIO")
           | h :: _ ->
               System.Console.Write(showVal h)
               bounceContinue env cont Inert
-          | [] -> fail (NumArgs(1, []))
+          | [] -> signal cont (NumArgs(1, []))

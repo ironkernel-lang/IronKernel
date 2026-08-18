@@ -22,7 +22,27 @@ module Eval =
     let configureBodyCompiler compile = bodyCompiler <- Some compile
 
     let inline ok (x: LispVal) : Step = Done (returnM x)
+    /// Unwinds the computation directly, consulting no continuation. After ADR 0006
+    /// phase 1 this is reserved for the places that have no continuation to signal
+    /// from -- where the continuation *argument* is itself malformed, and the internal
+    /// error for a metacontinuation in the wrong position. Everywhere else uses
+    /// `signal` below, which will become 7.2.7's abnormal pass.
     let inline fail (e: LispError) : Step = Done (throwError e)
+
+    /// R-1RK 7.2.7 makes signalling an error an abnormal pass to a continuation in the
+    /// extent of error-continuation. This is the seam that will become one: today it
+    /// ignores its continuation and unwinds directly, exactly as `fail` does, so
+    /// nothing changes yet (ADR 0006 phase 1).
+    ///
+    /// The continuation passed is the one the failing operation would have returned to,
+    /// which means the *innermost* one in scope -- inside a CPS callback that is the
+    /// callback's own, not the enclosing primitive's. Getting that right is the whole
+    /// point of migrating the call sites before the behaviour changes, because phase 2
+    /// is what makes a wrong one visible.
+    ///
+    /// `fail` remains for the paths that genuinely have no continuation: bootstrap, and
+    /// host entry points.
+    let inline signal (_cont: LispVal) (e: LispError) : Step = Done (throwError e)
     let inline ofResult (r: ThrowsError<LispVal>) : Step = Done r
 
     let rec runAsync (step: Step) : Task<ThrowsError<LispVal>> =
@@ -255,7 +275,7 @@ module Eval =
                     | None ->
                         match tryRewrite name args with
                         | Some rewritten -> More (fun () -> evalStep env cont rewritten)
-                        | None -> fail (UnboundVar("Getting an unbound variable", name))
+                        | None -> signal cont (UnboundVar("Getting an unbound variable", name))
                 | op ->
                     let cps e v a _ =
                         operateStep e v a args
@@ -330,7 +350,7 @@ module Eval =
                         args)
         | IOFunc (requiredCapability, f) ->
             if not (has requiredCapability _env) then
-                fail (CapabilityDenied(sprintf "I/O requires %A" requiredCapability))
+                signal cont (CapabilityDenied(sprintf "I/O requires %A" requiredCapability))
             else
                 match evalArgs _env (newContinuation _env) args with
                 | Choice1Of2 e -> fail e
@@ -347,7 +367,7 @@ module Eval =
         | Applicative f -> evalArgsExStep _env cont args f
         | Continuation (cr, capturedPrompt, ct') ->
             match args with
-            | [] -> fail (NumArgs (1, []))
+            | [] -> signal cont (NumArgs (1, []))
             | [a] ->
                 match ct' with
                 | Full -> More (fun () -> evalStep _env func a)
@@ -361,7 +381,7 @@ module Eval =
                                   tag = None
                                   handler = None }
                     More (fun () -> evalStep _env (Continuation (cr, prompt, Full)) a)
-            | _ -> fail (NumArgs (1, args))
+            | _ -> signal cont (NumArgs (1, args))
         | Resumption resumption ->
             match args with
             | [argument] when Interlocked.Exchange(&resumption.consumed, 1) = 0 ->
@@ -374,8 +394,8 @@ module Eval =
                     | Continuation(_, Some frame, _) -> frame.parentCont
                     | _ -> cont
                 More (fun () -> operateStep _env resumeCont resumption.continuation [argument])
-            | [_] -> fail (Default "resumption has already been consumed")
-            | _ -> fail (NumArgs(1, args))
+            | [_] -> signal cont (Default "resumption has already been consumed")
+            | _ -> signal cont (NumArgs(1, args))
         | Operative operative ->
             let prms = operative.prms
             let envarg = operative.envarg
@@ -426,7 +446,7 @@ module Eval =
         // know the `List` spelling. ADR 0005 phase 1 removes the duplicate case; until
         // then the producers normalise.
         | Inert -> More (fun () -> continueEvalStep _env cont (ofList []))
-        | _ -> fail (BadSpecialForm ("Expecting a combiner, got ", func))
+        | _ -> signal cont (BadSpecialForm ("Expecting a combiner, got ", func))
 
     /// Seeds the binding walk from an F# argument list rather than a Kernel one, so
     /// that applying an operative does not build a chain of cells purely to take it
@@ -492,7 +512,7 @@ module Eval =
 
     and resumeEvaluatedStep env cont (resumption: ResumptionRecord) argument : Step =
         if Interlocked.Exchange(&resumption.consumed, 1) <> 0 then
-            fail (Default "resumption has already been consumed")
+            signal cont (Default "resumption has already been consumed")
         else
             match resumption.continuation with
             | Continuation(continuationRecord, Some frame, _) ->
@@ -512,7 +532,7 @@ module Eval =
                         env
                         (Continuation(continuationRecord, prompt, Full))
                         argument)
-            | found -> fail (TypeMismatch("continuation", found))
+            | found -> signal cont (TypeMismatch("continuation", found))
 
     and evalArgs _env cont args =
         sequence (List.map (fun a -> run (evalStep _env cont a)) args) []
