@@ -469,6 +469,9 @@ module Eval =
             // through the list patterns instead destructured *and rebuilt* the rest of
             // both chains on every iteration, which made binding quadratic in the
             // number of parameters, on every operative call.
+            // R-1RK 4.9.1: #ignore in a parameter tree matches whatever is there and
+            // binds nothing.
+            | Ignore -> ()
             | Nil ->
                 match value with
                 | Nil -> ()

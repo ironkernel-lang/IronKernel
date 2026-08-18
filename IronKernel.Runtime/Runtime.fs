@@ -686,15 +686,22 @@
         /// 4.7.2: an operative must not change under whoever captured it. See ADR 0005
         /// -- today `acquireImmutable` is the identity, and this is the seam that has to
         /// start copying when pairs become mutable.
+        /// The environment parameter may be `#ignore` (R-1RK 4.10.3), which declines
+        /// the dynamic environment rather than binding it. It is spelled here as a name
+        /// no symbol can be read as, so that `bind` simply never finds it.
+        let private ignoredEnvironmentName = "#ignore environment parameter"
+
         let vau _env cont xs = 
-            match xs with
-            | prms :: Atom e :: body   ->
+            let build prms envarg body =
                 bounceContinue _env cont (
                     Operative{ prms = acquireImmutable prms
-                               envarg = e
+                               envarg = envarg
                                body = acquireImmutableForms body
                                closure = _env
-                               compiledBody = None } ) 
+                               compiledBody = None } )
+            match xs with
+            | prms :: Atom e :: body -> build prms e body
+            | prms :: Ignore :: body -> build prms ignoredEnvironmentName body
             | _ -> fail (Default("invalid arguments"))
 
         let define env cont xs = 
@@ -828,9 +835,37 @@
                 bounceEval env (makeCPS env cont captureTag) tagExpression
             | badform -> fail (NumArgs(3, badform))
          
+        /// R-1RK 6.7.1. Operative: the first operand is evaluated in the dynamic
+        /// environment and must be an environment; the rest are symbols, and the
+        /// predicate is true iff every one of them is visibly bound in it.
+        ///
+        /// The report derives this from an exit guard on error-continuation, catching
+        /// the error an unbound lookup signals. That derivation does not work here --
+        /// signalling an error is not an abnormal pass to error-continuation, which the
+        /// 7.2.7 divergence records -- so the lookup is asked directly instead.
+        let bindsPredicate env cont args =
+            match args with
+            | environmentExpression :: symbols ->
+                let decide _ resultCont value _ =
+                    match value with
+                    | Environment _ ->
+                        let rec loop = function
+                            | [] -> More(fun () -> continueEvalStep env resultCont (Bool true))
+                            | Atom name :: rest ->
+                                if (getVar' value name).IsSome then loop rest
+                                else More(fun () -> continueEvalStep env resultCont (Bool false))
+                            // A non-symbol operand is a type error rather than false:
+                            // the question "is this bound" has no meaning for it.
+                            | found :: _ -> fail (TypeMismatch("symbol", found))
+                        loop symbols
+                    | found -> fail (TypeMismatch("environment", found))
+                bounceEval env (makeCPS env cont decide) environmentExpression
+            | [] -> fail (NumArgs(1, args))
+
         let primitiveOperatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [
                   ("vau"    , vau);
+                  ("$binds?", bindsPredicate);
                   ("define" , define);
                   ("if"     , if_then_else);
                   ("."      , dot) ;
@@ -1579,6 +1614,18 @@
         let isInert env cont args =
             typePredicate (function Inert -> true | _ -> false) env cont args
 
+        /// R-1RK 4.8.2: the primitive type predicate for type ignore.
+        let isIgnore env cont args =
+            typePredicate (function Ignore -> true | _ -> false) env cont args
+
+        /// R-1RK 13.1.1. The report gives it by signature only; a symbol is its name,
+        /// so this is the symbol with that name.
+        let stringToSymbol env cont args =
+            match args with
+            | [Obj value] when (value :? string) -> bounceContinue env cont (Atom(value :?> string))
+            | [found] -> fail (TypeMismatch("string", found))
+            | _ -> fail (NumArgs(1, args))
+
         /// R-1RK 4.7.2. The result must have an immutable evaluation structure and be
         /// initially equal? to the argument. A mutable argument is therefore copied --
         /// "if object is a mutable pair, then the result is not eq? to object" -- while
@@ -2198,10 +2245,14 @@
         /// by the extent of a call, this one is scoped by environment ancestry, so it
         /// survives being closed over and read long after the binder returned.
         ///
-        /// The key is an ordinary binding under a name no Kernel symbol can spell: it
-        /// contains spaces, which the reader cannot produce in an atom, and a fresh
-        /// GUID. Reusing the environment's own lookup is the point -- "the nearest
-        /// such ancestor" then means exactly what it means for every other variable,
+        /// The key is an ordinary binding under a name containing spaces, which the
+        /// reader cannot produce in an atom. That alone is not privacy -- 13.1.1's
+        /// `string->symbol` will build any name asked of it -- so what keeps the key
+        /// private is the fresh GUID in it, which is never handed out. The spaces only
+        /// keep it out of the reader's reach.
+        ///
+        /// Reusing the environment's own lookup is the point -- "the nearest such
+        /// ancestor" then means exactly what it means for every other variable,
         /// including in an environment with several parents.
         let make_keyed_static_variable env cont = function
             | [] ->
@@ -2246,6 +2297,8 @@
                   ("extend-continuation", extendContinuation);
                   ("continuation?", isContinuation);
                   ("copy-es-immutable", copyEsImmutable);
+                  ("ignore?", isIgnore);
+                  ("string->symbol", stringToSymbol);
                   ("port?", isPort);
                   ("input-port?", isInputPort);
                   ("output-port?", isOutputPort);

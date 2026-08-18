@@ -240,6 +240,12 @@ let private behaviouralChecks () : (string * string list) list = [
     "4.6.2", [ "(null? ())"; "(eqv? (null? (cons 1 2)) #f)" ]
     "4.6.3", [ "(eqv? (car (cons 1 2)) 1)"; "(eqv? (cdr (cons 1 2)) 2)" ]
     "4.8.1", [ "(environment? (get-current-environment))" ]
+    "4.8.2", [ "(ignore? #ignore)"; "(eqv? (ignore? #inert) #f)"
+               "(eqv? (ignore? 5) #f)"; "(ignore?)"
+               // 4.9.1: in a parameter tree it matches an operand and binds nothing.
+               "(=? ((lambda (a #ignore) a) 1 2) 1)"
+               // 4.10.3: as the environment parameter it declines the environment.
+               "(=? ((vau (x) #ignore 7) 1) 7)" ]
     "4.8.3", [ "(eqv? (eval (list + 1 2) (get-current-environment)) 3)" ]
     "4.8.4", [ "(environment? (make-environment))" ]
     "4.10.3", [ // An operative receives its operands unevaluated.
@@ -406,6 +412,14 @@ let private behaviouralChecks () : (string * string list) list = [
                 + " (let ((e ((car q) 99 ((car p) 42 (get-current-environment)))))"
                 + " (and? (=? (eval (list (car (cdr p))) e) 42)"
                 + " (=? (eval (list (car (cdr q))) e) 99))))" ]
+    "9.1.3", [ "(promise? ($lazy 1))"
+               "(=? (force ($lazy (+ 1 2))) 3)"
+               // Evaluated in the dynamic environment of the constructing call.
+               "(let ((n 5)) (=? (force ($lazy n)) 5))"
+               // "Distinct promises represent different occasions of evaluation."
+               "(eqv? (eq? ($lazy 1) ($lazy 1)) #f)" ]
+    "13.1.1", [ "(eq? (string->symbol \"abc\") (quote abc))"
+                "(symbol? (string->symbol \"abc\"))" ]
     "9.1.4", [ "(eqv? (force (memoize 5)) 5)" ]
     "12.5.1", [ "(number? 1)"; "(number? 1.5)"; "(eqv? (number? 'a) #f)"; "(number?)"
                 "(integer? 3)"; "(integer? 3.0)"; "(eqv? (integer? 3.5) #f)"
@@ -594,6 +608,17 @@ let private behaviouralChecks () : (string * string list) list = [
     "15.1.7", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v 'alpha))))))" ]
     "15.1.8", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write '(a b c) p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v '(a b c)))))))" ]
     // 15.2.2: load evaluates the file's forms in the calling environment.
+    "6.7.1", [ "($binds? (get-current-environment) car)"
+               "(eqv? ($binds? (get-current-environment) definitely-not-bound) #f)"
+               // The first operand is evaluated; the rest are not.
+               "(let ((e (make-environment))) (eqv? ($binds? e car) #f))"
+               // True for no symbols at all.
+               "($binds? (get-current-environment))" ]
+    "6.7.8", [ // ($let-safe b . body) is ($let-redirect (make-kernel-standard-
+               // environment) b . body): the body runs in a fresh standard
+               // environment, so a local definition of the caller is not visible.
+               "(=? ($let-safe ((x 1)) (+ x 1)) 2)"
+               "($let-safe () (applicative? car))" ]
     "6.7.3", [ "(environment? (make-kernel-standard-environment))"
                // "a child of the ground environment": ground is visible through it.
                "(eval (list applicative? car) (make-kernel-standard-environment))"

@@ -245,3 +245,80 @@ let ``opening a missing file for input is an error rather than a creation`` () =
             | Inert -> ()
             | value -> failwithf "opening for output gave %s" (showVal value)
             Assert.True(File.Exists paths.[0], "opening for output did not create the file")))
+
+[<Fact>]
+let ``ignore is a value, a parameter that binds nothing, and a declined environment`` () =
+    // R-1RK 4.8.2 is the type predicate; 4.9.1 gives #ignore its meaning in a
+    // parameter tree and 4.10.3 its meaning as $vau's environment parameter.
+    [
+        "(ignore? #ignore)", Bool true
+        "(eqv? (ignore? #inert) #f)", Bool true
+        "(eqv? (ignore? 5) #f)", Bool true
+        "(ignore?)", Bool true
+        // It matches an operand and binds nothing.
+        "(=? ((lambda (a #ignore) a) 1 2) 1)", Bool true
+        "(=? ((lambda (#ignore b) b) 1 2) 2)", Bool true
+        // As the environment parameter it declines the dynamic environment, so the
+        // body cannot reach it under any name.
+        "(=? ((vau (x) #ignore 7) 1) 7)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``$binds? asks whether symbols are visibly bound`` () =
+    // R-1RK 6.7.1. The report derives it by catching the error an unbound lookup
+    // signals, with an exit guard on error-continuation; that derivation does not work
+    // here (see the 7.2.7 divergence), so the lookup is asked directly.
+    [
+        "($binds? (get-current-environment) car)", Bool true
+        "($binds? (get-current-environment) car cdr cons)", Bool true
+        "(eqv? ($binds? (get-current-environment) definitely-not-bound) #f)", Bool true
+        // One unbound symbol is enough to make it false.
+        "(eqv? ($binds? (get-current-environment) car definitely-not-bound) #f)", Bool true
+        // The first operand is evaluated, the rest are not.
+        "(eqv? ($binds? (make-environment) car) #f)", Bool true
+        "($binds? (get-current-environment))", Bool true
+        // A visible binding counts, not just a local one.
+        "(eval (list (quote $binds?) (quote (get-current-environment)) (quote car)) (make-kernel-standard-environment))",
+            Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``$let-safe runs its body in a fresh standard environment`` () =
+    // R-1RK 6.7.8: ($let-safe b . body) is ($let-redirect
+    // (make-kernel-standard-environment) b . body).
+    [
+        "(=? ($let-safe ((x 1)) (+ x 1)) 2)", Bool true
+        "($let-safe () (applicative? car))", Bool true
+        // A *local* binding of the caller is not visible inside, which is the point
+        // of "safe": what the body can see does not depend on where it was written.
+        // It has to be a local one -- a top-level definition in this session lands in
+        // the ground environment, which a standard environment is a child of.
+        "(eqv? ((lambda (local-only)"
+        + " ($let-safe () ($binds? (get-current-environment) local-only))) 9) #f)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``$lazy makes a promise of an expression and its environment`` () =
+    // R-1RK 9.1.3. The expression is evaluated in "the dynamic environment from which
+    // $lazy was called", and only when first forced.
+    [
+        "(promise? ($lazy 1))", Bool true
+        "(=? (force ($lazy (+ 1 2))) 3)", Bool true
+        "(=? (let ((n 5)) (force ($lazy n))) 5)", Bool true
+        // "Distinct promises represent different occasions of evaluation", so two
+        // promises of the same expression are not the same promise.
+        "(eqv? (eq? ($lazy 1) ($lazy 1)) #f)", Bool true
+        // Forcing a non-promise gives it back.
+        "(=? (force 5) 5)", Bool true
+    ] |> evalSessionKernelAndPromises
+
+[<Fact>]
+let ``string->symbol builds the symbol with that name`` () =
+    [
+        "(eq? (string->symbol \"abc\") (quote abc))", Bool true
+        "(symbol? (string->symbol \"abc\"))", Bool true
+        // It will build a name the reader could not have produced, which is why the
+        // keyed static variables' privacy rests on their GUID rather than on spelling.
+        "(symbol? (string->symbol \"two words\"))", Bool true
+        "(eqv? (eq? (string->symbol \"a\") (string->symbol \"b\")) #f)", Bool true
+    ] |> evalSessionKernel

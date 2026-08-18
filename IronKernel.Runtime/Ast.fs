@@ -248,6 +248,10 @@ module Ast =
         /// and output can be ports too (15.1.4).
         | Port of System.IO.Stream
         | Inert
+        /// R-1RK 4.8. The one value of type ignore. In a parameter tree it matches an
+        /// operand and binds nothing, and as $vau's environment parameter it declines
+        /// the dynamic environment.
+        | Ignore
         | Nil
         | Obj of obj
         | Continuation of ContinuationRecord * PromptFrame option * ContinuationType
@@ -567,6 +571,7 @@ module Ast =
                 | Resumption _ -> output.Append("<resumption>") |> ignore
                 | Status status -> output.Append("error : ").Append(status) |> ignore
                 | Inert -> output.Append("#inert") |> ignore
+                | Ignore -> output.Append("#ignore") |> ignore
                 | Keyword name -> output.Append(":").Append(name) |> ignore
                 | Vector contents ->
                     pending <- Append "]" :: pending

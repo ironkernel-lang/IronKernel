@@ -100,11 +100,12 @@ let ``the binder requires an environment and the right operand count`` () =
         | value -> failwithf "the accessor takes no operands, got %s" (showVal value))
 
 [<Fact>]
-let ``the key is held under a name no symbol can spell`` () =
-    // The key is an ordinary binding whose name contains spaces. That is only private
-    // because the reader cannot put a space inside an atom, so the claim is worth
-    // checking rather than asserting in a comment: a spaced name reads as several
-    // data, never as one symbol that could shadow or read the key.
+let ``the key is held under a name the reader cannot produce`` () =
+    // The key's name contains spaces, so no source text can name it: a spaced name
+    // reads as several data, never as one symbol. That is not by itself privacy --
+    // string->symbol (13.1.1) will build any name asked of it -- so what actually
+    // keeps the key private is the fresh GUID in it, which is never handed out. This
+    // checks the half that is checkable.
     match parseOk "(keyed static variable)" with
     | List [Atom "keyed"; Atom "static"; Atom "variable"] -> ()
     | value -> failwithf "a spaced name read as a single datum: %s" (showVal value)

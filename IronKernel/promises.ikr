@@ -36,3 +36,8 @@
 				(#t
 					(vector-set! v 0 (decapsulate y)); iterate
 					(force-promise x)))))))
+
+; 9.1.3: the report's name for `lazy`, which is what it already is -- an operative
+; holding the expression and the dynamic environment it was called from, evaluated
+; when the promise is first forced.
+(define $lazy lazy)
