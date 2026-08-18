@@ -151,3 +151,32 @@ let ``await-task rejects a non-task argument`` () =
     match evalIn env "(await-task 5)" with
     | Status message -> Assert.Contains("Task", message)
     | value -> failwithf "expected an error, got %s" (showVal value)
+
+[<Fact>]
+let ``perform delivers structured payloads unevaluated`` () =
+    // The handler receives the payload as a value. Before perform unwrapped
+    // its handler applicative, the payload was evaluated a second time on
+    // delivery, so any structured payload was misread as a combination.
+    evalSessionKernel
+        [ "(define effect (make-prompt-tag))", Inert
+          """(prompt effect
+               (lambda (payload k) (resume k (car payload)))
+               (perform effect (list :a 1)))""", Keyword "a"
+          """(prompt effect
+               (lambda (payload k) (resume k (car (cdr payload))))
+               (perform effect (list "text" 42)))""", Obj 42 ]
+
+[<Fact>]
+let ``resuming an outer effect preserves inner prompt frames`` () =
+    // Performing an effect handled by an outer prompt captures a continuation
+    // that crosses the inner prompt. Before the resumption held the
+    // perform-site continuation intact, that capture flattened away the inner
+    // frame, so a later perform of the inner effect had no handler.
+    evalSessionKernel
+        [ "(define outer (make-prompt-tag))", Inert
+          "(define inner (make-prompt-tag))", Inert
+          """(prompt outer
+               (lambda (v k) (resume k (+ v 1)))
+               (prompt inner
+                 (lambda (v k) (resume k (* v 2)))
+                 (+ (perform outer 10) (perform inner 5))))""", Obj 21 ]

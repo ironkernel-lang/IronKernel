@@ -531,23 +531,13 @@ module Eval =
             signal cont (Default "resumption has already been consumed")
         else
             match resumption.continuation with
-            | Continuation(continuationRecord, Some frame, _) ->
-                More(fun () ->
-                    continueEvalStep
-                        env
-                        (Continuation(continuationRecord, Some frame, Full))
-                        argument)
-            | Continuation(continuationRecord, None, _) ->
-                let prompt =
-                    Some
-                        { parentCont = cont
-                          tag = None
-                          handler = None }
-                More(fun () ->
-                    continueEvalStep
-                        env
-                        (Continuation(continuationRecord, prompt, Full))
-                        argument)
+            | Continuation _ as captured ->
+                // The resumption holds the perform-site continuation intact —
+                // segments, intermediate prompt frames, and the matched frame
+                // included. Deliver the value straight into it; unwinding past
+                // the matched frame reaches its parent naturally, which is
+                // what lets resume bypass the handler's own continuation.
+                More(fun () -> continueEvalStep env captured argument)
             | found -> signal cont (TypeMismatch("continuation", found))
 
     and evalArgs _env cont args =

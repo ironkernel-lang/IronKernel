@@ -24,3 +24,10 @@ let ``vector literal from parser evaluates as self`` () =
         Assert.Equal(2, arr.Length)
         assertEqv arr.[0] (Obj 1)
     | v -> failwith (showVal v)
+
+[<Fact>]
+let ``vector-length reports element count`` () =
+    [
+        "(vector-length (vector))", Obj 0
+        "(vector-length (vector 1 2 3))", Obj 3
+    ] |> evalSession

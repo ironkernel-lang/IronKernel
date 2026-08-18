@@ -103,6 +103,9 @@
             | Obj arg1, Obj arg2 -> ValueSome(arg1.Equals(arg2))
             | Bool arg1, Bool arg2 -> ValueSome(arg1 = arg2)
             | Atom arg1, Atom arg2 -> ValueSome(arg1 = arg2)
+            // Keywords are pure names, like symbols: two spellings of :foo are
+            // interchangeable in every way a program can observe.
+            | Keyword arg1, Keyword arg2 -> ValueSome(arg1 = arg2)
             | PromptTag arg1, PromptTag arg2 -> ValueSome(arg1 = arg2)
             // Compared cell by cell rather than through the list patterns, which
             // materialised both chains before comparing them and walked each value
@@ -1367,11 +1370,15 @@
         let perform env cont = function
             | [PromptTag tag; value] ->
                 match findPrompt (Some tag) cont with
-                | Some (continuationRecord, ({ handler = Some handler } as frame)) ->
-                    let captured =
-                        Continuation(continuationRecord, Some frame, Delimited)
+                | Some (_, ({ handler = Some handler } as frame)) ->
+                    // Capture the perform-site continuation as it stands. It
+                    // already carries the whole segment/frame chain out to the
+                    // matching prompt and beyond — including any *intermediate*
+                    // prompt frames. Flattening it through the findPrompt
+                    // record (as before) erased those frames, so after a
+                    // resume the effects they handled had no handler.
                     let record =
-                        { continuation = captured
+                        { continuation = cont
                           consumed = 0 }
                     let resumption = Resumption record
                     // Abort (handler return without resume) must invalidate the
@@ -1381,10 +1388,18 @@
                     let invalidateOnAbort e c result _ =
                         Interlocked.Exchange(&record.consumed, 1) |> ignore
                         bounceContinue e c result
+                    // The payload and resumption are already values. Operating
+                    // on the applicative itself would evaluate them a second
+                    // time — a structured payload such as (list :a 1) would be
+                    // applied as a combination. Unwrap to the underlying
+                    // operative, as shift does for its handler.
+                    let rec unwrap = function
+                        | Applicative inner -> unwrap inner
+                        | other -> other
                     bounceOperate
                         env
                         (makeCPS env frame.parentCont invalidateOnAbort)
-                        handler
+                        (unwrap handler)
                         [value; resumption]
                 | Some _ -> signal cont (Default "matching prompt has no effect handler")
                 | None -> signal cont (Default "perform requires a matching tagged handler")
@@ -2357,6 +2372,12 @@
             | [_; pos] -> signal cont (TypeMismatch("vector/int", pos))
             | _ -> signal cont (NumArgs(2, args))
 
+        let vector_length env cont args =
+            match args with
+            | [Vector arr] -> Obj(arr.Length :> obj) |> bounceContinue env cont
+            | [bad] -> signal cont (TypeMismatch("vector", bad))
+            | _ -> signal cont (NumArgs(1, args))
+
         let make_vector env cont args =
             match args with
             | [Obj size'; v] when typeof<int> = size'.GetType() ->
@@ -2581,6 +2602,7 @@
                   ("vector?", isVector);
                   ("make-vector", make_vector);
                   ("vector-ref", vector_ref);
+                  ("vector-length", vector_length);
                   ("vector-set!", vector_set);
                   ("make-encapsulation-type", make_encapsulation_type);
                   ("make-keyed-dynamic-variable", make_keyed_dynamic_variable);
