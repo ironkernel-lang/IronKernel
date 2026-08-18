@@ -2360,6 +2360,12 @@
             | [_; pos] -> signal cont (TypeMismatch("vector/int", pos))
             | _ -> signal cont (NumArgs(2, args))
 
+        let vector_length env cont args =
+            match args with
+            | [Vector arr] -> Obj(arr.Length :> obj) |> bounceContinue env cont
+            | [bad] -> signal cont (TypeMismatch("vector", bad))
+            | _ -> signal cont (NumArgs(1, args))
+
         let make_vector env cont args =
             match args with
             | [Obj size'; v] when typeof<int> = size'.GetType() ->
@@ -2584,6 +2590,7 @@
                   ("vector?", isVector);
                   ("make-vector", make_vector);
                   ("vector-ref", vector_ref);
+                  ("vector-length", vector_length);
                   ("vector-set!", vector_set);
                   ("make-encapsulation-type", make_encapsulation_type);
                   ("make-keyed-dynamic-variable", make_keyed_dynamic_variable);
