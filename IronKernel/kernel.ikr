@@ -576,6 +576,61 @@
 (define finite-list? (lambda xs ($every? $finite-list-one? xs)))
 (define countable-list? (lambda xs ($every? $countable-list-one? xs)))
 
+; 5.8.1: (encycle! object integer1 integer2). Mutates the improper list starting at
+; object to have acyclic prefix length integer1 and cycle length integer2, by
+; setting the cdr of the (integer1 + integer2)th pair to refer to the
+; (integer1 + 1)th pair. list-tail k lands on the (k + 1)th pair, hence the offsets.
+; integer2 = 0 does nothing, and the result is inert either way.
+;
+; The report requires both integers to be exact and non-negative and the list to
+; hold at least their sum in pairs. A negative count is rejected here rather than
+; left to list-tail, which would count down past zero and never stop.
+(define encycle!
+  (lambda (object prefix cycle)
+    (if (if (integer? prefix) (integer? cycle) #f)
+      (if (if (negative? prefix) #t (negative? cycle))
+        (error "encycle!: the counts must be non-negative")
+        (if (zero? cycle)
+          #inert
+          (set-cdr! (list-tail object (- (+ prefix cycle) 1))
+                    (list-tail object prefix))))
+      (error "encycle!: the counts must be exact integers"))))
+
+; 6.4.1: (append! . lists). "Sets the cdr of the last pair in each nonempty list
+; argument to refer to the next non-nil argument, except that if there is a last
+; non-nil argument, it isn't mutated." Only the *first* argument is ever the
+; mutation target, which falls out of the report's own equivalence
+;   (append! u v . w) = ($sequence (append! u v) (append! u . w))
+; because appending v to u leaves u's last pair inside v. The result is inert.
+;
+; The report also makes it an error for two arguments to share a last pair; that is
+; a condition on the caller, and appending such a pair to itself would build a cycle
+; rather than signal, which is recorded as a divergence.
+(define $last-pair
+  (lambda (p)
+    (letrec ((aux (lambda (q) (if (pair? (cdr q)) (aux (cdr q)) q))))
+      (aux p))))
+
+(define $append-onto!
+  (lambda (u v)
+    (if (null? v)
+      #inert
+      (if (finite-list? u)
+        (if (null? u)
+          (error "append!: the first argument must be a nonempty acyclic list")
+          (set-cdr! ($last-pair u) v))
+        (error "append!: every argument but the last must be an acyclic list")))))
+
+(define append!
+  (lambda lists
+    (if (null? lists)
+      (error "append!: needs at least one argument")
+      (letrec ((aux (lambda (u rest)
+                      (if (null? rest)
+                        #inert
+                        (sequence ($append-onto! u (car rest)) (aux u (cdr rest)))))))
+        (aux (car lists) (cdr lists))))))
+
 ; 6.3.10: (reduce list binary identity). The report also gives a six-argument form
 ; for cyclic lists; with no cycles to describe, the three-argument form is the whole
 ; of it here.

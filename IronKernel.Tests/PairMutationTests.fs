@@ -56,15 +56,18 @@ let ``copy-es-immutable returns something equal? with an immutable structure`` (
     ] |> evalSessionKernel
 
 [<Fact>]
-let ``the entries the module still lacks are genuinely absent`` () =
-    // Guarding the claim in the 4.7 divergence: these are not quietly bound to
-    // something that does nothing. set-car! and set-cdr! left this list in ADR 0005
-    // phase 3, which is the deliberate update the test was there to force.
+let ``every entry of module Pair mutation is bound`` () =
+    // This began as a guard on the 4.7 divergence's claim that the mutating entries
+    // were absent, and forced a deliberate update each time one arrived: set-car! and
+    // set-cdr! in ADR 0005 phase 3, encycle! and append! in phase 5. The module is
+    // complete now, so it asserts the opposite of what it started as.
     withKernel (fun env ->
-        for name in [ "encycle!"; "append!" ] do
+        for name in
+            [ "set-car!"; "set-cdr!"; "copy-es-immutable"; "copy-es"
+              "assq"; "memq?"; "encycle!"; "append!" ] do
             match evalIn env name with
-            | Status message -> Assert.Contains("unbound", message.ToLowerInvariant())
-            | value -> failwithf "%s should be unbound, got %s" name (showVal value))
+            | Status message -> failwithf "%s should be bound: %s" name message
+            | _ -> ())
 
 [<Fact>]
 let ``copy-es-immutable and copy-es take exactly one argument`` () =
@@ -354,3 +357,78 @@ let ``length and the list predicates read the shape rather than walking it`` () 
         "(finite-list?)", Bool true
         "(countable-list?)", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``encycle! gives a list the prefix and cycle it is asked for`` () =
+    // R-1RK 5.8.1: sets the cdr of the (prefix + cycle)th pair to refer to the
+    // (prefix + 1)th, so the list ends up with exactly those metrics.
+    [
+        "(define a (list 1 2 3 4 5))", Inert
+        "(inert? (encycle! a 2 3))", Bool true
+        "(equal? (get-list-metrics a) (list 5 0 2 3))", Bool true
+        // A cycle covering the whole list.
+        "(define b (list 1 2 3))", Inert
+        "(encycle! b 0 3)", Inert
+        "(equal? (get-list-metrics b) (list 3 0 0 3))", Bool true
+        "(eqv? (length b) #e+infinity)", Bool true
+        // "If integer2 = 0, the applicative does nothing."
+        "(define c (list 1 2 3))", Inert
+        "(encycle! c 1 0)", Inert
+        "(equal? (get-list-metrics c) (list 3 1 3 0))", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``encycle! rejects counts it cannot use`` () =
+    withKernel (fun env ->
+        // A negative count would count down past zero for ever rather than signal.
+        for expression in
+            [ "(encycle! (list 1 2 3) -1 1)"; "(encycle! (list 1 2 3) 1 -1)"
+              "(encycle! (list 1 2 3) 1.5 1)" ] do
+            match evalIn env expression with
+            | Status _ -> ()
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value)
+        // "The improper list starting at object must contain at least integer1 +
+        // integer2 pairs."
+        match evalIn env "(encycle! (list 1 2) 2 3)" with
+        | Status _ -> ()
+        | value -> failwithf "too few pairs should signal an error, got %s" (showVal value))
+
+[<Fact>]
+let ``append! links the lists by mutating the first`` () =
+    // R-1RK 6.4.1. Only the first argument is ever the mutation target, which falls
+    // out of the report's own equivalence: appending v to u leaves u's last pair
+    // inside v, so appending w next reaches the end of both.
+    [
+        "(define u (list 1 2))", Inert
+        "(define v (list 3 4))", Inert
+        "(inert? (append! u v))", Bool true
+        "(equal? u (list 1 2 3 4))", Bool true
+        // It links rather than copies: the tail *is* v.
+        "(eq? (cdr (cdr u)) v)", Bool true
+        // Three arguments chain left to right.
+        "(define x (list 1))", Inert
+        "(append! x (list 2) (list 3))", Inert
+        "(equal? x (list 1 2 3))", Bool true
+        // "the next non-nil argument": a nil argument is skipped.
+        "(define y (list 1))", Inert
+        "(append! y () (list 9))", Inert
+        "(equal? y (list 1 9))", Bool true
+        // (append! v) is inert and does nothing.
+        "(define z (list 1))", Inert
+        "(inert? (append! z))", Bool true
+        "(equal? z (list 1))", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``append! rejects arguments it cannot mutate`` () =
+    withKernel (fun env ->
+        // The first argument must be a nonempty acyclic list.
+        for expression in [ "(append!)"; "(append! () (list 1))" ] do
+            match evalIn env expression with
+            | Status _ -> ()
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value)
+        // A cyclic first argument has no last pair to write into, and is refused
+        // rather than walked for ever.
+        match evalIn env "(let ((p (list 1 2))) (encycle! p 0 2) (append! p (list 3)))" with
+        | Status message -> Assert.Contains("acyclic", message)
+        | value -> failwithf "a cyclic argument should signal an error, got %s" (showVal value))
