@@ -564,6 +564,32 @@ let private behaviouralChecks () : (string * string list) list = [
     // back equal. Numbers do not survive this, because `write` prints them as
     // `<obj 42 : Int32>`, which `read` cannot parse -- the 3.6 divergence. Symbols,
     // lists and booleans do.
+    "15.1.1", [ "(port? (get-current-input-port))"; "(eqv? (port? 5) #f)"; "(port?)" ]
+    "15.1.2", [ "(input-port? (get-current-input-port))"
+                "(output-port? (get-current-output-port))"
+                // "Every port must be admitted by at least one of these two", and a
+                // non-port is false rather than an error.
+                "(eqv? (input-port? (get-current-output-port)) #f)"
+                "(eqv? (input-port? 5) #f)"; "(input-port?)"; "(output-port?)" ]
+    "15.1.3", [ // "The opened port is accessed implicitly within the dynamic extent of
+                // the call": write with no port finds it, and read reads it back.
+                "(sequence (with-output-to-file \"conformance-15-1-3.txt\""
+                + " (lambda () (write (quote hello))))"
+                + " (eq? (with-input-from-file \"conformance-15-1-3.txt\""
+                + " (lambda () (read))) (quote hello)))"
+                // The binding is scoped to the extent, so the console is current again.
+                "(output-port? (get-current-output-port))" ]
+    "15.1.4", [ "(port? (get-current-input-port))"; "(port? (get-current-output-port))"
+                "(input-port? (get-current-input-port))"
+                "(output-port? (get-current-output-port))" ]
+    "15.1.6", [ // Closing is not mutation (chapter 15's preamble), and gives inert.
+                "(inert? (close-output-file (open-output-file \"conformance-15-1-6.txt\")))"
+                "(inert? (close-input-file (open-input-file \"conformance-15-1-6.txt\")))" ]
+    "15.2.1", [ // Like 15.1.3 but the port is an operand rather than implicit.
+                "(sequence (call-with-output-file \"conformance-15-2-1.txt\""
+                + " (lambda (p) (write (quote hello) p)))"
+                + " (eq? (call-with-input-file \"conformance-15-2-1.txt\""
+                + " (lambda (p) (read p))) (quote hello)))" ]
     "15.1.5", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (. System.IO.File Delete f) #t))" ]
     "15.1.7", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v 'alpha))))))" ]
     "15.1.8", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write '(a b c) p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v '(a b c)))))))" ]
@@ -603,6 +629,11 @@ let private behaviouralChecks () : (string * string list) list = [
 /// Divergences the matrix cannot express as a status, recorded so that a `verified`
 /// row is not read as "identical to the report".
 let private divergences () = [
+    "15.1.3", "`with-input-from-file` and `with-output-to-file` close their port on "
+              + "a *normal* return, which is what chapter 15's preamble asks of them, "
+              + "but not on a non-local exit: an escape out of the combiner leaves the "
+              + "port open. Closing on an abnormal pass as well would take an exit "
+              + "guard (7.2.4), which the implementation has but this does not yet use."
     "3.6", "External representations differ: IronKernel prints a number as "
            + "`<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a "
            + "number written to a port cannot be read back by `read`; symbols, lists "
