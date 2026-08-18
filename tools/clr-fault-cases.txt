@@ -170,3 +170,7 @@
 (#inert)
 (null? (#inert))
 (eqv? (#inert) (list))
+(eq? (list 1) (list 1))
+(eq?)
+(equal? car car)
+(eq? (make-environment) (make-environment))

@@ -48,8 +48,7 @@ exercised, not that IronKernel matches the report exactly.
 | 12.3.3 | Under strict arithmetic the report signals on numeric overflow and underflow as well as on a result with no primary value. IronKernel signals only the latter: an overflow still yields an infinity and an underflow a zero, which is the report's behaviour for *cleared* strict-arithmetic. Its initial value here is true, which the report leaves open. |
 | 7.2.7 | Signalling an error is not an abnormal pass to `error-continuation`. IronKernel reports errors on a separate channel that unwinds the computation directly, so an exit guard is *not* selected when an error is signalled within the guarded extent -- passing to the continuation explicitly does work, and provides the diagnostic. One consequence is that the report's derivation of `$binds?` from an error exit-guard would not work here. |
 | 7.2.6 | `root-continuation` is not literally at the end of every continuation chain: IronKernel's drivers give each top-level form its own continuation. Its extent is instead defined to contain everything, which is what "the ancestor of all other continuations" means for the selection algorithm, so a clause selecting on it is always selected. Receiving a value ends the session, and the process exit status is 0. |
-| 4.7 | Module Pair mutation is only half implemented, and deliberately so. IronKernel's pairs are immutable -- lists are F# immutable lists rather than cons cells -- so `set-car!`, `set-cdr!`, `encycle!` and `append!` have no cell to write into and are absent. The four entries that need no mutation are implemented. `copy-es-immutable` returns its argument, which 4.7.2 permits outright for an argument that is already an immutable pair; `copy-es` copies the structure, but the report's promise that the result is not `eq?` to a pair argument is unobservable here, since `eq?` compares structurally (see 4.2.1). Supporting the module fully means replacing the list representation with mutable cons cells and making every traversal cycle-safe, including `equal?`. That work is planned in [ADR 0005](adr/0005-mutable-pairs.md). |
-| 4.2.1 | `eq?` is bound to the same structural comparison as `eqv?`, so it is coarser than the report's, which distinguishes objects that `equal?` does not. |
+| 4.7 | Module Pair mutation is only half implemented, and deliberately so. IronKernel's pairs are immutable -- lists are F# immutable lists rather than cons cells -- so `set-car!`, `set-cdr!`, `encycle!` and `append!` have no cell to write into and are absent. The four entries that need no mutation are implemented. `copy-es-immutable` returns its argument, which 4.7.2 permits outright for an argument that is already an immutable pair; `copy-es` copies the structure, and its result is not `eq?` to a pair argument now that `eq?` compares pairs by identity. Supporting the module fully means replacing the list representation with mutable cons cells and making every traversal cycle-safe, including `equal?`. That work is planned in [ADR 0005](adr/0005-mutable-pairs.md). |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
 
@@ -117,8 +116,8 @@ divergences before taking any row as a claim of conformance.
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
 | 4.1.1 | `boolean?` | Booleans | `verified` | 4 behavioural check(s) |
-| 4.2.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 3 behavioural check(s) |
-| 4.3.1 | `equal?` | Equivalence up to mutation | `verified` | 3 behavioural check(s) |
+| 4.2.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 10 behavioural check(s) |
+| 4.3.1 | `equal?` | Equivalence up to mutation | `verified` | 6 behavioural check(s) |
 | 4.4.1 | `symbol?` | Symbols | `verified` | 3 behavioural check(s) |
 | 4.5.1 | `inert?` | Control | `verified` | 3 behavioural check(s) |
 | 4.5.2 | `$if` | Control | `verified` | 3 behavioural check(s) |
@@ -177,11 +176,11 @@ divergences before taking any row as a claim of conformance.
 | 6.3.9 | `countable-list?` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 6.3.10 | `reduce` | Pairs and lists | `verified` | 3 behavioural check(s) |
 | 6.4.1 | `append!` | Pair mutation (optional) | `absent` | optional module |
-| 6.4.2 | `copy-es` | Pair mutation (optional) | `verified` | optional module; 6 behavioural check(s) |
+| 6.4.2 | `copy-es` | Pair mutation (optional) | `verified` | optional module; 8 behavioural check(s) |
 | 6.4.3 | `assq` | Pair mutation (optional) | `verified` | optional module; 4 behavioural check(s) |
 | 6.4.4 | `memq?` | Pair mutation (optional) | `verified` | optional module; 3 behavioural check(s) |
-| 6.5.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 2 behavioural check(s) |
-| 6.6.1 | `equal?` | Equivalence up to mutation | `verified` | 2 behavioural check(s) |
+| 6.5.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 6 behavioural check(s) |
+| 6.6.1 | `equal?` | Equivalence up to mutation | `verified` | 7 behavioural check(s) |
 | 6.7.1 | `$binds?` | Environments | `absent` |  |
 | 6.7.2 | `get-current-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.3 | `make-kernel-standard-environment` | Environments | `absent` |  |
