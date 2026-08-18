@@ -1,6 +1,6 @@
 # ADR 0006: Errors as abnormal passes
 
-Status: Accepted — phases 1-3 done, phase 4 outstanding
+Status: Implemented
 
 ## Decision
 
@@ -246,10 +246,24 @@ record. The test has the body return `(list #t)` and takes the car of either pat
 which is a transcription difference and not a semantic one — what decides the
 predicate is still whether looking the symbol up signals.
 
-**Phase 4 — record.** Retire the 7.2.7 divergence, narrow 15.1.3's successor if
-ports can now close on error too, and re-validate. Note that the 7.2.5 divergence
-does *not* retire: an atomic operand tree still has no representation, and errors
-now go through interception while a direct continuation application still does not.
+**Phase 4 — record.** *Done.* The 7.2.7 divergence is retired, taking the matrix
+from twelve divergences to eleven, and its entry now carries three behavioural checks
+instead of one -- selection of an exit guard on `error-continuation`, and diversion --
+rather than only that `error-continuation` is a continuation.
+
+There was no 15.1.3 divergence to narrow; the note assumed one. Ports do now close
+when the body signals, because the closing guard chapter 15 already installed on the
+extent is finally selected, and that is a test. Its controls are the point: deleting
+a file that is still open succeeds on Unix, so "the file could be deleted" cannot
+fail for the right reason, while "a later write is rejected" can -- an open port
+accepts one.
+
+The 7.2.5 divergence does not retire, and grew a second half instead. Errors now go
+through interception while a direct continuation application still does not, which is
+worth stating where someone will meet it; and a combination's operand tree is
+represented as a list, so the atomic tree the report allows has no spelling. That
+second half was previously implicit in a test comment and is now on the record,
+because it is what the `$binds?` derivation runs into.
 
 ## Baseline to hold
 

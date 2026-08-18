@@ -323,7 +323,20 @@ let private behaviouralChecks () : (string * string list) list = [
                "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
                + " (apply-continuation out 3) 99)"
                + " (list (list root-continuation (lambda (v d) v)))))) 3)" ]
-    "7.2.7", [ "(continuation? error-continuation)" ]
+    "7.2.7", [ "(continuation? error-continuation)"
+               // "When an error is signaled during a Kernel computation, the
+               // signaling action consists of an abnormal pass to some continuation
+               // in the dynamic extent of error-continuation." So an exit guard
+               // selecting on error-continuation is selected when the guarded extent
+               // signals -- which is what makes the pass observable at all.
+               "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
+               + " (car 5) 99) (list (list error-continuation"
+               + " (lambda (v d) (apply-continuation out 7))))))) 7)"
+               // The interceptor's second argument diverts, which is how an error is
+               // handled rather than merely observed. The operand tree of a divert is
+               // a list here (the 7.2.5 divergence), so both paths yield one.
+               "(=? (car (guard-dynamic-extent (list) (lambda () (car 5) (list 1))"
+               + " (list (list error-continuation (lambda (v d) (d 9)))))) 9)" ]
     "7.3.3", [ // Exit guards fire outward, smallest extent first.
                "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda ()"
                + " (guard-dynamic-extent (list) (lambda () (apply-continuation out 1))"
@@ -703,12 +716,19 @@ let private behaviouralChecks () : (string * string list) list = [
 /// Divergences the matrix cannot express as a status, recorded so that a `verified`
 /// row is not read as "identical to the report".
 let private divergences () = [
-    "7.2.5", "Applying a continuation object directly, as in `(k 1)`, bypasses the "
-             + "selection and interception of 7.2.5: no guard is consulted. That is a "
-             + "dialect extension rather than a gap in the report, which does not make "
-             + "continuations applicable at all -- `apply-continuation` (7.3.1) and "
-             + "`continuation->applicative` (7.2.5) are its mechanisms, and both "
-             + "intercept correctly. Anything relying on a guard should use those."
+    "7.2.5", "Two things. First, applying a continuation object directly, as in "
+             + "`(k 1)`, bypasses the selection and interception of 7.2.5: no guard is "
+             + "consulted. That is a dialect extension rather than a gap in the "
+             + "report, which does not make continuations applicable at all -- "
+             + "`apply-continuation` (7.3.1) and `continuation->applicative` (7.2.5) "
+             + "are its mechanisms, and both intercept correctly. Anything relying on "
+             + "a guard should use those, and since 7.2.7 now signals by abnormal "
+             + "pass, errors do go through interception while a direct application "
+             + "still does not. Second, a combination's operand tree is represented as "
+             + "a list, so the *atomic* operand tree the report also allows has no "
+             + "spelling: `(divert #f)` delivers `(#f)` rather than `#f`, which is why "
+             + "the report's `$binds?` derivation (6.7.1) needs a list on both paths "
+             + "here. `apply-continuation` takes the object directly and is unaffected."
     "3.6", "Two spellings differ from the report's, and both round-trip through "
            + "`read`, because IronKernel's reader accepts them. A dotted pair writes "
            + "as `(1 & 2)` rather than `(1 . 2)`, since `.` is the CLR interop "
@@ -747,14 +767,6 @@ let private divergences () = [
               + "and an exact answer for subtraction -- so it is left undetected "
               + "rather than guessed at. The variable's initial value here is true, "
               + "which the report leaves open."
-    "7.2.7", "Signalling an error is not an abnormal pass to `error-continuation`. "
-             + "IronKernel reports errors on a separate channel that unwinds the "
-             + "computation directly, so an exit guard is *not* selected when an error "
-             + "is signalled within the guarded extent -- passing to the continuation "
-             + "explicitly does work, and provides the diagnostic. One consequence is "
-             + "that the report's derivation of `$binds?` from an error exit-guard "
-             + "would not work here. Changing this is planned in "
-             + "[ADR 0006](adr/0006-errors-as-abnormal-passes.md)."
     "7.2.6", "`root-continuation` is not literally at the end of every continuation "
              + "chain: IronKernel's drivers give each top-level form its own "
              + "continuation. Its extent is instead defined to contain everything, "
