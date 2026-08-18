@@ -1,6 +1,6 @@
 # ADR 0004: Compiling procedure bodies
 
-Status: Implemented — phases 1-4 done, phase 5 open
+Status: Implemented
 
 ## Decision
 
@@ -184,10 +184,79 @@ master. Phase 1's cost on `CompiledGeneric` and `CompiledFolded` remains: those
 measure a single top-level form, where the extra continuation threading is not
 offset by anything a body would gain.
 
-**Phase 5 — revisit analyzer specialization.** *Open; the only phase not done.*
-Re-measure with `GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
-once bodies are compiled, and guards measured 12% faster there, so extending
-`PrimitiveIdentity` should be reconsidered then, with evidence.
+**Phase 5 — revisit analyzer specialization.** *Measured. The answer is no: do not
+extend `PrimitiveIdentity`.*
+
+The premise held. `GuardSpecializationBenchmarks`, on an idle machine, has the
+guarded path ahead in both cases -- and the 12% figure that motivated this phase
+reproduces exactly:
+
+| | Mean | vs its unguarded pair | Allocated |
+|---|---:|---:|---:|
+| `Unguarded` | 190.9 ns | | 984 B |
+| `Guarded` | 159.0 ns | -16.7% | 800 B (-19%) |
+| `UnguardedFreshEnv` | 219.1 ns | | 1232 B |
+| `GuardedFreshEnv` | 193.4 ns | -11.7% | 1048 B (-15%) |
+
+So the earlier claim that guards were a pessimization is doubly dead: the reasoning
+behind it was void once phase 4 replaced the reference-equality cache, and the
+measurement now disagrees with it too.
+
+What kills the extension is not the mechanism's speed but its reach. A census of the
+Core nodes the analyzer produces *inside compiled bodies* -- what phase 3 compiles
+per operative -- over two corpora:
+
+| | kernel.ikr (409 nodes) | examples (232 nodes) |
+|---|---:|---:|
+| `COperate` (generic dispatch) | 51.1% | 62.1% |
+| `CGuarded` (the specialized path) | 16.4% | 12.5% |
+
+Half to two-thirds of a compiled body is generic dispatch, and the operators
+reaching it divide into two groups, neither of which `PrimitiveIdentity` can help:
+
+- **Ordinary applicative calls** -- `null?` (32 sites in kernel.ikr), `car`, `cons`,
+  `zero?`, `<`, `vector-set!`, and user procedures. There is nothing to lower. `CIf`
+  wins because it compiles its branches instead of leaving them as raw operands; an
+  applicative call has no branches, and `COperate` already reaches the call-site
+  cache.
+- **Derived control operatives** -- `letrec` (20), `let` (11), `begin` (11), `cond`,
+  `sequence`. These are the ones with structure worth lowering, and they are defined
+  in `kernel.ikr` as vaus. `PrimitiveIdentity` is a field on
+  `PrimitiveOperativeRecord`, so it cannot tag them at all. That is structural, not a
+  matter of which cases someone bothered to add.
+
+The only primitive candidate with a Core node already waiting for it is `eval` ->
+`CEval` (19 sites in kernel.ikr, 5 in the examples). Worth noting while here:
+`CEval`, `CSeq`, `CVau` and `CReset` exist in the IR but the analyzer never emits any
+of them -- they are produced only by the package decoder and the partial evaluator.
+The specialization machinery is narrower in practice than the node set suggests.
+
+*Limitation.* The census counts static occurrences, not execution frequency, so it
+says what a body is made of rather than where its time goes. The structural
+conclusion does not depend on the weighting: a derived combiner is unreachable by
+this mechanism however hot it is. Execution frequency would only change how much is
+on the table for a *different* mechanism.
+
+*If the lever is wanted*, it is identity for derived combiners -- a way to guard on
+"this binding is still the standard library's `let`" -- which is a different design
+from `PrimitiveIdentity` and should get its own ADR rather than being grown into
+this one.
+
+## Baseline
+
+Taken on an idle machine alongside phase 5's measurement, as the reference for any
+later work. `ControlFlowBenchmarks`: `NamedLambdaCall` 744.7 ns / 3.6 KB,
+`NamedVauCall` 736.9 ns / 3.6 KB, `CallCcEscape` 795.1 ns, `ShiftResetResume`
+1220.0 ns, `DirectEffectHandler` 856.5 ns, `EffectHandlerAbort` 1970.7 ns,
+`EffectHandlerResume` 2695.4 ns, `LambdaLiteralCall` 32.9 us.
+`CompilerBenchmarks`: ColdCompile 147.3 ns / 808 B, Interpreted 432.4 ns / 2048 B,
+CompiledGeneric 185.0 ns / 808 B, CompiledFolded 54.1 ns / 304 B.
+
+Worth stating because it cost time twice: these numbers move by half again if
+anything else on the machine is busy, and stray processes left by an earlier run are
+the likeliest cause. Ratios and allocation stay put when that happens, which is how
+to tell it from a real regression -- a uniform slowdown with byte-identical
+allocation is the machine, not the code.
 
 ## Consequences
 
