@@ -202,12 +202,20 @@
             | :? ArgumentException as ex -> throwError (Default(description + ": " + ex.Message))
             | :? NotSupportedException as ex -> throwError (Default(description + ": " + ex.Message))
 
+        // Reading opens an existing file; only writing creates one. OpenOrCreate for
+        // both meant `open-input-file` on a missing file silently created an empty one
+        // and then read nothing from it, which is a surprising way to answer "that file
+        // is not there".
+        let private fileModeFor = function
+            | FileAccess.Read -> FileMode.Open
+            | _ -> FileMode.OpenOrCreate
+
         let makePort mode = function
             | [Obj filename] ->
                 either {
                     let! fname = cast filename
                     return! guardIO "open file" (fun () ->
-                        returnM (Port(File.Open(fname, FileMode.OpenOrCreate, mode))))
+                        returnM (Port(File.Open(fname, fileModeFor mode, mode))))
                 }
             | [found] -> throwError(TypeMismatch("string", found))
             | bad -> throwError(NumArgs(1, bad))
@@ -321,7 +329,9 @@
             | _ -> fail (NumArgs(0, args))
 
         let private openFile name access filename =
-            try Choice2Of2(Port(IO.File.Open(filename, IO.FileMode.OpenOrCreate, access)))
+            let mode =
+                if access = IO.FileAccess.Read then IO.FileMode.Open else IO.FileMode.OpenOrCreate
+            try Choice2Of2(Port(IO.File.Open(filename, mode, access)))
             with ex -> Choice1Of2(Default(name + ": " + ex.Message))
 
         /// R-1RK 15.1.3. "The opened port is accessed implicitly within the dynamic
