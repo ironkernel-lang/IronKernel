@@ -87,58 +87,75 @@
         /// Everything else is judged the same way by both. Two equal exact integers,
         /// or two equal symbols, are interchangeable in every way a program can
         /// observe, and the report leaves eq? on such objects to the implementation.
+        /// One comparison. `ValueNone` means "these are two distinct pairs and the
+        /// caller asked for a structural comparison", which is the only case that has
+        /// to descend -- so it is the only case that needs a work list.
+        ///
+        /// An object is the same object as itself, whatever its type. Without that
+        /// first case an environment, a vector or a primitive combiner was not equal to
+        /// itself, because the cases below cover only the types with a structural
+        /// comparison and everything else fell through to false -- which breaks the
+        /// reflexivity 4.2.1 and 4.3.1 both require.
+        let private compareStep pairsByIdentity first second =
+            match first, second with
+            | a, b when obj.ReferenceEquals(a, b) -> ValueSome true
+            | Inert, Inert -> ValueSome true
+            | Obj arg1, Obj arg2 -> ValueSome(arg1.Equals(arg2))
+            | Bool arg1, Bool arg2 -> ValueSome(arg1 = arg2)
+            | Atom arg1, Atom arg2 -> ValueSome(arg1 = arg2)
+            | PromptTag arg1, PromptTag arg2 -> ValueSome(arg1 = arg2)
+            // Compared cell by cell rather than through the list patterns, which
+            // materialised both chains before comparing them and walked each value
+            // twice over -- once failing DottedList, once matching List.
+            //
+            // Reference-equal cells were settled above; for eq? distinct cells are
+            // distinct pairs however alike they look, so it never descends.
+            | Pair _, Pair _ -> if pairsByIdentity then ValueSome false else ValueNone
+            | Nil, Nil -> ValueSome true
+            | _ -> ValueSome false
+
+        /// The work list and the visited set are built only once a comparison actually
+        /// descends. `eq?` never does, and neither does any comparison of scalars, so
+        /// the common case allocates nothing -- comparing two integers cost 232 bytes
+        /// when both were built up front.
         let private compareValues pairsByIdentity left right =
-            let pending = System.Collections.Generic.Stack<LispVal * LispVal>()
-            pending.Push(left, right)
-            let visited =
-                System.Collections.Generic.HashSet<struct (PairCell * PairCell)>(
-                    HashIdentity.Structural)
-            let mutable equal = true
+            match compareStep pairsByIdentity left right with
+            | ValueSome result -> result
+            | ValueNone ->
+                let pending = System.Collections.Generic.Stack<LispVal * LispVal>()
+                let visited =
+                    System.Collections.Generic.HashSet<struct (PairCell * PairCell)>(
+                        HashIdentity.Structural)
+                pending.Push(left, right)
+                let mutable equal = true
 
-            let pushLists leftValues rightValues =
-                let rec loop leftRemaining rightRemaining =
-                    match leftRemaining, rightRemaining with
-                    | [], [] -> ()
-                    | leftValue :: leftTail, rightValue :: rightTail ->
-                        pending.Push(leftValue, rightValue)
-                        loop leftTail rightTail
-                    | _ -> equal <- false
-                loop leftValues rightValues
+                // Only a structural comparison reaches here, so two distinct cells
+                // always descend. Taking that case directly rather than through
+                // `compareStep` matters: it is every cons cell of every list compared.
+                //
+                // A pair of cells already under comparison is assumed equal. That is
+                // what makes equal? terminate on cyclic structure, which R-1RK 4.3.1
+                // requires and set-cdr! now makes reachable: if following the cycle
+                // round ever disagreed, the disagreement is found before the cells
+                // recur.
+                while equal && pending.Count > 0 do
+                    let first, second = pending.Pop()
+                    match first, second with
+                    | Pair leftCell, Pair rightCell when
+                        not (obj.ReferenceEquals(first, second)) ->
+                        if not (visited.Add(struct (leftCell, rightCell))) then ()
+                        else
+                            pending.Push(leftCell.cdr, rightCell.cdr)
+                            pending.Push(leftCell.car, rightCell.car)
+                    | _ ->
+                        match compareStep pairsByIdentity first second with
+                        | ValueSome true -> ()
+                        | ValueSome false -> equal <- false
+                        // Unreachable: the only ValueNone is two distinct pairs, taken
+                        // by the case above.
+                        | ValueNone -> equal <- false
 
-            while equal && pending.Count > 0 do
-                match pending.Pop() with
-                // An object is the same object as itself, whatever its type. Without
-                // this an environment, a vector or a primitive combiner was not equal
-                // to itself, because the cases below cover only the types with a
-                // structural comparison and everything else fell through to false --
-                // which breaks the reflexivity 4.2.1 and 4.3.1 both require.
-                | first, second when obj.ReferenceEquals(first, second) -> ()
-                | Inert, Inert -> ()
-                | Obj arg1, Obj arg2 -> equal <- arg1.Equals(arg2)
-                | Bool arg1, Bool arg2 -> equal <- arg1 = arg2
-                | Atom arg1, Atom arg2 -> equal <- arg1 = arg2
-                | PromptTag arg1, PromptTag arg2 -> equal <- arg1 = arg2
-                // Compared cell by cell rather than through the list patterns, which
-                // materialised both chains before comparing them and walked each value
-                // twice over -- once failing DottedList, once matching List.
-                | Pair left, Pair right ->
-                    if pairsByIdentity then
-                        // Reference-equal cells were settled above; distinct cells are
-                        // distinct pairs however alike they look.
-                        equal <- false
-                    // A pair of cells already under comparison is assumed equal. That is
-                    // what makes equal? terminate on cyclic structure, which R-1RK 4.3.1
-                    // requires and set-cdr! now makes reachable: if following the cycle
-                    // round ever disagreed, the disagreement is found before the cells
-                    // recur. eq? cannot loop, because it never descends into a pair.
-                    elif not (visited.Add(struct (left, right))) then ()
-                    else
-                        pending.Push(left.cdr, right.cdr)
-                        pending.Push(left.car, right.car)
-                | Nil, Nil -> ()
-                | _ -> equal <- false
-
-            equal
+                equal
 
         /// R-1RK 4.7.1. The result is inert, and 3.8 requires an error when the pair is
         /// immutable -- which is what protects a captured algorithm from being rewritten
