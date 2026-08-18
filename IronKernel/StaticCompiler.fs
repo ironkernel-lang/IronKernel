@@ -117,7 +117,7 @@ module StaticCompiler =
                 Some(
                     generated(
                     "match getVar env " + quote name
-                    + " with | Choice1Of2 error -> Done(throwError error)"
+                    + " with | Choice1Of2 error -> signal cont error"
                     + " | Choice2Of2 value -> bounceContinue env cont value"))
             | COperate(operator, operands) ->
                 match operands |> List.map emitValue |> sequenceOptions with

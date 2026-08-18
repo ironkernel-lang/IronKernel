@@ -96,10 +96,10 @@
                     | Some typ ->
                         // Evaluate constructor arguments (operative operands arrive raw).
                         match sequence (List.map (eval env (newContinuation env)) args) [] with
-                        | Choice1Of2 e -> fail e
+                        | Choice1Of2 e -> signal cont e
                         | Choice2Of2 evaluated ->
                             match sequence (List.map toObjects evaluated) [] with
-                            | Choice1Of2 e -> fail e
+                            | Choice1Of2 e -> signal cont e
                             | Choice2Of2 mapargs ->
                                 try
                                     let obj = Activator.CreateInstance(typ, List.toArray mapargs)
@@ -219,7 +219,7 @@
                     | Atom _
                     | Obj _ ->
                         match sequence (List.map (eval env (newContinuation env)) args) [] with
-                        | Choice1Of2 e -> fail e
+                        | Choice1Of2 e -> signal cont e
                         | Choice2Of2 args' ->
                             let result =
                                 match clazz with
@@ -238,7 +238,7 @@
                                         | Choice1Of2 e -> throwError e
                                 | bad -> throwError (TypeMismatch("object", bad))
                             match result with
-                            | Choice1Of2 e -> fail e
+                            | Choice1Of2 e -> signal cont e
                             | Choice2Of2 r -> bounceContinue env cont r
                     | exp ->
                         let cps e c result _ =
@@ -313,7 +313,7 @@
                 signal cont (CapabilityDenied "host output requires HostIO")
           | Obj(sf)::tail when typeof<string> = sf.GetType() -> 
                 match sequence (List.map toObjects tail) [] with
-                | Choice1Of2 e -> fail e
+                | Choice1Of2 e -> signal cont e
                 | Choice2Of2 mapargs ->
                     // A format string with more placeholders than arguments raises
                     // FormatException, which escaped the evaluator and aborted the

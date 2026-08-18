@@ -43,7 +43,7 @@
             | [a;b] ->
                 match op a b with
                 | Choice2Of2 result -> bounceContinue env cont result
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             | _ -> signal cont (NumArgs(2,prms))
 
         let numBoolBinop env cont (op: LispVal -> LispVal -> ThrowsError<LispVal>) prms : Step = 
@@ -51,7 +51,7 @@
             | [a;b] ->
                 match op a b with
                 | Choice2Of2 result -> bounceContinue env cont result
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             | _ -> signal cont (NumArgs(2,prms))
 
         // The three fundamental operations, each one cell access. Asked through the
@@ -531,10 +531,10 @@
                 signal cont (CapabilityDenied "source loading requires SourceLoading")
             | [Obj(filename)] ->
                 match cast filename with
-                | Choice1Of2 e -> fail e
+                | Choice1Of2 e -> signal cont e
                 | Choice2Of2 fname ->
                     match load fname with
-                    | Choice1Of2 e -> fail e
+                    | Choice1Of2 e -> signal cont e
                     | Choice2Of2 lisp ->
                         // Each loaded form gets a fresh continuation. Passing the
                         // caller's `cont` ran the rest of the caller's computation once
@@ -547,7 +547,7 @@
                         // own structure through `vau` above (ADR 0005 phase 0).
                         let evaluateForm form = eval env (newContinuation env) form
                         match sequence (List.map evaluateForm lisp) [] with
-                        | Choice1Of2 e -> fail e
+                        | Choice1Of2 e -> signal cont e
                         | Choice2Of2 _ -> bounceContinue env cont Inert
             | badform -> signal cont (NumArgs(1, badform))
 
@@ -633,11 +633,11 @@
                     match Contracts.attach contract value with
                     | Some contracted ->
                         match defineVar env name contracted with
-                        | Choice1Of2 error -> fail error
+                        | Choice1Of2 error -> signal cont error
                         | Choice2Of2 _ -> bounceContinue env cont Inert
                     | None ->
                         signal cont (ContractViolation(name + " contract mode does not match its combiner"))
-                | _, _, _, Choice1Of2 error -> fail error
+                | _, _, _, Choice1Of2 error -> signal cont error
                 | _ -> signal cont (ContractViolation("invalid contract specification for " + name))
             | bad -> signal cont (NumArgs(6, bad))
 
@@ -992,7 +992,7 @@
             let extend target applicative dynamicEnv =
                 match extendWith target applicative dynamicEnv with
                 | Choice2Of2 extended -> bounceContinue env cont extended
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             match args with
             | [target; applicative; (Environment _ as dynamicEnv)] ->
                 extend target applicative dynamicEnv
@@ -1092,14 +1092,14 @@
             match args with
             | [Obj filename; combiner] when (filename :? string) ->
                 match openFile name access (filename :?> string) with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 (Port stream as port) ->
                     let closeAfter _ c value _ =
                         try stream.Close() with _ -> ()
                         More(fun () -> continueEvalStep env c value)
                     let afterCall = makeCPS env cont closeAfter
                     match buildGuarded env afterCall Nil (closingGuard stream) with
-                    | Choice1Of2 error -> fail error
+                    | Choice1Of2 error -> signal cont error
                     | Choice2Of2 guarded ->
                         let isolated = newEnvWithClr (ofEnvironment env) [] []
                         bounceOperate
@@ -1123,14 +1123,14 @@
             match args with
             | [Obj filename; combiner] when (filename :? string) ->
                 match openFile name access (filename :?> string) with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 (Port stream as port) ->
                     let closeAfter _ c value _ =
                         try stream.Close() with _ -> ()
                         More(fun () -> continueEvalStep env c value)
                     let afterCall = makeCPS env cont closeAfter
                     match buildGuarded env afterCall Nil (closingGuard stream) with
-                    | Choice1Of2 error -> fail error
+                    | Choice1Of2 error -> signal cont error
                     | Choice2Of2 guarded -> bounceOperate env guarded combiner [port]
                 | Choice2Of2 _ -> signal cont (Default(name + ": could not open the file"))
             | [found; _] -> signal cont (TypeMismatch("string", found))
@@ -1171,7 +1171,7 @@
         let writeValue env cont args =
             let finish result =
                 match result with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 value -> bounceContinue env cont value
             match args with
             | [value] -> finish (writeTo (currentOutput cont) value)
@@ -1206,7 +1206,7 @@
         let readValue env cont args =
             let finish result =
                 match result with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 value -> bounceContinue env cont value
             match args with
             | [] -> finish (readFrom (currentInput cont))
@@ -1219,7 +1219,7 @@
             | [entry; (Continuation _ as target); exit] ->
                 match buildGuarded env target entry exit with
                 | Choice2Of2 inner -> bounceContinue env cont inner
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             | [_; found; _] -> signal cont (TypeMismatch("continuation", found))
             | _ -> signal cont (NumArgs(3, args))
 
@@ -1239,7 +1239,7 @@
             match args with
             | [entry; combiner; exit] ->
                 match buildGuarded env cont entry exit with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 inner -> bounceOperate env inner combiner []
             | _ -> signal cont (NumArgs(3, args))
 
@@ -1358,7 +1358,7 @@
                             |> ignore
                       resume =
                         function
-                        | Choice1Of2 error -> fail error
+                        | Choice1Of2 error -> signal cont error
                         | Choice2Of2 value -> bounceContinue env cont value }
             | [found] -> signal cont (TypeMismatch("Task", found))
             | bad -> signal cont (NumArgs(1, bad))
@@ -1477,7 +1477,7 @@
                     | next :: remaining ->
                         match op acc next with
                         | Choice2Of2 result -> loop result remaining
-                        | Choice1Of2 error -> fail error
+                        | Choice1Of2 error -> signal cont error
                 loop first rest
 
         /// The binary case is matched directly. Two arguments is overwhelmingly the
@@ -1488,7 +1488,7 @@
             | [a; b] ->
                 match op a b with
                 | Choice2Of2 result -> continueNumericFrom args env cont result
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             | _ -> foldNumeric op identity env cont args
 
         let plus env cont args = binaryOrFold opAdd (box 0) env cont args
@@ -1511,7 +1511,7 @@
             | [a; b] ->
                 match opDivide a b with
                 | Choice2Of2 result -> continueNumericFrom args env cont result
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             | numerator :: (_ :: _ as divisors) ->
                 let rec product acc = function
                     | [] -> Choice2Of2 acc
@@ -1520,11 +1520,11 @@
                         | Choice2Of2 value -> product value rest
                         | Choice1Of2 error -> Choice1Of2 error
                 match product (List.head divisors) (List.tail divisors) with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 divisor ->
                     match opDivide numerator divisor with
                     | Choice2Of2 result -> continueNumericFrom args env cont result
-                    | Choice1Of2 error -> fail error
+                    | Choice1Of2 error -> signal cont error
             | _ -> signal cont (NumArgs(2, args))
         /// R-1RK 12.9. The report gives these entries signatures only: Appendix A.2
         /// records that it is an incomplete draft whose unwritten portions were "only
@@ -2227,7 +2227,7 @@
                 match opDivAndMod a b with
                 | Choice2Of2 (quotient, remainder) ->
                     bounceContinue env cont (ofList [quotient; remainder])
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
             | _ -> signal cont (NumArgs(2, args))
 
         let lessThan env cont args = numBoolBinop env cont opLessThan args
@@ -2252,7 +2252,7 @@
             | [Vector arr; Obj pos'; value] when typeof<int> = pos'.GetType() ->
                 let index = pos' :?> int
                 match checkedIndex arr index "vector-set!" with
-                | Some error -> fail error
+                | Some error -> signal cont error
                 | None ->
                     arr.[index] <- value
                     bounceContinue env cont Inert
@@ -2264,7 +2264,7 @@
             | [Vector arr; Obj pos'] when typeof<int> = pos'.GetType() ->
                 let index = pos' :?> int
                 match checkedIndex arr index "vector-ref" with
-                | Some error -> fail error
+                | Some error -> signal cont error
                 | None -> arr.[index] |> bounceContinue env cont
             | [_; pos] -> signal cont (TypeMismatch("vector/int", pos))
             | _ -> signal cont (NumArgs(2, args))
@@ -2372,7 +2372,7 @@
                             | [value; (Environment _ as target)] ->
                                 let child = newEnv [target]
                                 match defineVar child key value with
-                                | Choice1Of2 error -> fail error
+                                | Choice1Of2 error -> signal cont error
                                 | Choice2Of2 _ -> bounceContinue e c child
                             | [_; found] -> signal c (TypeMismatch("environment", found))
                             | bad -> signal c (NumArgs(2, bad))))

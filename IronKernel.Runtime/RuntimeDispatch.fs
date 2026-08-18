@@ -16,7 +16,7 @@ module RuntimeDispatch =
     /// and turn `Await` into a blocking wait. See ADR 0004.
     let appNamed env cont name (operands: LispVal[]) : Step =
         match getVar env name with
-        | Choice1Of2 error -> Done(throwError error)
+        | Choice1Of2 error -> signal cont error
         | Choice2Of2 combiner -> bounceOperate env cont combiner (Array.toList operands)
 
     /// One call site's resolved binding, immutable once constructed so that it can
@@ -98,7 +98,7 @@ module RuntimeDispatch =
             match resolved.EagerUnderlying with
             | ValueSome underlying ->
                 match evaluateSimpleOperands env [] operands with
-                | Choice1Of2 error -> Done(throwError error)
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 args -> bounceOperate env cont underlying args
             | ValueNone -> bounceOperate env cont resolved.Combiner operands
 
@@ -122,7 +122,7 @@ module RuntimeDispatch =
                 // snapshot that could never be revalidated.
                 | ValueNone ->
                     match getVar env name with
-                    | Choice1Of2 error -> Done(throwError error)
+                    | Choice1Of2 error -> signal cont error
                     | Choice2Of2 combiner -> bounceOperate env cont combiner operands
 
     type GeneratedFunc = Func<LispVal, LispVal, Step>
@@ -144,14 +144,14 @@ module RuntimeDispatch =
                 match value with
                 | Bool true -> consequent.Invoke(e, c)
                 | Bool false -> alternative.Invoke(e, c)
-                | found -> Done(throwError (TypeMismatch("bool", found)))))
+                | found -> signal c (TypeMismatch("bool", found))))
 
     let runDefine env cont name (rhs: GeneratedFunc) =
         rhs.Invoke(
             env,
             makeCPS env cont (fun e c value _ ->
                 match defineVar e name value with
-                | Choice1Of2 error -> Done(throwError error)
+                | Choice1Of2 error -> signal c error
                 | Choice2Of2 _ -> bounceContinue e c Inert))
 
     let runSequence env cont (forms: GeneratedFunc[]) =

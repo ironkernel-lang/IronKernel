@@ -1,6 +1,6 @@
 # ADR 0006: Errors as abnormal passes
 
-Status: Accepted — phases 1-2 done, phases 3-4 outstanding
+Status: Accepted — phases 1-3 done, phase 4 outstanding
 
 ## Decision
 
@@ -151,6 +151,12 @@ ignores its continuation, so nothing changes yet. 200 sites now signal; 8 still
 where the continuation *argument* is itself malformed, and the internal error for a
 metacontinuation in the wrong position.
 
+> **Corrected in phase 3.** The second sentence was wrong. 47 sites were still
+> unmigrated, not 8, and they were not the ones without a continuation: 39 `fail`
+> sites in the runtime and 8 `Done(throwError ...)` sites in the compiled and dispatch
+> paths, almost all with a continuation in scope. The count of 8 is right only for
+> what remains *after* phase 3. See phase 3 below.
+
 The migration was not quite as mechanical as this plan assumed, and the part that
 was not is the part phase 2 depends on. `signal` takes the continuation the failing
 operation would have returned to, which is the *innermost* one in scope, and eleven
@@ -204,13 +210,46 @@ convention. The non-inline delegate is the fastest of the three and the one ship
 411 ns against master's 421 ns, with the compiled paths unchanged. Time improved and
 allocation rose 1.2%, on the interpreted path only.
 
-**Phase 3 — the payoffs.** An exit guard selecting on `error-continuation` fires
-when the guarded extent signals. `dynamic-wind` cleans up after a failure. The
-report's `$binds?` derivation becomes expressible, and should be added as a test
-even though the direct implementation stays.
+**Phase 3 — the payoffs.** *Done.* `dynamic-wind` cleans up after a failure, and
+the report's `$binds?` derivation works. Both are tests; the direct `$binds?`
+implementation stays.
+
+Neither worked when the phase began, and the reason is the part of this ADR worth
+keeping. **Phases 1 and 2 had missed 47 signalling sites**, so whether an error could
+be intercepted depended on which primitive raised it: a guard caught `(car 5)` and
+missed an unbound variable.
+
+- **39 `fail` sites in `Eval`, `Runtime` and `Interop`.** Phase 1's note claimed 8
+  remained and that they were "exactly the ones with no continuation to signal from".
+  That was a miscount. Almost all 39 are the `| Choice1Of2 error -> fail error`
+  conversions this ADR had already identified as "where the pass begins" — the
+  inventory named them and the migration then skipped them. 8 sites genuinely do stay
+  `fail`, and those are the malformed-continuation and internal-error cases.
+- **8 sites in the compiled and dispatch paths** — `Compiler.fs`,
+  `RuntimeDispatch.fs`, and the source text `StaticCompiler.fs` emits — which called
+  `Done(throwError ...)` and so never went through `signal` at all. The site inventory
+  in this ADR counted `fail` and `throwError` in the runtime and never considered
+  compiled code, which is what a lambda body becomes. This is why the gap showed up as
+  "the guard catches an error from `(car 5)` but not from evaluating a symbol": the
+  first is a primitive, the second is compiled.
+
+Two of the 47 sit inside CPS callbacks binding their own continuation, and take that
+one rather than the enclosing primitive's — the same trap phase 1 documented, which
+the compiler cannot catch because both names are in scope.
+
+**On the `$binds?` transcription.** The report's derivation diverts with
+`(apply divert #f)`, which passes `#f` as an *atomic* operand tree. IronKernel's
+`apply` is the report's derivation verbatim, so that is not where the difference is:
+a combination's operand tree is represented as a list, so a non-list tree has no
+spelling, and `(divert #f)` delivers `(#f)`. That is the 7.2.5 divergence already on
+record. The test has the body return `(list #t)` and takes the car of either path,
+which is a transcription difference and not a semantic one — what decides the
+predicate is still whether looking the symbol up signals.
 
 **Phase 4 — record.** Retire the 7.2.7 divergence, narrow 15.1.3's successor if
-ports can now close on error too, and re-validate.
+ports can now close on error too, and re-validate. Note that the 7.2.5 divergence
+does *not* retire: an atomic operand tree still has no representation, and errors
+now go through interception while a direct continuation application still does not.
 
 ## Baseline to hold
 
