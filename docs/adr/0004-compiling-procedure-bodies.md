@@ -1,6 +1,6 @@
 # ADR 0004: Compiling procedure bodies
 
-Status: Proposed
+Status: Implemented — phases 1-4 done, phase 5 open
 
 ## Decision
 
@@ -167,7 +167,8 @@ and it needs profiling rather than another attempt.
 
 ## Results
 
-Against master, with 237 tests passing and diagnostics byte-identical:
+Against master as it stood when phases 1-4 landed, with 237 tests passing at that
+time and diagnostics byte-identical:
 
 | Measurement | master | now |
 |---|---|---|
@@ -183,8 +184,8 @@ master. Phase 1's cost on `CompiledGeneric` and `CompiledFolded` remains: those
 measure a single top-level form, where the extra continuation threading is not
 offset by anything a body would gain.
 
-**Phase 5 — revisit analyzer specialization.** Re-measure with
-`GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
+**Phase 5 — revisit analyzer specialization.** *Open; the only phase not done.*
+Re-measure with `GuardSpecializationBenchmarks`. Fresh-frame invocation becomes the common case
 once bodies are compiled, and guards measured 12% faster there, so extending
 `PrimitiveIdentity` should be reconsidered then, with evidence.
 
@@ -197,18 +198,27 @@ loops costs about 7% on `CompiledGeneric` and 15% on `CompiledFolded`, at 10-27%
 more allocation. If phases 2 and 3 do not land, phase 1 should be reverted rather
 than left in place.
 
-Phase 1 also constrains how a located span may be applied. Errors short-circuit
-the trampoline as `Done` and bypass continuations, so `runLocated` has to inspect
-the step chain. Under CPS that chain also covers everything that runs after the
-form, so a span applied naively reaches past its own form and an operator's span
-swallows errors raised by the operands evaluated after it. Interpreting bounded
-each sub-evaluation with a fresh continuation; the compiled path has to restore
-that boundary explicitly by recording when control passes out of the form. Until then, adding
-`PrimitiveIdentity` cases is a measured pessimization rather than an
-optimization: guards re-resolve the binding by name on every invocation, whereas
-the `COperate` fallback's call-site cache validates by environment reference
-equality and always hits when the environment is stable, which is the only
-situation compiled code encounters today.
+Phase 1 also constrains how a located span may be applied. An unintercepted error
+reaches the driver as `Done` without passing through the continuations between, so
+`runLocated` has to inspect the step chain. Under CPS that chain also covers
+everything that runs after the form, so a span applied naively reaches past its own
+form and an operator's span swallows errors raised by the operands evaluated after
+it. Interpreting bounded each sub-evaluation with a fresh continuation; the compiled
+path has to restore that boundary explicitly by recording when control passes out of
+the form.
+
+> ADR 0006 has since made signalling an abnormal pass, so an error now runs the
+> guard machinery on its way out. That does not change this: with no guard
+> installed the pass reaches a destination that returns `Done`, which is what
+> `runLocated` sees.
+
+The paragraph that used to close this section argued that adding `PrimitiveIdentity`
+cases was a pessimization because the call-site cache "validates by environment
+reference equality and always hits when the environment is stable, which is the only
+situation compiled code encounters today". Phase 4 measured the opposite -- 0 hits
+against 150,393 misses, because every call binds a fresh frame -- and replaced that
+validation with the path check. The argument is void, and what replaces it is phase
+5: re-measure rather than reason from the old cache's behaviour.
 
 Continuation-heavy behaviour is the primary regression risk, and it is exercised
 by examples rather than by unit tests. `Examples/coroutines.ikr` is now executed
