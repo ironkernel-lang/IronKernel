@@ -206,9 +206,13 @@
         // both meant `open-input-file` on a missing file silently created an empty one
         // and then read nothing from it, which is a surprising way to answer "that file
         // is not there".
+        // Reading opens an existing file; writing creates one, or truncates the one
+        // that is there. OpenOrCreate for output left the tail of whatever was in the
+        // file already, so writing a shorter value produced a file that was part new
+        // value and part old.
         let private fileModeFor = function
             | FileAccess.Read -> FileMode.Open
-            | _ -> FileMode.OpenOrCreate
+            | _ -> FileMode.Create
 
         let makePort mode = function
             | [Obj filename] ->
@@ -330,7 +334,7 @@
 
         let private openFile name access filename =
             let mode =
-                if access = IO.FileAccess.Read then IO.FileMode.Open else IO.FileMode.OpenOrCreate
+                if access = IO.FileAccess.Read then IO.FileMode.Open else IO.FileMode.Create
             try Choice2Of2(Port(IO.File.Open(filename, mode, access)))
             with ex -> Choice1Of2(Default(name + ": " + ex.Message))
 

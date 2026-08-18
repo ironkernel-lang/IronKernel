@@ -606,7 +606,24 @@ let private behaviouralChecks () : (string * string list) list = [
                 + " (lambda (p) (read p))) (quote hello)))" ]
     "15.1.5", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (. System.IO.File Delete f) #t))" ]
     "15.1.7", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v 'alpha))))))" ]
-    "15.1.8", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write '(a b c) p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v '(a b c)))))))" ]
+    // R-1RK 3.6 has write "generate external representations whenever possible", and
+    // 12.4 asks more of an exact number: "writeing an exact number z and then reading
+    // what was written will produce an object eq? to z". Only a round trip checks that.
+    "15.1.8", [ "(let ((f (. System.IO.Path GetTempFileName)))"
+                + " (let ((trip (lambda (v) (sequence"
+                + " (with-output-to-file f (lambda () (write v)))"
+                + " (with-input-from-file f (lambda () (read)))))))"
+                + " (and? (eqv? (trip 28) 28) (eqv? (trip -3) -3)"
+                + " (eqv? (trip 1/3) 1/3) (eqv? (trip #e+infinity) #e+infinity)"
+                + " (eqv? (trip 3.14) 3.14)"
+                + " (equal? (trip \"hello\") \"hello\")"
+                + " (equal? (trip (list 8 13)) (list 8 13))"
+                + " (eq? (trip (quote sym)) (quote sym)))))"
+                // An inexact real must read back inexact (12.4), which is what the
+                // decimal point is for: without it 1.0 would read back as exact 1.
+                "(let ((f (. System.IO.Path GetTempFileName)))"
+                + " (sequence (with-output-to-file f (lambda () (write (real->inexact 1))))"
+                + " (inexact? (with-input-from-file f (lambda () (read))))))" ]
     // 15.2.2: load evaluates the file's forms in the calling environment.
     "6.7.1", [ "($binds? (get-current-environment) car)"
                "(eqv? ($binds? (get-current-environment) definitely-not-bound) #f)"
@@ -686,10 +703,13 @@ let private divergences () = [
               + "but not on a non-local exit: an escape out of the combiner leaves the "
               + "port open. Closing on an abnormal pass as well would take an exit "
               + "guard (7.2.4), which the implementation has but this does not yet use."
-    "3.6", "External representations differ: IronKernel prints a number as "
-           + "`<obj 3 : Int32>` rather than `3`. `write` uses that spelling, so a "
-           + "number written to a port cannot be read back by `read`; symbols, lists "
-           + "and booleans round-trip."
+    "3.6", "Two spellings differ from the report's, and both round-trip through "
+           + "`read`, because IronKernel's reader accepts them. A dotted pair writes "
+           + "as `(1 & 2)` rather than `(1 . 2)`, since `.` is the CLR interop "
+           + "operative here. A CLR value with no Kernel representation -- a DateTime, "
+           + "a complex number, an inexact infinity or NaN -- writes as `<obj v : T>`, "
+           + "which the reader cannot parse; 3.6 provides for objects that have no "
+           + "external representation, and those are IronKernel's."
     "12.9", "The report specifies 12.9.2 through 12.9.6 by signature only. Appendix "
             + "A.2 records that it is an incomplete draft whose unwritten portions were "
             + "\"only planned in rough outline\", so `verified` there means the binding "

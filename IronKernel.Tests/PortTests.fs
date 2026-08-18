@@ -322,3 +322,62 @@ let ``string->symbol builds the symbol with that name`` () =
         "(symbol? (string->symbol \"two words\"))", Bool true
         "(eqv? (eq? (string->symbol \"a\") (string->symbol \"b\")) #f)", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``write and read round-trip the values that have representations`` () =
+    // R-1RK 3.6: write "generates external representations whenever possible", and
+    // 12.4 asks more of an exact number -- "writeing an exact number z and then
+    // reading what was written will produce an object eq? to z". Numbers used to
+    // write as <obj 3 : Int32>, which read could not parse at all.
+    withTempFiles 1 (fun paths ->
+        let file = quoted paths.[0]
+        [
+            "(define trip (lambda (v) (sequence"
+            + " (with-output-to-file " + file + " (lambda () (write v)))"
+            + " (with-input-from-file " + file + " (lambda () (read))))))", Inert
+            "(eqv? (trip 28) 28)", Bool true
+            "(eqv? (trip -3) -3)", Bool true
+            "(eqv? (trip 1/3) 1/3)", Bool true
+            "(eqv? (trip 123456789012345678901234567890) 123456789012345678901234567890)", Bool true
+            "(eqv? (trip #e+infinity) #e+infinity)", Bool true
+            "(eqv? (trip #e-infinity) #e-infinity)", Bool true
+            "(eqv? (trip 3.14) 3.14)", Bool true
+            "(equal? (trip \"hello\") \"hello\")", Bool true
+            // Escapes survive, so a string containing a quote is not a parse error.
+            "(equal? (trip \"a \\\"q\\\" b\") \"a \\\"q\\\" b\")", Bool true
+            "(equal? (trip (list 8 13)) (list 8 13))", Bool true
+            "(eq? (trip (quote sym)) (quote sym))", Bool true
+            "(equal? (trip (list 1 (list 2 \"x\") 1/2)) (list 1 (list 2 \"x\") 1/2))", Bool true
+            // A dotted pair round-trips too, in IronKernel's spelling of the marker.
+            "(equal? (trip (cons 1 2)) (cons 1 2))", Bool true
+        ] |> evalSessionKernel)
+
+[<Fact>]
+let ``an inexact real reads back inexact`` () =
+    // 12.4: the representation "indicates that it is inexact". The decimal point is
+    // what does that here -- without it, (real->inexact 1) would write as "1" and read
+    // back as the exact integer.
+    withTempFiles 1 (fun paths ->
+        let file = quoted paths.[0]
+        [
+            "(with-output-to-file " + file + " (lambda () (write (real->inexact 1))))", Bool true
+            "(inexact? (with-input-from-file " + file + " (lambda () (read))))", Bool true
+            "(=? (with-input-from-file " + file + " (lambda () (read))) 1)", Bool true
+            // and an exact one still reads back exact
+            "(with-output-to-file " + file + " (lambda () (write 1)))", Bool true
+            "(exact? (with-input-from-file " + file + " (lambda () (read))))", Bool true
+        ] |> evalSessionKernel)
+
+[<Fact>]
+let ``opening for output truncates what was there`` () =
+    // OpenOrCreate left the tail of the previous contents, so writing a shorter value
+    // produced a file that was part new value and part old -- which the round-trip
+    // check above found by reading back a spliced-together number.
+    withTempFiles 1 (fun paths ->
+        let file = quoted paths.[0]
+        [
+            "(with-output-to-file " + file + " (lambda () (write 123456789012345678901234567890)))",
+                Bool true
+            "(with-output-to-file " + file + " (lambda () (write 1)))", Bool true
+            "(=? (with-input-from-file " + file + " (lambda () (read))) 1)", Bool true
+        ] |> evalSessionKernel)
