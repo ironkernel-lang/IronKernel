@@ -266,7 +266,17 @@ let private behaviouralChecks () : (string * string list) list = [
                 "(eqv? (car ((vau xs _ xs) foo)) 'foo)" ]
     "4.10.4", [ "(eqv? ((wrap (vau (x) _ x)) (+ 1 2)) 3)" ]
     "4.10.5", [ "(eqv? ((unwrap (lambda (x) x)) bar) 'bar)" ]
-    "5.1.1", [ "(eqv? (sequence 1 2 3) 3)" ]
+    // Primitive here rather than derived (ADR 0007); 1.3.2 permits that, since "the
+    // derivation code is not considered part of the definition of the feature".
+    "5.1.1", [ "(eqv? (sequence 1 2 3) 3)"
+               // "If (objects) is the empty list, the result is inert."
+               "(inert? (sequence))"
+               // Left to right, and an operative, so a later element sees what an
+               // earlier one defined.
+               "(let ((v (vector 0 0)))"
+               + " (sequence (sequence (vector-set! v 0 1) (vector-set! v 1 2))"
+               + " (and? (=? (vector-ref v 0) 1) (=? (vector-ref v 1) 2))))"
+               "(=? ((lambda () (sequence (define local 5) local))) 5)" ]
     "5.2.1", [ "(eqv? (car (list 7 8)) 7)"; "(eqv? (length (list 7 8)) 2)" ]
     "5.2.2", [ "(eqv? (cdr (list* 1 2)) 2)" ]
     "5.3.1", [ "(eqv? (car ((vau xs _ xs) foo)) 'foo)" ]

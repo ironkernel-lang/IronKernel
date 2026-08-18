@@ -526,6 +526,27 @@
                 bounceEval env (makeCPS env cont cps) cond
             |_ -> signal cont (NumArgs(3,args))
 
+        /// R-1RK 5.1.1. Evaluates its operands left to right in the dynamic
+        /// environment; the last is a tail context, and no operands gives inert.
+        ///
+        /// Primitive rather than derived (ADR 0007). The report's derivation builds
+        /// this from `seq2` and an `aux` operative that recurses on
+        /// `(eval (cons aux tail) env)`, so each element costs a `null?`, two `eval`s
+        /// and a `cons` beyond the work itself. 1.3.2 says the derivation "is not
+        /// considered part of the definition of the feature", so a primitive conforms;
+        /// the derivation is kept as a test rather than as the implementation.
+        ///
+        /// The last operand is evaluated against the caller's own continuation, which
+        /// is what makes it a tail context -- the same shape `Helpers.Seq` uses for a
+        /// compiled `CSeq`.
+        let rec sequenceForms env cont args =
+            match args with
+            | [] -> More(fun () -> continueEvalStep env cont Inert)
+            | [final] -> bounceEval env cont final
+            | head :: rest ->
+                let next e c _ _ = sequenceForms e c rest
+                bounceEval env (makeCPS env cont next) head
+
         let loadAndEval env cont = function
             | _ when not (has SourceLoading env) ->
                 signal cont (CapabilityDenied "source loading requires SourceLoading")
@@ -734,6 +755,7 @@
         let primitiveOperatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [
                   ("vau"    , vau);
+                  ("sequence", sequenceForms);
                   ("$binds?", bindsPredicate);
                   ("define" , define);
                   ("if"     , if_then_else);
@@ -2525,6 +2547,7 @@
             let operativeIdentity = function
                 | "if" -> Some PrimitiveIf
                 | "define" -> Some PrimitiveDefine
+                | "sequence" -> Some PrimitiveSequence
                 | _ -> None
             let makeOperative (name, func) =
                 name,

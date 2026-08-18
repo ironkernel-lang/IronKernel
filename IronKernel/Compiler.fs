@@ -173,7 +173,8 @@ module Compiler =
                         KernelFunc(fun env cont ->
                             match identity with
                             | PrimitiveIf -> Runtime.if_then_else env cont operands
-                            | PrimitiveDefine -> Runtime.define env cont operands)
+                            | PrimitiveDefine -> Runtime.define env cont operands
+                            | PrimitiveSequence -> Runtime.sequenceForms env cont operands)
                         :: completed
                 | CGuarded (guard, specialized, fallback) ->
                     pending <-

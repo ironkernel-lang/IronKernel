@@ -142,7 +142,7 @@ divergences before taking any row as a claim of conformance.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 5.1.1 | `$sequence` | Control | `verified` | 1 behavioural check(s) |
+| 5.1.1 | `$sequence` | Control | `verified` | 4 behavioural check(s) |
 | 5.2.1 | `list` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.2.2 | `list*` | Pairs and lists | `verified` | 1 behavioural check(s) |
 | 5.3.1 | `$vau` | Combiners | `verified` | 1 behavioural check(s) |

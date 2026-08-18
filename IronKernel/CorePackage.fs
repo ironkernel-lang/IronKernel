@@ -101,11 +101,13 @@ module CorePackage =
     let private writeIdentity (writer: BinaryWriter) = function
         | PrimitiveIf -> writer.Write 0uy
         | PrimitiveDefine -> writer.Write 1uy
+        | PrimitiveSequence -> writer.Write 2uy
 
     let private readIdentity (reader: BinaryReader) =
         match reader.ReadByte() with
         | 0uy -> PrimitiveIf
         | 1uy -> PrimitiveDefine
+        | 2uy -> PrimitiveSequence
         | tag -> raise (InvalidDataException(sprintf "Unknown IKC primitive identity: %d" tag))
 
     let private writePosition (writer: BinaryWriter) position =

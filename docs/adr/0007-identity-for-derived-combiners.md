@@ -1,6 +1,6 @@
 # ADR 0007: Identity for derived combiners
 
-Status: Proposed
+Status: Accepted — sequencing implemented
 
 ## Decision
 
@@ -121,6 +121,35 @@ analyzer. So the compiler side is a lowering rule, not a new node.
 `let` is the only other candidate above 1%, and it is a further decision to take on
 its own evidence once sequencing is done, because removing the sequencing traffic
 changes the profile everything else is measured against.
+
+## Outcome
+
+Implemented for `$sequence`. The gain is much larger than the 6.1% dispatch share,
+which is what the inference above predicted: the derivation's cost was mostly the
+`eval`/`cons`/`null?` traffic it generated per element, not its own dispatches.
+
+| | master | primitive |
+|---|---:|---:|
+| `constant-width-amb.ikr`, median of 3 | 16.19 s | **11.56 s (-28.6%)** |
+| `LambdaLiteralCall` | 32,881 ns / 135.1 KB | **20,804 ns / 87.2 KB (-37% / -35%)** |
+| `NamedLambdaCall` | 744.7 ns | 739.2 ns |
+| `EffectHandlerResume` | 2695.4 ns | 2659.7 ns |
+
+`LambdaLiteralCall` builds and applies a combiner once, which is what every `let`
+expands to, so it is the most sequence-dense benchmark in the set; the rest are flat
+to 2% better. `CompilerBenchmarks` is unchanged (146.9 / 426.7 / 183.1 / 52.2 ns),
+which is the check that nothing was added to the ordinary path.
+
+The three risks named above were all real work rather than formalities. The tail
+context needed the structural test, and that test was checked against a negative
+control: moving the recursion out of tail position takes the captured continuation's
+depth from 23 to 2003, so it discriminates. The derivation is kept in
+`StdlibTests` and checked against the primitive, so it cannot rot silently. And
+`sequence` being load-bearing is why the suite and the twelve examples are the real
+evidence here -- 398 tests, and every example unchanged.
+
+The `let` question is now open on its own terms, and the profile it should be
+measured against is this one, not the one in this ADR.
 
 ## Risks
 

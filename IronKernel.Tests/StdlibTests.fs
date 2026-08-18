@@ -84,3 +84,72 @@ let ``$and? and $or? stop as soon as the result is decided`` () =
         "($or? #t (sequence (vector-set! trace 1 1) #f))", Bool true
         "(vector-ref trace 1)", Obj 0
     ]
+
+[<Fact>]
+let ``sequence follows 5.1.1`` () =
+    // Primitive since ADR 0007. The behaviour the report specifies is unchanged by
+    // that: left to right in the dynamic environment, last value returned, inert for
+    // no operands. (The tail-context half of 5.1.1 is not observable from a result,
+    // and is checked structurally in CompilerTests.)
+    evalSessionKernel [
+        "(sequence 1 2 3)", Obj 3
+        "(sequence 7)", Obj 7
+        "(sequence)", Inert
+        "($sequence 1 2 3)", Obj 3
+        // Left to right, and every element really is evaluated.
+        "(define trace (vector 0 0 0))", Inert
+        "(sequence (vector-set! trace 0 1) (vector-set! trace 1 2) (vector-set! trace 2 3))", Inert
+        "(vector-ref trace 0)", Obj 1
+        "(vector-ref trace 2)", Obj 3
+        // It is an operative: operands arrive unevaluated, so a later element can
+        // depend on a definition an earlier one made.
+        "(operative? sequence)", Bool true
+        "((lambda () (sequence (define local 5) local)))", Obj 5
+    ]
+
+[<Fact>]
+let ``a redefined sequence is used instead of the primitive`` () =
+    // The compiled form is guarded on the binding still holding the primitive, so a
+    // program that rebinds the name must get its own combiner rather than the
+    // lowered `CSeq`. Without the guard the lowering would silently win.
+    evalSessionKernel [
+        "((lambda () (define sequence (lambda xs 99)) (sequence 1 2 3)))", Obj 99
+        // The shadowing is local: the outer binding still means the primitive.
+        "(sequence 1 2 3)", Obj 3
+    ]
+
+[<Fact>]
+let ``the report's derivation of $sequence still behaves like the primitive`` () =
+    // ADR 0007 replaced this derivation with a primitive, so nothing exercises it any
+    // more and it could rot unnoticed. R-1RK 5.1.1's derivation, transcribed, and
+    // checked against the primitive on the cases that distinguish sequencing:
+    // ordering, the returned value, and the empty case.
+    evalSessionKernel [
+        """(define derived-sequence
+              ((wrap
+                 (vau (seq2) _
+                      (seq2
+                        (define aux
+                          (vau (head & tail) env
+                               (if (null? tail)
+                                 (eval head env)
+                                 (seq2
+                                   (eval head env)
+                                   (eval (cons aux tail) env)))))
+                        (vau body env
+                             (if (null? body)
+                               #inert
+                               (eval (cons aux body) env))))))
+               (vau (first second) env
+                    ((wrap (vau _ _ (eval second env)))
+                     (eval first env)))))""", Inert
+        "(derived-sequence 1 2 3)", Obj 3
+        "(derived-sequence 7)", Obj 7
+        "(inert? (derived-sequence))", Bool true
+        "(define trace (vector 0 0))", Inert
+        "(derived-sequence (vector-set! trace 0 1) (vector-set! trace 1 2))", Inert
+        "(vector-ref trace 0)", Obj 1
+        "(vector-ref trace 1)", Obj 2
+        // Unevaluated operands, as for the primitive.
+        "((lambda () (derived-sequence (define local 5) local)))", Obj 5
+    ]

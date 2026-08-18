@@ -160,6 +160,7 @@ module StaticCompiler =
                         match guard.expectedIdentity with
                         | PrimitiveIf -> "PrimitiveIf"
                         | PrimitiveDefine -> "PrimitiveDefine"
+                        | PrimitiveSequence -> "PrimitiveSequence"
                     Some(
                         generated(
                             "runGuard env cont " + quote guard.name + " " + identity
