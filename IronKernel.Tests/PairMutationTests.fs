@@ -299,3 +299,58 @@ let ``an operative keeps the body it captured even if the source is mutated`` ()
         "(=? (f) 3)", Bool true
         "(=? (f) 3)", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``get-list-metrics measures a cycle rather than walking into one`` () =
+    // R-1RK 5.7.1: (p n a c) -- pairs, nils, acyclic prefix length, cycle length --
+    // with a + c = p, and n and c never both non-zero. It used to answer "acyclic, of
+    // this length" unconditionally, which was true only because no list could be
+    // cyclic.
+    [
+        "(define metrics (lambda (x) (get-list-metrics x)))", Inert
+        "(equal? (metrics ()) (list 0 1 0 0))", Bool true
+        // "if a = c = 0, object is not a pair"
+        "(equal? (metrics 5) (list 0 0 0 0))", Bool true
+        "(equal? (metrics (list 1 2 3)) (list 3 1 3 0))", Bool true
+        // "if n = c = 0, the improper list is not a list"
+        "(equal? (metrics (cons 1 2)) (list 1 0 1 0))", Bool true
+        // A list that is all cycle.
+        "(define p (list 1 2 3))", Inert
+        "(set-cdr! (cdr (cdr p)) p)", Inert
+        "(equal? (metrics p) (list 3 0 0 3))", Bool true
+        // A cycle behind an acyclic prefix: a + c = p still holds.
+        "(define q (list 1 2 3 4 5))", Inert
+        "(set-cdr! (cdr (cdr (cdr (cdr q)))) (cdr (cdr q)))", Inert
+        "(equal? (metrics q) (list 5 0 2 3))", Bool true
+        // A pair whose cdr is itself.
+        "(define r (list 1))", Inert
+        "(set-cdr! r r)", Inert
+        "(equal? (metrics r) (list 1 0 0 1))", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``length and the list predicates read the shape rather than walking it`` () =
+    // R-1RK 6.3.1: length is "the number of consecutive cdr references that can be
+    // followed", zero for a non-pair and positive infinity for a cyclic list. 6.3.8
+    // and 6.3.9: finite-list? is the acyclic lists, countable-list? the lists at all.
+    // All three would run forever on a cyclic argument if they cdr'd down it.
+    [
+        "(define p (list 1 2 3))", Inert
+        "(set-cdr! (cdr (cdr p)) p)", Inert
+        "(=? (length (list 1 2 3)) 3)", Bool true
+        "(=? (length ()) 0)", Bool true
+        "(=? (length 5) 0)", Bool true
+        "(=? (length (cons 1 2)) 1)", Bool true
+        "(eqv? (length p) #e+infinity)", Bool true
+        "(finite-list? (list 1 2))", Bool true
+        "(finite-list? ())", Bool true
+        "(eqv? (finite-list? p) #f)", Bool true
+        "(eqv? (finite-list? (cons 1 2)) #f)", Bool true
+        "(countable-list? (list 1 2))", Bool true
+        // A cyclic list is a list; an improper one is not.
+        "(countable-list? p)", Bool true
+        "(eqv? (countable-list? (cons 1 2)) #f)", Bool true
+        // Both are variadic and true for no arguments.
+        "(finite-list?)", Bool true
+        "(countable-list?)", Bool true
+    ] |> evalSessionKernel
