@@ -137,7 +137,7 @@ let ``managed artifact runs without Kernel source or runtime compilation`` () =
         let stderr = child.StandardError.ReadToEnd()
         child.WaitForExit()
         Assert.Equal(0, child.ExitCode)
-        Assert.Equal("<obj 15 : Int32>", stdout.Trim())
+        Assert.Equal("15", stdout.Trim())
         Assert.Equal("", stderr.Trim())
     finally
         Directory.Delete(root, true)
@@ -165,7 +165,8 @@ let ``managed artifact preserves exponent-form double literals`` () =
         let stderr = child.StandardError.ReadToEnd()
         child.WaitForExit()
         Assert.Equal(0, child.ExitCode)
-        Assert.Equal("<obj 1E+20 : Double>", stdout.Trim())
+        // The exponent form already tells the reader this is inexact (R-1RK 12.4).
+        Assert.Equal("1E+20", stdout.Trim())
         Assert.Equal("", stderr.Trim())
     finally
         Directory.Delete(root, true)
@@ -196,7 +197,7 @@ let ``managed artifact supports definitions and lazy conditionals`` () =
         let stderr = child.StandardError.ReadToEnd()
         child.WaitForExit()
         Assert.Equal(0, child.ExitCode)
-        Assert.Equal("<obj 99 : Int32>", stdout.Trim())
+        Assert.Equal("99", stdout.Trim())
         Assert.Equal("", stderr.Trim())
     finally
         Directory.Delete(root, true)
@@ -321,7 +322,7 @@ let ``native artifact runs without dotnet or Homebrew dylibs`` () =
             let stderr = child.StandardError.ReadToEnd()
             child.WaitForExit()
             Assert.Equal(0, child.ExitCode)
-            Assert.Equal("<obj IronKernel : String>", stdout.Trim())
+            Assert.Equal("\"IronKernel\"", stdout.Trim())
             Assert.Equal("", stderr.Trim())
 
             let dependencyInfo = ProcessStartInfo("otool")

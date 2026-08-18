@@ -508,6 +508,53 @@ module Ast =
         | Render of LispVal
         | Append of string
 
+    /// R-1RK 3.6: "The applicative write generates external representations whenever
+    /// possible, that is, whenever the object to be written has an external
+    /// representation." For an exact number 12.4 asks for more than legibility --
+    /// "writeing an exact number z and then reading what was written will produce an
+    /// object eq? to z" -- so these are the spellings the reader accepts, not merely
+    /// tidier ones.
+    ///
+    /// A CLR value with no Kernel external representation keeps the `<obj v : T>`
+    /// form. That is not a representation the reader can parse, which is precisely
+    /// what 3.6 means by an object that has none.
+    let private externalRepresentation (value: obj) =
+        // The decimal point is what tells the reader an inexact real is inexact (12.4);
+        // without it 1.0 would read back as the exact integer 1.
+        let inexact (text: string) =
+            if text |> Seq.exists (fun c -> c = '.' || c = 'e' || c = 'E') then text
+            else text + ".0"
+        let opaque (v: obj) =
+            "<obj " + v.ToString() + " : " + v.GetType().Name + ">"
+        match value with
+        | null -> "<obj null>"
+        | :? string as text ->
+            let escaped =
+                text
+                |> String.collect (function
+                    | '\\' -> "\\\\"
+                    | '"' -> "\\\""
+                    | '\n' -> "\\n"
+                    | '\r' -> "\\r"
+                    | '\t' -> "\\t"
+                    | c -> string c)
+            "\"" + escaped + "\""
+        | :? byte as v -> string v
+        | :? int as v -> string v
+        | :? int64 as v -> string v
+        | :? System.Numerics.BigInteger as v -> v.ToString()
+        // ExactRatio and ExactInfinity already render as `n/d` and `#e+infinity`,
+        // which is what the reader accepts.
+        | :? ExactRatio as v -> v.ToString()
+        | :? ExactInfinity as v -> v.ToString()
+        | :? double as v ->
+            if System.Double.IsNaN v || System.Double.IsInfinity v then opaque value
+            else inexact (v.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+        | :? float32 as v ->
+            if System.Single.IsNaN v || System.Single.IsInfinity v then opaque value
+            else inexact (v.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+        | v -> opaque v
+
     let showVal value =
         let output = System.Text.StringBuilder()
         let mutable pending = [Render value]
@@ -559,13 +606,7 @@ module Ast =
                 | Nil -> output.Append("()") |> ignore
                 | Obj (:? System.Type as objectType) ->
                     output.Append("<type ").Append(objectType.FullName).Append(">") |> ignore
-                | Obj value ->
-                    output.Append("<obj ") |> ignore
-                    if isNull value then
-                        output.Append("null") |> ignore
-                    else
-                        output.Append(value.ToString()).Append(" : ").Append(value.GetType().Name) |> ignore
-                    output.Append(">") |> ignore
+                | Obj value -> output.Append(externalRepresentation value) |> ignore
                 | Continuation _ -> output.Append("<continuation>") |> ignore
                 | PromptTag _ -> output.Append("<prompt-tag>") |> ignore
                 | Resumption _ -> output.Append("<resumption>") |> ignore
