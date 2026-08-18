@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 120 | 89% |
+| `verified` | 122 | 90% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 15 | 11% |
+| `absent` | 13 | 10% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -48,7 +48,7 @@ exercised, not that IronKernel matches the report exactly.
 | 12.3.3 | Under strict arithmetic the report signals on numeric overflow and underflow as well as on a result with no primary value. IronKernel signals only the latter: an overflow still yields an infinity and an underflow a zero, which is the report's behaviour for *cleared* strict-arithmetic. Its initial value here is true, which the report leaves open. |
 | 7.2.7 | Signalling an error is not an abnormal pass to `error-continuation`. IronKernel reports errors on a separate channel that unwinds the computation directly, so an exit guard is *not* selected when an error is signalled within the guarded extent -- passing to the continuation explicitly does work, and provides the diagnostic. One consequence is that the report's derivation of `$binds?` from an error exit-guard would not work here. |
 | 7.2.6 | `root-continuation` is not literally at the end of every continuation chain: IronKernel's drivers give each top-level form its own continuation. Its extent is instead defined to contain everything, which is what "the ancestor of all other continuations" means for the selection algorithm, so a clause selecting on it is always selected. Receiving a value ends the session, and the process exit status is 0. |
-| 4.7 | Module Pair mutation is not complete: `encycle!` (5.8.1) and `append!` (6.4.1) are absent. Everything else is implemented, over genuinely mutable cons cells. Mutability follows where the structure came from: the reader produces immutable pairs, because a program is an algorithm rather than data the program made, while `cons` and `list` produce mutable ones. The two remaining entries are phase 5 of [ADR 0005](adr/0005-mutable-pairs.md). |
+| 4.7 | Module Pair mutation is complete. Mutability follows where the structure came from: the reader produces immutable pairs, because a program is an algorithm rather than data the program made, while `cons` and `list` produce mutable ones. R-1RK 6.4.1 makes it an error for two arguments of `append!` to share a last pair; that condition is on the caller and is not checked, so appending such a pair to itself builds a cycle rather than signalling. |
 | 6.3 | The derived list library divides on whether a derivation asks about a list's *shape* or walks its *elements*. `length`, `finite-list?` and `countable-list?` go through `get-list-metrics`, which measures a cycle rather than walking into one. `list-tail`, `filter`, `reduce`, `append` and the rest walk elements and diverge on a cyclic argument, as the report's own derivations of them do. The report's six-argument `reduce` (6.3.10), which is the entry that would handle a cyclic list, is not implemented: only the three-argument form is. |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
@@ -84,13 +84,13 @@ divergences before taking any row as a claim of conformance.
 | 5.5 Core library features (I) — Combiners | **required** | 1 | 1 | yes |
 | 5.6 Core library features (I) — Control | **required** | 1 | 1 | yes |
 | 5.7 Core library features (I) — Pairs and lists | **required** | 2 | 2 | yes |
-| 5.8 Core library features (I) — Pair mutation (optional) | optional | 1 | 0 | no |
+| 5.8 Core library features (I) — Pair mutation (optional) | optional | 1 | 1 | yes |
 | 5.9 Core library features (I) — Combiners | **required** | 1 | 1 | yes |
 | 5.10 Core library features (I) — Environments | **required** | 1 | 1 | yes |
 | 6.1 Core library features (II) — Booleans | **required** | 5 | 5 | yes |
 | 6.2 Core library features (II) — Combiners | **required** | 1 | 1 | yes |
 | 6.3 Core library features (II) — Pairs and lists | **required** | 10 | 10 | yes |
-| 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 3 | no |
+| 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 4 | yes |
 | 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 1 | yes |
 | 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 1 | yes |
 | 6.7 Core library features (II) — Environments | **required** | 10 | 7 | no |
@@ -152,7 +152,7 @@ divergences before taking any row as a claim of conformance.
 | 5.6.1 | `$cond` | Control | `verified` | 1 behavioural check(s) |
 | 5.7.1 | `get-list-metrics` | Pairs and lists | `verified` | 7 behavioural check(s) |
 | 5.7.2 | `list-tail` | Pairs and lists | `verified` | 2 behavioural check(s) |
-| 5.8.1 | `encycle!` | Pair mutation (optional) | `absent` | optional module |
+| 5.8.1 | `encycle!` | Pair mutation (optional) | `verified` | optional module; 4 behavioural check(s) |
 | 5.9.1 | `map` | Combiners | `verified` | 1 behavioural check(s) |
 | 5.10.1 | `$let` | Environments | `verified` | 1 behavioural check(s) |
 
@@ -176,7 +176,7 @@ divergences before taking any row as a claim of conformance.
 | 6.3.8 | `finite-list?` | Pairs and lists | `verified` | 6 behavioural check(s) |
 | 6.3.9 | `countable-list?` | Pairs and lists | `verified` | 5 behavioural check(s) |
 | 6.3.10 | `reduce` | Pairs and lists | `verified` | 3 behavioural check(s) |
-| 6.4.1 | `append!` | Pair mutation (optional) | `absent` | optional module |
+| 6.4.1 | `append!` | Pair mutation (optional) | `verified` | optional module; 5 behavioural check(s) |
 | 6.4.2 | `copy-es` | Pair mutation (optional) | `verified` | optional module; 8 behavioural check(s) |
 | 6.4.3 | `assq` | Pair mutation (optional) | `verified` | optional module; 4 behavioural check(s) |
 | 6.4.4 | `memq?` | Pair mutation (optional) | `verified` | optional module; 3 behavioural check(s) |

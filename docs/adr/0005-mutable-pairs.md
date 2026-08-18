@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Accepted — phases 0-4 done, phases 5-6 outstanding
+Status: Accepted — phases 0-5 done, phase 6 outstanding
 
 ## Decision
 
@@ -303,8 +303,22 @@ divergence rather than left implicit, together with the fact that the report's
 six-argument `reduce` (6.3.10), the entry that would handle a cyclic list, is not
 implemented.
 
-**Phase 5 — the mutating library entries.** `encycle!` (5.8.1) and `append!`
-(6.4.1), which is where a cycle first enters the system from Kernel code.
+**Phase 5 — the mutating library entries.** *Done.* `encycle!` (5.8.1) sets the
+cdr of the (prefix + cycle)th pair to refer to the (prefix + 1)th, giving a list
+exactly the metrics it was asked for; a cycle length of zero does nothing, and a
+negative count is rejected rather than left to `list-tail`, which would count down
+past zero for ever. `append!` (6.4.1) links its arguments by mutating the first,
+which is the only one ever written to — that falls out of the report's own
+equivalence, since appending v to u leaves u's last pair inside v.
+
+Module Pair mutation is complete. What remains of it is one condition on the
+caller that is not checked: 6.4.1 makes it an error for two arguments of `append!`
+to share a last pair, and appending such a pair to itself builds a cycle rather
+than signalling. That is recorded as a divergence.
+
+The test that guarded the 4.7 divergence's "these are absent" claim has now
+asserted the opposite of what it started as, having forced a deliberate update in
+each of phases 3 and 5. That was the point of writing it.
 
 **Phase 6 — re-validate and record.** Benchmarks against the baseline, the CLR
 fault sweep extended with cyclic and mutation cases, the conformance matrix

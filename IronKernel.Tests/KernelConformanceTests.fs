@@ -126,6 +126,28 @@ let private behaviouralChecks () : (string * string list) list = [
                "(immutable-pair? (car (copy-es-immutable (list (list 1) 2))))"
                "(equal? (copy-es-immutable (list (list 1 2) 3)) (list (list 1 2) 3))"
                "(pair? (copy-es-immutable (list 1 2)))" ]
+    "5.8.1", [ // "sets the cdr of the (integer1 + integer2)th pair to refer to the
+               // (integer1 + 1)th pair", so the list ends with exactly those metrics.
+               "(let ((a (list 1 2 3 4 5))) (encycle! a 2 3)"
+               + " (equal? (get-list-metrics a) (list 5 0 2 3)))"
+               "(let ((b (list 1 2 3))) (encycle! b 0 3)"
+               + " (equal? (get-list-metrics b) (list 3 0 0 3)))"
+               // "If integer2 = 0, the applicative does nothing."
+               "(let ((c (list 1 2 3))) (encycle! c 1 0)"
+               + " (equal? (get-list-metrics c) (list 3 1 3 0)))"
+               // The result is inert.
+               "(let ((d (list 1 2))) (inert? (encycle! d 0 2)))" ]
+    "6.4.1", [ // "sets the cdr of the last pair in each nonempty list argument to
+               // refer to the next non-nil argument"
+               "(let ((u (list 1 2))) (append! u (list 3 4)) (equal? u (list 1 2 3 4)))"
+               // It links rather than copies.
+               "(let ((u (list 1 2))) (let ((v (list 3))) (append! u v)"
+               + " (eq? (cdr (cdr u)) v)))"
+               // "the next non-nil argument": a nil argument is skipped.
+               "(let ((y (list 1))) (append! y () (list 9)) (equal? y (list 1 9)))"
+               // (append! v) is inert, and the result is always inert.
+               "(let ((z (list 1))) (inert? (append! z)))"
+               "(let ((z (list 1))) (inert? (append! z (list 2))))" ]
     "6.4.2", [ "(=? (copy-es 5) 5)"
                // "always returns a non-eq? pair when given a pair as argument"
                "(let ((p (list 1 2))) (eqv? (eq? (copy-es p) p) #f))"
@@ -628,13 +650,13 @@ let private divergences () = [
              + "which is what \"the ancestor of all other continuations\" means for the "
              + "selection algorithm, so a clause selecting on it is always selected. "
              + "Receiving a value ends the session, and the process exit status is 0."
-    "4.7", "Module Pair mutation is not complete: `encycle!` (5.8.1) and `append!` "
-           + "(6.4.1) are absent. Everything else is implemented, over genuinely "
-           + "mutable cons cells. Mutability follows where the structure came from: "
-           + "the reader produces immutable pairs, because a program is an algorithm "
-           + "rather than data the program made, while `cons` and `list` produce "
-           + "mutable ones. The two remaining entries are phase 5 of "
-           + "[ADR 0005](adr/0005-mutable-pairs.md)."
+    "4.7", "Module Pair mutation is complete. Mutability follows where the "
+           + "structure came from: the reader produces immutable pairs, because a "
+           + "program is an algorithm rather than data the program made, while `cons` "
+           + "and `list` produce mutable ones. R-1RK 6.4.1 makes it an error for two "
+           + "arguments of `append!` to share a last pair; that condition is on the "
+           + "caller and is not checked, so appending such a pair to itself builds a "
+           + "cycle rather than signalling."
     "6.3", "The derived list library divides on whether a derivation asks about a "
            + "list's *shape* or walks its *elements*. `length`, `finite-list?` and "
            + "`countable-list?` go through `get-list-metrics`, which measures a cycle "
