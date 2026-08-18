@@ -107,7 +107,23 @@ let private behaviouralChecks () : (string * string list) list = [
                "(eqv? (eq? (make-environment) (make-environment)) #f)" ]
     "4.6.1", [ "(pair? (cons 1 2))"; "(eqv? (pair? ()) #f)" ]
     // 4.9.1: $define! binds in the current environment and returns inert.
+    "4.7.1", [ // The mutation is visible through every reference to the pair.
+               "(let ((p (list 1 2))) (set-car! p 9) (=? (car p) 9))"
+               "(let ((p (list 1 2))) (let ((q p)) (set-car! q 9) (=? (car p) 9)))"
+               "(let ((p (list 1 2))) (set-cdr! p (list 7)) (=? (car (cdr p)) 7))"
+               // The result is inert.
+               "(let ((p (list 1 2))) (inert? (set-car! p 9)))"
+               // 3.8: mutating an immutable object signals an error, so a captured
+               // algorithm cannot be rewritten under whoever captured it.
+               "(immutable-pair? (quote (1 2)))"
+               "(eqv? (immutable-pair? (list 1 2)) #f)" ]
     "4.7.2", [ "(=? (copy-es-immutable 5) 5)"
+               // "If object is a mutable pair, then the result is not eq? to object."
+               "(let ((p (list 1 2))) (eqv? (eq? (copy-es-immutable p) p) #f))"
+               "(let ((p (list 1 2))) (equal? (copy-es-immutable p) p))"
+               // The copy is immutable all the way down.
+               "(immutable-pair? (copy-es-immutable (list 1 2)))"
+               "(immutable-pair? (car (copy-es-immutable (list (list 1) 2))))"
                "(equal? (copy-es-immutable (list (list 1 2) 3)) (list (list 1 2) 3))"
                "(pair? (copy-es-immutable (list 1 2)))" ]
     "6.4.2", [ "(=? (copy-es 5) 5)"
@@ -589,18 +605,14 @@ let private divergences () = [
              + "which is what \"the ancestor of all other continuations\" means for the "
              + "selection algorithm, so a clause selecting on it is always selected. "
              + "Receiving a value ends the session, and the process exit status is 0."
-    "4.7", "Module Pair mutation is only half implemented, and deliberately so. "
-           + "IronKernel's pairs are immutable -- lists are F# immutable lists rather "
-           + "than cons cells -- so `set-car!`, `set-cdr!`, `encycle!` and `append!` "
-           + "have no cell to write into and are absent. The four entries that need no "
-           + "mutation are implemented. `copy-es-immutable` returns its argument, which "
-           + "4.7.2 permits outright for an argument that is already an immutable pair; "
-           + "`copy-es` copies the structure, and its result is not `eq?` to a pair "
-           + "argument now that `eq?` compares pairs by identity. Supporting the module "
-           + "fully means replacing the "
-           + "list representation with mutable cons cells and making every traversal "
-           + "cycle-safe, including `equal?`. That work is planned in "
-           + "[ADR 0005](adr/0005-mutable-pairs.md)."
+    "4.7", "Module Pair mutation is not complete: `encycle!` (5.8.1) and `append!` "
+           + "(6.4.1) are absent. Everything else is implemented, over genuinely "
+           + "mutable cons cells. Mutability follows where the structure came from: "
+           + "the reader produces immutable pairs, because a program is an algorithm "
+           + "rather than data the program made, while `cons` and `list` produce "
+           + "mutable ones. The remaining two, and the cycle-safety their cycles "
+           + "demand of `get-list-metrics` and the derived list library, are phases 4 "
+           + "and 5 of [ADR 0005](adr/0005-mutable-pairs.md)."
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."

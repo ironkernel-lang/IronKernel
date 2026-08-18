@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 119 | 88% |
+| `verified` | 120 | 89% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 16 | 12% |
+| `absent` | 15 | 11% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -48,7 +48,7 @@ exercised, not that IronKernel matches the report exactly.
 | 12.3.3 | Under strict arithmetic the report signals on numeric overflow and underflow as well as on a result with no primary value. IronKernel signals only the latter: an overflow still yields an infinity and an underflow a zero, which is the report's behaviour for *cleared* strict-arithmetic. Its initial value here is true, which the report leaves open. |
 | 7.2.7 | Signalling an error is not an abnormal pass to `error-continuation`. IronKernel reports errors on a separate channel that unwinds the computation directly, so an exit guard is *not* selected when an error is signalled within the guarded extent -- passing to the continuation explicitly does work, and provides the diagnostic. One consequence is that the report's derivation of `$binds?` from an error exit-guard would not work here. |
 | 7.2.6 | `root-continuation` is not literally at the end of every continuation chain: IronKernel's drivers give each top-level form its own continuation. Its extent is instead defined to contain everything, which is what "the ancestor of all other continuations" means for the selection algorithm, so a clause selecting on it is always selected. Receiving a value ends the session, and the process exit status is 0. |
-| 4.7 | Module Pair mutation is only half implemented, and deliberately so. IronKernel's pairs are immutable -- lists are F# immutable lists rather than cons cells -- so `set-car!`, `set-cdr!`, `encycle!` and `append!` have no cell to write into and are absent. The four entries that need no mutation are implemented. `copy-es-immutable` returns its argument, which 4.7.2 permits outright for an argument that is already an immutable pair; `copy-es` copies the structure, and its result is not `eq?` to a pair argument now that `eq?` compares pairs by identity. Supporting the module fully means replacing the list representation with mutable cons cells and making every traversal cycle-safe, including `equal?`. That work is planned in [ADR 0005](adr/0005-mutable-pairs.md). |
+| 4.7 | Module Pair mutation is not complete: `encycle!` (5.8.1) and `append!` (6.4.1) are absent. Everything else is implemented, over genuinely mutable cons cells. Mutability follows where the structure came from: the reader produces immutable pairs, because a program is an algorithm rather than data the program made, while `cons` and `list` produce mutable ones. The remaining two, and the cycle-safety their cycles demand of `get-list-metrics` and the derived list library, are phases 4 and 5 of [ADR 0005](adr/0005-mutable-pairs.md). |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
 
@@ -72,7 +72,7 @@ divergences before taking any row as a claim of conformance.
 | 4.4 Core types and primitive features — Symbols | **required** | 1 | 1 | yes |
 | 4.5 Core types and primitive features — Control | **required** | 2 | 2 | yes |
 | 4.6 Core types and primitive features — Pairs and lists | **required** | 3 | 3 | yes |
-| 4.7 Core types and primitive features — Pair mutation (optional) | optional | 2 | 1 | no |
+| 4.7 Core types and primitive features — Pair mutation (optional) | optional | 2 | 2 | yes |
 | 4.8 Core types and primitive features — Environments | **required** | 4 | 3 | no |
 | 4.9 Core types and primitive features — Environment mutation (optional) | optional | 1 | 1 | yes |
 | 4.10 Core types and primitive features — Combiners | **required** | 5 | 5 | yes |
@@ -124,8 +124,8 @@ divergences before taking any row as a claim of conformance.
 | 4.6.1 | `pair?` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 4.6.2 | `null?` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 4.6.3 | `cons` | Pairs and lists | `verified` | 2 behavioural check(s) |
-| 4.7.1 | `set-car!, set-cdr!` | Pair mutation (optional) | `absent` | optional module; `set-car!` absent; `set-cdr!` absent |
-| 4.7.2 | `copy-es-immutable` | Pair mutation (optional) | `verified` | optional module; 3 behavioural check(s) |
+| 4.7.1 | `set-car!, set-cdr!` | Pair mutation (optional) | `verified` | optional module; 6 behavioural check(s) |
+| 4.7.2 | `copy-es-immutable` | Pair mutation (optional) | `verified` | optional module; 7 behavioural check(s) |
 | 4.8.1 | `environment?` | Environments | `verified` | 1 behavioural check(s) |
 | 4.8.2 | `ignore?` | Environments | `absent` |  |
 | 4.8.3 | `eval` | Environments | `verified` | 1 behavioural check(s) |
