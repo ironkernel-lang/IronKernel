@@ -56,8 +56,10 @@ module Contracts =
         | StringShape, Obj (:? string) -> true
         | BooleanShape, Bool _ -> true
         | AtomShape, Atom _ -> true
-        | ListShape, List _
-        | ListShape, DottedList _ -> true
+        // One cell test. Through the list patterns this walked the whole chain to
+        // fail DottedList and again to match List, on every contracted call.
+        | ListShape, Pair _
+        | ListShape, Nil -> true
         | PromptTagShape, PromptTag _ -> true
         | ResumptionShape, Resumption _ -> true
         | DateTimeShape, Obj (:? System.DateTime) -> true

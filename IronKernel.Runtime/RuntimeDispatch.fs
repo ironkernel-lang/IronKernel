@@ -55,8 +55,10 @@ module RuntimeDispatch =
     type NamedCallSite(name: string, operands: LispVal list) =
         let simpleOperands =
             operands
+            // A pair is a combination that would need evaluating, whatever its shape.
+            // Asking through the list pattern walked each operand's whole structure.
             |> List.forall (function
-                | List (_ :: _) -> false
+                | Pair _ -> false
                 | _ -> true)
 
         /// The whole cache is one immutable snapshot behind a single reference so

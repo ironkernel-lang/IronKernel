@@ -242,17 +242,27 @@ module Eval =
             match getVar env id with
             | Choice2Of2 r -> More (fun () -> continueEvalStep env cont r)
             | Choice1Of2 e -> fail e
-        | List (Atom name :: args) ->
-            match getVar' env name with
-            | Some r -> More (fun () -> operateStep env cont r args)
-            | None ->
-                match tryRewrite name args with
-                | Some rewritten -> More (fun () -> evalStep env cont rewritten)
-                | None -> fail (UnboundVar("Getting an unbound variable", name))
-        | List (op :: args) ->
-            let cps e v a _ =
-                operateStep e v a args
-            More (fun () -> evalStep env (makeCPS env cont cps) op)
+        // One walk of the operand chain, not two. Matching `List (Atom name :: args)`
+        // and then `List (op :: args)` materialised the operands twice for every
+        // combination whose operator is not a symbol, and once for every one that is.
+        | Pair cell ->
+            match cell.cdr with
+            | List args ->
+                match cell.car with
+                | Atom name ->
+                    match getVar' env name with
+                    | Some r -> More (fun () -> operateStep env cont r args)
+                    | None ->
+                        match tryRewrite name args with
+                        | Some rewritten -> More (fun () -> evalStep env cont rewritten)
+                        | None -> fail (UnboundVar("Getting an unbound variable", name))
+                | op ->
+                    let cps e v a _ =
+                        operateStep e v a args
+                    More (fun () -> evalStep env (makeCPS env cont cps) op)
+            // An improper combination is not a combination; it evaluates to itself,
+            // which is what falling past both list patterns used to do.
+            | _ -> More (fun () -> continueEvalStep env cont value)
         | z ->
             More (fun () -> continueEvalStep env cont z)
 
@@ -430,28 +440,22 @@ module Eval =
                 match defineVar env var value with
                 | Choice1Of2 error -> bindingError <- Some error
                 | Choice2Of2 _ -> ()
-            | List [] ->
+            // A parameter tree and its value are walked cell by cell. Proper and
+            // improper trees need no separate cases: a dotted formal is just a pair
+            // whose cdr is a symbol, and the `Atom` case above binds it. Matching
+            // through the list patterns instead destructured *and rebuilt* the rest of
+            // both chains on every iteration, which made binding quadratic in the
+            // number of parameters, on every operative call.
+            | Nil ->
                 match value with
-                | List [] -> ()
+                | Nil -> ()
                 | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
-            | List (head :: tail) ->
+            | Pair formalCell ->
                 match value with
-                | List (valueHead :: valueTail) ->
-                    pending <- (head, valueHead) :: (ofList tail, ofList valueTail) :: pending
-                | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
-            | DottedList ([], rest) ->
-                match value with
-                | DottedList ([], valueRest) -> pending <- (rest, valueRest) :: pending
-                | _ -> pending <- (rest, value) :: pending
-            | DottedList (head :: tail, rest) ->
-                match value with
-                | List (valueHead :: valueTail) ->
+                | Pair valueCell ->
                     pending <-
-                        (head, valueHead) :: (ofDotted tail rest, ofList valueTail) :: pending
-                | DottedList (valueHead :: valueTail, valueRest) ->
-                    pending <-
-                        (head, valueHead)
-                        :: (ofDotted tail rest, ofDotted valueTail valueRest)
+                        (formalCell.car, valueCell.car)
+                        :: (formalCell.cdr, valueCell.cdr)
                         :: pending
                 | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
             | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))

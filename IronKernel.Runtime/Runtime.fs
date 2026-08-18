@@ -54,24 +54,24 @@
                 | Choice1Of2 error -> fail error
             | _ -> fail (NumArgs(2,prms))
 
+        // The three fundamental operations, each one cell access. Asked through the
+        // list patterns they were linear: `car` walked a whole chain to read its first
+        // cell, and `cdr` and `cons` walked it *and rebuilt it*, so every (cdr rest) in
+        // a library loop copied the rest of the list and every traversal was quadratic.
+        // Sharing the tail rather than copying it is also what R-1RK means by a pair --
+        // and what set-cdr! will need in phase 3.
         let car env cont = function
-            | [List (x::_)] -> bounceContinue env cont x
-            | [DottedList (x::_,_)] -> bounceContinue env cont x
+            | [Pair cell] -> bounceContinue env cont cell.car
             | [badArg] -> fail (TypeMismatch("pair",badArg))
             | badArgList -> fail (NumArgs(1,badArgList))
 
         let cdr env cont = function 
-            | [List(_::xs)] -> bounceContinue env cont (ofList xs)
-            | [DottedList([_],x)] -> bounceContinue env cont x
-            | [DottedList(_::xs,x)] -> bounceContinue env cont (ofDotted xs x)
+            | [Pair cell] -> bounceContinue env cont cell.cdr
             | [badArg] -> fail (TypeMismatch("pair",badArg))
             | badArgList -> fail (NumArgs(1,badArgList))
 
         let cons env cont = function
-            | [x; List []] -> bounceContinue env cont (ofList[x])
-            | [x; List(xs)] -> bounceContinue env cont (ofList(x::xs))
-            | [x;DottedList(xs,xlast)] -> bounceContinue env cont (ofDotted (x::xs) xlast)
-            | [x1;x2] -> bounceContinue env cont (ofDotted [x1] x2)
+            | [x; y] -> bounceContinue env cont (consImmutable x y)
             | badArgList -> fail (NumArgs(2,badArgList))
 
         let private eqvValue left right =
