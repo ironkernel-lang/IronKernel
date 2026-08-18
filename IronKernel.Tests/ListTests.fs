@@ -155,3 +155,70 @@ let ``filter requires a boolean result`` () =
         match evalIn env "(filter (lambda (x) 1) (list 1 2))" with
         | Status message -> Assert.Contains("non-boolean", message)
         | value -> failwithf "expected an error, got %s" (showVal value))
+
+[<Fact>]
+let ``reduce handles a cyclic list through the six-argument form`` () =
+    // R-1RK 6.3.10. The three-argument form requires an acyclic list; the six-argument
+    // one takes precycle, incycle and postcycle, because an arbitrary binary operation
+    // cannot be generalised to an infinite sequence in finite time and the caller has
+    // to say how the cycle is handled.
+    [
+        "(define id (lambda (x) x))", Inert
+        // encycle! returns inert, so the list has to be named first.
+        "(define cyc (lambda (ls a c) (sequence (encycle! ls a c) ls)))", Inert
+        // A pure cycle (a = 0, c = 3), and one behind an acyclic prefix (a = 2, c = 3).
+        "(define pure (cyc (list 1 2 3) 0 3))", Inert
+        "(define mixed (cyc (list 10 20 1 2 3) 2 3))", Inert
+        "(=? (reduce pure + 0 id + id) 6)", Bool true
+        "(=? (reduce mixed + 0 id + id) 36)", Bool true
+        // precycle and postcycle are really applied, rather than the cycle just being
+        // summed: doubling in postcycle moves 6 to 12, and scaling each element by ten
+        // in precycle moves 6 to 60.
+        "(=? (reduce mixed + 0 id + (lambda (x) (* x 2))) 42)", Bool true
+        "(=? (reduce pure + 0 (lambda (x) (* x 10)) + id) 60)", Bool true
+        // A one-element cycle, and the six-argument form on an acyclic list, where
+        // c = 0 and the cycle applicatives go unused.
+        "(=? (reduce (cyc (list 5) 0 1) + 0 id + id) 5)", Bool true
+        "(=? (reduce (list 1 2 3) + 0 id + id) 6)", Bool true
+        "(=? (reduce () + 7 id + id) 7)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``reduce makes exactly the calls the report specifies`` () =
+    // 6.3.10 fixes the call counts: acyclic of length n calls binary n-1 times; cyclic
+    // with prefix a and cycle c calls binary a times, precycle c, incycle c-1, and
+    // postcycle once. Summing with + cannot check this -- + is associative and
+    // commutative, so a wrong grouping still gives the right total. Counting can.
+    [
+        "(define top (get-current-environment))", Inert
+        "(define cyc (lambda (ls a c) (sequence (encycle! ls a c) ls)))", Inert
+        "(define counts (vector 0 0 0 0))", Inert
+        "(define bump (lambda (i) (vector-set! counts i (+ (vector-ref counts i) 1))))", Inert
+        """(define reset (lambda () (sequence (vector-set! counts 0 0) (vector-set! counts 1 0)
+                                              (vector-set! counts 2 0) (vector-set! counts 3 0))))""", Inert
+        "(define cbin (lambda (x y) (sequence (bump 0) (+ x y))))", Inert
+        "(define cpre (lambda (x) (sequence (bump 1) x)))", Inert
+        "(define cin (lambda (x y) (sequence (bump 2) (+ x y))))", Inert
+        "(define cpost (lambda (x) (sequence (bump 3) x)))", Inert
+        // Acyclic, n = 5.
+        "(sequence (reset) (reduce (list 1 2 3 4 5) cbin 0) (=? (vector-ref counts 0) 4))", Bool true
+        // Cyclic, a = 2, c = 3.
+        """(sequence (reset) (reduce (cyc (list 10 20 1 2 3) 2 3) cbin 0 cpre cin cpost)
+             (and? (=? (vector-ref counts 0) 2) (=? (vector-ref counts 1) 3)
+                   (=? (vector-ref counts 2) 2) (=? (vector-ref counts 3) 1)))""", Bool true
+        // Pure cycle, a = 0: binary is not called at all.
+        """(sequence (reset) (reduce (cyc (list 1 2 3) 0 3) cbin 0 cpre cin cpost)
+             (and? (=? (vector-ref counts 0) 0) (=? (vector-ref counts 1) 3)
+                   (=? (vector-ref counts 2) 2)))""", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``reduce calls its applicatives in the caller's dynamic environment`` () =
+    // 6.3.10: "Each call to binary, precycle, incycle, or postcycle uses the dynamic
+    // environment of the call to reduce", by analogy with map (5.9.1). Without that,
+    // binary would run in reduce's own environment and `local-marker` would be
+    // unbound, so this distinguishes the two.
+    [
+        "(define peek (wrap (vau (x y) e (eval (quote local-marker) e))))", Inert
+        "(=? ((lambda () (define local-marker 99) (reduce (list 1 2) peek 0))) 99)", Bool true
+    ] |> evalSessionKernel

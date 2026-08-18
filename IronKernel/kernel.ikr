@@ -450,9 +450,11 @@
 ; primitives. set-cdr! can build a cycle, so the derivations that ask about a
 ; list's *shape* go through get-list-metrics, which measures a cycle rather than
 ; walking into one. The derivations that walk a list's elements -- list-tail,
-; filter, reduce and the rest -- still assume the caller passes a finite list, as
+; filter, append and the rest -- still assume the caller passes a finite list, as
 ; the report's own derivations of them do; a cyclic argument makes them diverge,
-; which is recorded as a divergence rather than papered over.
+; which is recorded as a divergence rather than papered over. `reduce` (6.3.10) is
+; the exception: the report gives it a six-argument syntax for the cyclic case, and
+; that is implemented, so it consults the metrics too.
 
 ; 5.7.2
 (define list-tail
@@ -623,14 +625,62 @@
                         (sequence ($append-onto! u (car rest)) (aux u (cdr rest)))))))
         (aux (car lists) (cdr lists))))))
 
-; 6.3.10: (reduce list binary identity). The report also gives a six-argument form
-; that handles a cyclic list; only the three-argument form is implemented, so this
-; one walks its argument and diverges on a cycle. Recorded as a 6.3 divergence.
+; 6.3.10: (reduce list binary identity) and the six-argument
+; (reduce list binary identity precycle incycle postcycle), which is the form that
+; reduces a *cyclic* list. The report gives reduce a cycle interface because an
+; arbitrary binary operation cannot be generalised to an infinite sequence in finite
+; time, so the caller supplies how to handle one: precycle converts each element of
+; the cycle, incycle reduces those, and postcycle converts the result back to
+; something binary accepts.
+;
+; This is the report's own derivation, wrapped so its helpers stay private, with one
+; change. The report maps precycle over (list-tail ls a), which is the cyclic part;
+; `map` walks its argument and so would not return on it, while reduce-n consumes
+; only c elements. Mapping exactly those c elements keeps the same calls in the same
+; order without needing a cycle-aware map.
+;
+; Called with a cyclic list, the three-argument form still diverges, as the report's
+; derivation does -- there the second syntax "must be used".
+;
+; The applicatives are called in reduce's own dynamic environment (as map does,
+; 5.9.1), which is why this is a wrapped vau rather than a lambda.
 (define reduce
-  (lambda (ls binary identity)
-    (letrec ((aux (lambda (rest acc)
-                    (if (null? rest) acc (aux (cdr rest) (binary acc (car rest)))))))
-      (if (null? ls) identity (aux (cdr ls) (car ls))))))
+  ((lambda ()
+     (letrec
+       ((reduce-acyclic
+          (lambda (ls bin id)
+            (if (null? ls)
+              id
+              (if (null? (cdr ls))
+                (car ls)
+                (bin (car ls) (reduce-acyclic (cdr ls) bin id))))))
+        (reduce-n
+          (lambda (ls bin n)
+            (if (=? n 1)
+              (car ls)
+              (bin (car ls) (reduce-n (cdr ls) bin (- n 1))))))
+        (map-n
+          (lambda (f ls n)
+            (if (zero? n)
+              ()
+              (cons (f (car ls)) (map-n f (cdr ls) (- n 1)))))))
+       (wrap
+         (vau (ls bin id & opt) env
+           (let ((fixenv (lambda (appv) (lambda x (apply appv x env)))))
+             (let ((binary (fixenv bin))
+                   (metrics (get-list-metrics ls)))
+               (let ((a (car (cdr (cdr metrics))))
+                     (c (car (cdr (cdr (cdr metrics))))))
+                 (if (zero? c)
+                   (reduce-acyclic ls binary id)
+                   (let ((pre (fixenv (car opt)))
+                         (in (fixenv (car (cdr opt))))
+                         (post (fixenv (car (cdr (cdr opt))))))
+                     (let ((reduced-cycle
+                             (post (reduce-n (map-n pre (list-tail ls a) c) in c))))
+                       (if (zero? a)
+                         reduced-cycle
+                         (binary (reduce-n ls binary a) reduced-cycle))))))))))))))
 
 ; --- R-1RK canonical names ---------------------------------------------------
 ; The report spells operatives with a leading `$`, and the primitive definer as
