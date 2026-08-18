@@ -43,6 +43,7 @@ module Parser =
                     | "#t" -> Bool(true)
                     | "#f" -> Bool(false)
                     | "#inert" -> Inert
+                    | "#ignore" -> Ignore
                     // R-1RK 12.4 gives the exact infinities of 12.3.2 an external
                     // representation. They read as atoms because `#`, `+` and `-` are
                     // all symbol characters, so they are recognised here rather than

@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 130 | 96% |
+| `verified` | 135 | 100% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 5 | 4% |
+| `absent` | 0 | 0% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -75,7 +75,7 @@ divergences before taking any row as a claim of conformance.
 | 4.5 Core types and primitive features — Control | **required** | 2 | 2 | yes |
 | 4.6 Core types and primitive features — Pairs and lists | **required** | 3 | 3 | yes |
 | 4.7 Core types and primitive features — Pair mutation (optional) | optional | 2 | 2 | yes |
-| 4.8 Core types and primitive features — Environments | **required** | 4 | 3 | no |
+| 4.8 Core types and primitive features — Environments | **required** | 4 | 4 | yes |
 | 4.9 Core types and primitive features — Environment mutation (optional) | optional | 1 | 1 | yes |
 | 4.10 Core types and primitive features — Combiners | **required** | 5 | 5 | yes |
 | 5.1 Core library features (I) — Control | **required** | 1 | 1 | yes |
@@ -94,13 +94,13 @@ divergences before taking any row as a claim of conformance.
 | 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 4 | yes |
 | 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 1 | yes |
 | 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 1 | yes |
-| 6.7 Core library features (II) — Environments | **required** | 10 | 8 | no |
+| 6.7 Core library features (II) — Environments | **required** | 10 | 10 | yes |
 | 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 3 | yes |
 | 6.9 Core library features (II) — Control | **required** | 1 | 1 | yes |
 | 7.2 Continuations — Primitive features | **required** | 7 | 7 | yes |
 | 7.3 Continuations — Library features | **required** | 4 | 4 | yes |
 | 8.1 Encapsulations — Primitive features | **required** | 1 | 1 | yes |
-| 9.1 Promises — Library features | **required** | 4 | 3 | no |
+| 9.1 Promises — Library features | **required** | 4 | 4 | yes |
 | 10.1 Keyed dynamic variables — Primitive features | **required** | 1 | 1 | yes |
 | 11.1 Keyed static variables — Primitive features | **required** | 1 | 1 | yes |
 | 12.5 Numbers — Number features | **required** | 14 | 14 | yes |
@@ -109,7 +109,7 @@ divergences before taking any row as a claim of conformance.
 | 12.8 Numbers — Rational features | optional | 5 | 5 | yes |
 | 12.9 Numbers — Real features | optional | 6 | 6 | yes |
 | 12.10 Numbers — Complex features | optional | 3 | 3 | yes |
-| 13.1 Strings — Primitive features | **required** | 1 | 0 | no |
+| 13.1 Strings — Primitive features | **required** | 1 | 1 | yes |
 | 15.1 Ports — Primitive features | **required** | 8 | 8 | yes |
 | 15.2 Ports — Library features | **required** | 3 | 3 | yes |
 
@@ -129,7 +129,7 @@ divergences before taking any row as a claim of conformance.
 | 4.7.1 | `set-car!, set-cdr!` | Pair mutation (optional) | `verified` | optional module; 6 behavioural check(s) |
 | 4.7.2 | `copy-es-immutable` | Pair mutation (optional) | `verified` | optional module; 7 behavioural check(s) |
 | 4.8.1 | `environment?` | Environments | `verified` | 1 behavioural check(s) |
-| 4.8.2 | `ignore?` | Environments | `absent` |  |
+| 4.8.2 | `ignore?` | Environments | `verified` | 6 behavioural check(s) |
 | 4.8.3 | `eval` | Environments | `verified` | 1 behavioural check(s) |
 | 4.8.4 | `make-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 4.9.1 | `$define!` | Environment mutation (optional) | `verified` | optional module; 2 behavioural check(s) |
@@ -183,14 +183,14 @@ divergences before taking any row as a claim of conformance.
 | 6.4.4 | `memq?` | Pair mutation (optional) | `verified` | optional module; 3 behavioural check(s) |
 | 6.5.1 | `eq?` | Equivalence under mutation (optional) | `verified` | optional module; 6 behavioural check(s) |
 | 6.6.1 | `equal?` | Equivalence up to mutation | `verified` | 7 behavioural check(s) |
-| 6.7.1 | `$binds?` | Environments | `absent` |  |
+| 6.7.1 | `$binds?` | Environments | `verified` | 4 behavioural check(s) |
 | 6.7.2 | `get-current-environment` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.3 | `make-kernel-standard-environment` | Environments | `verified` | 3 behavioural check(s) |
 | 6.7.4 | `$let*` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.5 | `$letrec` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.6 | `$letrec*` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.7 | `$let-redirect` | Environments | `verified` | 2 behavioural check(s) |
-| 6.7.8 | `$let-safe` | Environments | `absent` |  |
+| 6.7.8 | `$let-safe` | Environments | `verified` | 2 behavioural check(s) |
 | 6.7.9 | `$remote-eval` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.10 | `$bindings->environment` | Environments | `verified` | 2 behavioural check(s) |
 | 6.8.1 | `$set!` | Environment mutation (optional) | `verified` | optional module; 1 behavioural check(s) |
@@ -226,7 +226,7 @@ divergences before taking any row as a claim of conformance.
 |---|---|---|---|---|
 | 9.1.1 | `promise?` | Library features | `verified` | 1 behavioural check(s) |
 | 9.1.2 | `force` | Library features | `verified` | 1 behavioural check(s) |
-| 9.1.3 | `$lazy` | Library features | `absent` |  |
+| 9.1.3 | `$lazy` | Library features | `verified` | 4 behavioural check(s) |
 | 9.1.4 | `memoize` | Library features | `verified` | 1 behavioural check(s) |
 
 ## 10 Keyed dynamic variables
@@ -285,7 +285,7 @@ divergences before taking any row as a claim of conformance.
 
 | Entry | Feature | Module | Status | Notes |
 |---|---|---|---|---|
-| 13.1.1 | `string->symbol` | Primitive features | `absent` |  |
+| 13.1.1 | `string->symbol` | Primitive features | `verified` | 2 behavioural check(s) |
 
 ## 15 Ports
 

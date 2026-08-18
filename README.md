@@ -10,11 +10,17 @@ This tree is a **hybrid CLR runtime**: programs are analyzed to a Core IR and co
 
 [`docs/kernel-conformance.md`](docs/kernel-conformance.md) tracks IronKernel against
 the [Revised-1 Report on the Kernel Programming Language](https://ftp.cs.wpi.edu/pub/techreports/pdf/05-07.pdf)
-(R-1RK), feature by feature. Of the report's 135 feature entries, **130 are verified
-by a behavioural check and 5 are absent**; nothing is merely bound-but-unchecked.
+(R-1RK), feature by feature. Of the report's 135 feature entries, **135 are verified
+by a behavioural check and 0 are absent**; nothing is merely bound-but-unchecked.
 34 entries belong to modules the report marks optional. The matrix also reports
-status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **40 of 44
+status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **44 of 44
 modules are complete**.
+
+That is not the same as claiming conformance. §1.3.2 makes the module the unit,
+and support additionally requires the modules a module assumes and the report's
+baseline representation requirements — and a passing check exercises an entry
+rather than proving every requirement in it. The divergences below the summary are
+where the difference lives, and they are the part worth reading.
 
 **Every entry of chapter 12 now has a passing check** — Numbers (12.5), Inexact
 (12.6), Narrow inexact (12.7), Rational (12.8), Real (12.9) and Complex (12.10).

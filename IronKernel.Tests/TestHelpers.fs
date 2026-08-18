@@ -79,6 +79,21 @@ let evalSessionKernel (lines: (string * LispVal) list) =
             | Choice2Of2 other ->
                 failwithf "eqv? returned %s for: %s" (showVal other) expr))
 
+/// The same, with promises.ikr loaded as well.
+let evalSessionKernelAndPromises (lines: (string * LispVal) list) =
+    withKernelAndPromises (fun env ->
+        lines
+        |> List.iter (fun (expr, expected) ->
+            let actual = evalIn env expr
+            match eqv' [actual; expected] with
+            | Choice2Of2 (Bool true) -> ()
+            | Choice2Of2 (Bool false) ->
+                failwithf "expecting '%s' got '%s' for: %s" (showVal expected) (showVal actual) expr
+            | Choice1Of2 e ->
+                failwithf "eqv? failed (%s) for: %s => %s" (showError e) expr (showVal actual)
+            | Choice2Of2 other ->
+                failwithf "eqv? returned %s for: %s" (showVal other) expr))
+
 let parseOk input =
     match readExpr input with
     | Choice2Of2 v -> v

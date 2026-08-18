@@ -677,6 +677,16 @@
 ; restricted standard environment rather than an escape from its own profile.
 (define make-kernel-standard-environment (lambda () (get-current-environment)))
 
+; 6.7.8: ($let-safe bindings . body) is ($let-redirect
+; (make-kernel-standard-environment) bindings . body) -- a $let whose body runs in a
+; fresh standard environment rather than the caller's, so that what the body can see
+; does not depend on where it was written.
+(define $let-safe
+  (vau (bindings & body) env
+    (eval (list* let-redirect (make-kernel-standard-environment) bindings body) env)))
+
+(define let-safe $let-safe)
+
 ; 15.2.3: (get-module string) creates a fresh standard environment, evaluates the
 ; file's expressions in it consecutively, and returns it. The two-argument form
 ; binds module-parameters to the second argument first, "prior to evaluating read
