@@ -242,6 +242,13 @@ on the table for a *different* mechanism.
 from `PrimitiveIdentity` and should get its own ADR rather than being grown into
 this one.
 
+> [ADR 0007](0007-identity-for-derived-combiners.md) took that up and recommends
+> against building it. A dynamic census puts derived operatives at 7.2% of dispatches,
+> and 84% of that is sequencing rather than the `let`/`letrec` this paragraph guessed
+> at -- `letrec` is 0.09%. The static census above ranked it first, which is the
+> hazard of counting source sites. The cheaper route is to make the hot derived
+> operatives primitive and reuse the guard that already exists.
+
 ## Baseline
 
 Taken on an idle machine alongside phase 5's measurement, as the reference for any

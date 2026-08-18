@@ -1,0 +1,165 @@
+# ADR 0007: Identity for derived combiners
+
+Status: Proposed
+
+## Decision
+
+Do not build it. ADR 0004 phase 5 ended by naming identity for derived combiners as
+the lever its own mechanism could not reach; measuring that lever shows it is worth
+about 1% of dispatches beyond what a much smaller change already gets. Instead,
+promote the hot standard-library operatives to primitives and lower them through the
+`PrimitiveIdentity` guard that already exists, starting with `$sequence`.
+
+## Problem
+
+`PrimitiveIdentity` is a field on `PrimitiveOperativeRecord`. A compound operative --
+anything `kernel.ikr` builds with `vau` -- cannot carry one, so `analyzeGuarded`
+cannot recognise it and every call goes through generic `COperate` dispatch. Phase 5
+measured that guards are 11.7% faster on a fresh frame where they apply, and found
+that the operators with structure worth lowering are all derived and therefore out of
+reach.
+
+The obvious repair is to give derived combiners an identity too: stamp the standard
+library's combiners at bootstrap, generalise `BindingGuard.expectedIdentity` to cover
+them, and lower `(let ...)`, `(sequence ...)` and friends the way `if` is lowered
+today.
+
+Before building that, it is worth asking what it would buy.
+
+## What the dispatches actually are
+
+Phase 5's census counted *static* occurrences in compiled bodies and ranked `letrec`
+first among derived operatives. That ranking is an artifact of counting source sites.
+Instrumenting the compiled dispatch path (`NamedCallSite.Invoke`) and running eight
+example programs -- 9.0M dispatches in total, from 2.5k to 8.2M per program -- gives
+the frequency instead:
+
+| Combiner kind | Share of dispatches |
+|---|---:|
+| primitive applicative | 78.4% |
+| derived applicative | 12.3% |
+| **derived operative** | **7.2%** |
+| other applicative | 2.0% |
+| primitive operative | 0.0% |
+
+The derived-operative share is the ceiling on what this ADR's mechanism could ever
+address, and it is remarkably stable: 6.8% to 7.6% across all eight programs.
+
+Inside that 7.2% slice:
+
+| | Share of slice | Share of all dispatches |
+|---|---:|---:|
+| `seq2` | 46.3% | 3.4% |
+| `sequence` | 37.9% | 2.7% |
+| `let` | 14.1% | 1.0% |
+| `letrec` | 1.3% | 0.09% |
+| `cond`, `let*`, rest | 0.4% | 0.03% |
+
+So 84% of the target is one feature, sequencing. `letrec`, which the static census
+ranked first, is 0.09% of dispatches -- three orders of magnitude below where
+counting source sites placed it. Anyone sizing this work from the static census would
+have built the general mechanism to speed up the wrong thing.
+
+## Sequencing costs more than its own dispatches
+
+`$sequence` is the report's derivation (5.1.1): `seq2` plus an `aux` operative that
+evaluates the head and recurses on `(eval (cons aux tail) env)`. Each element
+therefore costs roughly a `null?`, two `eval`s and a `cons` on top of the dispatch
+itself -- and those are the top of the overall table:
+
+| Site | Share of all dispatches |
+|---|---:|
+| `null?` | 26.0% |
+| `eval` | 18.7% |
+| `cons` | 9.4% |
+| `zero?` | 8.9% |
+| `car` | 7.9% |
+
+This is an inference, not an attribution: the census keys on the dispatched name and
+does not record the caller, so it cannot say how much of that `eval` traffic is
+sequencing. Two things make the inference worth acting on anyway. The arithmetic is
+the right order -- 549k sequencing dispatches against 1.68M `eval` and 845k `cons` --
+and the census *undercounts* sequencing, because `aux` recurses through
+`(cons aux tail)`, a computed operator that never reaches the name-keyed call site at
+all. Lowering `$sequence` removes the generated traffic, not just the 6.1%.
+
+## Why the general mechanism is the wrong shape
+
+The case for identity on derived combiners is that it generalises. It does not.
+
+A guard only pays if the compiler knows what to lower the combiner *into*. `CIf`
+wins by compiling the branches; `CSeq` would win by compiling the elements. That
+knowledge is hardcoded per feature, so the mechanism can only ever recognise
+combiners the compiler already understands -- which is the standard library, and
+nothing else. It does not extend to user-defined combiners: speeding those up means
+inlining an arbitrary vau body, with the hygiene and dynamic-environment questions
+that entails, and that is a different technique that would not use this machinery.
+
+So the general mechanism's reach is exactly the set of combiners we could instead
+make primitive. Both routes end at the same lowered `CSeq`; one adds an identity
+scheme for compound operatives, a bootstrap stamping pass and a wider
+`BindingGuard`, and the other adds a primitive and one `PrimitiveIdentity` case.
+
+The report settles whether making them primitive is allowed. R-1RK 1.3.2:
+
+> The derivation code is not considered part of the definition of the feature, so
+> implementations are not expected to duplicate the exact behavior of the code.
+
+Library features may be implemented primitively. Conformance is unaffected, and the
+matrix records module completeness rather than how a feature was built.
+
+## What to do instead
+
+**Promote `$sequence` to a primitive operative** with a `PrimitiveSequence` identity,
+and lower `(sequence . forms)` to `CSeq` in `analyzeGuarded` under the existing
+binding guard, with the current `COperate` path as the fallback.
+
+`CSeq` already exists in `Ir.fs` and `compileToFunc` already compiles it -- it is
+produced today only by the package decoder and the partial evaluator, never by the
+analyzer. So the compiler side is a lowering rule, not a new node.
+
+`let` is the only other candidate above 1%, and it is a further decision to take on
+its own evidence once sequencing is done, because removing the sequencing traffic
+changes the profile everything else is measured against.
+
+## Risks
+
+**Sequencing is load-bearing.** Every operative body is a sequence, so a wrong
+primitive breaks everything at once. That is also the mitigation: the 394-test suite
+and the twelve examples exercise it on every path, and a mistake cannot hide.
+
+**Tail position.** 5.1.1 requires the last element to be evaluated as a tail context.
+The derivation gets this from `aux`'s structure; a primitive and a `CSeq` lowering
+each have to preserve it deliberately. ADR 0004 phase 2 already found that the
+equivalent property is invisible to a test that only checks results, and has to be
+measured structurally -- capture a continuation at the deepest point and assert its
+`nextCont` depth stays bounded. The same test shape applies here.
+
+**The derivation stops being exercised.** `kernel.ikr`'s version is presently
+executed by everything; as a fallback it would be executed by almost nothing, so it
+can rot unnoticed. It should keep a test that drives it directly.
+
+**The profile is one corpus.** Eight example programs are not a workload survey, and
+they lean on the standard library more than user code would. The 7.2% ceiling is the
+number to distrust first if the result disappoints.
+
+## Cost
+
+One primitive, one `PrimitiveIdentity` case, one lowering rule, and the tests above.
+No new mechanism. Against that, the rejected design needs identity on
+`OperativeRecord`, a bootstrap pass to stamp the standard library, a generalised
+`BindingGuard`, and a decision about what happens when a program redefines a stamped
+name -- for at most one point of additional reach.
+
+## Consequences
+
+`$sequence` moves from derived to primitive. The report permits it, but it is a real
+change in character: IronKernel has preferred to derive what the report derives, and
+this is the first place where measurement argues the other way. It is worth being
+explicit that the reason is evidence rather than convenience, and that the derivation
+stays in the tree as the fallback and as documentation of the semantics.
+
+If sequencing is lowered and the gain does not appear, the conclusion is not "now
+build the general mechanism". It is that dispatch is not where the time goes, and the
+remaining 78.4% -- primitive applicative calls in hot loops -- is the thing to profile
+next.
