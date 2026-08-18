@@ -896,6 +896,54 @@
                         | _ -> signal resultCont (TypeMismatch("applicative", interceptor))
             chain interceptions value
 
+        /// R-1RK 7.2.7: signalling is an abnormal pass "to some continuation in the
+        /// dynamic extent of error-continuation". This builds that continuation, one
+        /// per signal so the extent test is exact.
+        ///
+        /// It carries the original error rather than reconstructing one from the value
+        /// that arrives, so the diagnostic an unintercepted error reports is the same
+        /// one it reported before the pass existed. An interceptor that
+        /// returns normally therefore does not cancel the error; to handle one it must
+        /// divert to its second argument, which is the escape 7.2.5 gives it and what
+        /// the report's own $binds? derivation does.
+        let private errorDestination (error: LispError) =
+            match errorContinuation () with
+            | Continuation(errorRecord, metaCont, continuationType) ->
+                Continuation(
+                    { closure = Nil
+                      currentCont =
+                        Some(NativeCode { cont = (fun _ _ _ _ -> Done(throwError error)); args = None })
+                      nextCont = Some(Continuation(errorRecord, None, Full))
+                      args = None },
+                    metaCont, continuationType)
+            | other -> other
+
+        /// Whether the signalling point is already inside error-continuation's extent.
+        /// An error raised while handling an error would otherwise start a fresh pass
+        /// from inside the first one's interception chain, and a guard that always
+        /// signals would never finish. Once inside the error extent, signalling just
+        /// unwinds -- which is also what it means there.
+        let private alreadyHandlingError source =
+            match errorContinuation () with
+            | Continuation(errorRecord, _, _) ->
+                withinExtent (continuationAncestry source) errorRecord
+            | _ -> false
+
+        /// The signalling action of 7.2.7. With no guards installed the pass selects
+        /// nothing, reaches the destination above, and returns exactly what the direct
+        /// unwind returned -- which is what keeps this invisible to programs that do
+        /// not use guards.
+        let private signalAbnormally (cont: LispVal) (error: LispError) : Step =
+            match cont with
+            | Continuation(record, _, _) when not (alreadyHandlingError cont) ->
+                match record.closure with
+                | Environment _ as env ->
+                    passAbnormally env cont (errorDestination error) (Obj(box error))
+                // A continuation with no environment to run interceptors in cannot
+                // carry a pass; unwind directly rather than invent one.
+                | _ -> Done(throwError error)
+            | _ -> Done(throwError error)
+
         let continuationToApplicative env cont args =
             match args with
             | [Continuation _ as target] -> bounceContinue env cont (abnormalPass target)
@@ -2469,6 +2517,10 @@
 
         /// Fresh environment containing only primitive operators (safe for isolated tests).
         let makePrimitiveBindingsForProfile profile =
+            // Installed here rather than at module initialisation, because every path
+            // that builds an environment comes through this one and a module-level
+            // binding would depend on when the initialiser happened to run.
+            configureErrorSignal signalAbnormally
             let capabilities = forProfile profile
             let operativeIdentity = function
                 | "if" -> Some PrimitiveIf

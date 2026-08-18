@@ -1,6 +1,6 @@
 # ADR 0006: Errors as abnormal passes
 
-Status: Accepted — phase 1 done, phases 2-4 outstanding
+Status: Accepted — phases 1-2 done, phases 3-4 outstanding
 
 ## Decision
 
@@ -166,9 +166,43 @@ and one of them, `realArgument`, needed one threaded in from its callers; and a
 handful spelled the call `fail(` without a space, so a pattern requiring one missed
 them.
 
-**Phase 2 — route through the machinery.** Make `signal` perform the abnormal pass.
-With no guards installed, every existing test must still pass unchanged; that suite
-is the specification for "invisible to programs that do not use guards".
+**Phase 2 — route through the machinery.** *Done.* `signal` performs the abnormal
+pass. The 382 tests passed unchanged, which was the specification for "invisible to
+programs that do not use guards"; five new tests in `ErrorPassTests.fs` check the
+other half, because a signalling action that quietly went back to unwinding directly
+would also leave those 382 passing.
+
+The pass is installed from `Runtime` through a mutable hook, the idiom already used
+for `configureSourceServices` and `configureBodyCompiler`, rather than moving the
+guard machinery above `Eval`. Less churn for the same result, and the fallback when
+unconfigured is the old direct unwind.
+
+Two details the design settled:
+
+- **Regress** was answered by the extent test rather than a depth counter. An error
+  signalled from inside `error-continuation`'s extent — which is where an interceptor
+  handling an error runs — unwinds directly instead of starting a second pass. That
+  is not just a cutoff: once inside the error extent, unwinding is what signalling
+  means. A guard whose interceptor always signals now terminates, reporting the
+  interceptor's error.
+- **Diagnostics** were checked rather than assumed. The destination carries the
+  original `LispError` instead of rebuilding one from the value that arrives, and the
+  message an unintercepted error reports was compared against master on the same
+  inputs: byte-identical. Source spans turn out not to be carried by the error at all
+  — the dispatch layer attaches them on the unwind — so they were never at risk.
+
+**What the benchmark caught.** The ADR predicted `CompilerBenchmarks` would be
+unchanged and said a change would mean something had been added to the ordinary path.
+Something did change: `Interpreted` allocates 2048 B against master's 2024 B. The
+prediction's reasoning was wrong rather than its measurement. Instrumenting `signal`
+shows it is never called while evaluating `(+ value 1)`, so no work was added to the
+ordinary path; the 24 bytes are codegen around the indirection, which appears only
+once the hook is actually dispatched through. Three shapes were measured — a curried
+function behind an option, an inline delegate, and a non-inline delegate — and all
+three allocate the same 24 bytes, so it is the indirection itself and not the calling
+convention. The non-inline delegate is the fastest of the three and the one shipped:
+411 ns against master's 421 ns, with the compiled paths unchanged. Time improved and
+allocation rose 1.2%, on the interpreted path only.
 
 **Phase 3 — the payoffs.** An exit guard selecting on `error-continuation` fires
 when the guarded extent signals. `dynamic-wind` cleans up after a failure. The

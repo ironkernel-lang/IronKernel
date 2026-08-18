@@ -216,4 +216,4 @@
 (* 1e308 10)
 (with-strict-arithmetic #f (lambda () (* 1e308 10)))
 (* 1e-300 1e-300)
-(call/cc (lambda (out) (with-output-to-file "ovf-esc.txt" (lambda () (apply-continuation out 1)))))
+(call/cc (lambda (out) (with-output-to-file "/tmp/ironkernel-ovf-esc.txt" (lambda () (apply-continuation out 1)))))
