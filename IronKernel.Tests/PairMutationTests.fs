@@ -56,12 +56,12 @@ let ``copy-es-immutable returns something equal? with an immutable structure`` (
     ] |> evalSessionKernel
 
 [<Fact>]
-let ``the mutating half of the module is genuinely absent`` () =
+let ``the entries the module still lacks are genuinely absent`` () =
     // Guarding the claim in the 4.7 divergence: these are not quietly bound to
-    // something that does nothing. A later change that adds them should have to
-    // update this test deliberately.
+    // something that does nothing. set-car! and set-cdr! left this list in ADR 0005
+    // phase 3, which is the deliberate update the test was there to force.
     withKernel (fun env ->
-        for name in [ "set-car!"; "set-cdr!"; "encycle!"; "append!" ] do
+        for name in [ "encycle!"; "append!" ] do
             match evalIn env name with
             | Status message -> Assert.Contains("unbound", message.ToLowerInvariant())
             | value -> failwithf "%s should be unbound, got %s" name (showVal value))
@@ -199,6 +199,103 @@ let ``copy-es returns a pair that is not eq? to its argument`` () =
         // Non-pair referents come through as themselves (4.7.2's "corresponding
         // non-pair referents being eq?").
         "(eq? (car (copy-es (list 'a))) 'a)", Bool true
-        // copy-es-immutable may return its argument, and does.
-        "(eq? (copy-es-immutable p) p)", Bool true
+        // 4.7.2: "if object is a mutable pair, then the result is not eq? to object".
+        // p was built by `list`, so it is mutable and the copy is fresh.
+        "(eqv? (eq? (copy-es-immutable p) p) #f)", Bool true
+        "(equal? (copy-es-immutable p) p)", Bool true
+        // An already-immutable argument may come back as itself, and does.
+        "(eq? (copy-es-immutable (copy-es-immutable p)) (copy-es-immutable (copy-es-immutable p)))",
+            Bool false
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``set-car! and set-cdr! mutate a pair that other references see`` () =
+    // R-1RK 4.7.1. The result is inert, and the mutation is visible through every
+    // reference to the pair -- which is the whole reason the representation changed.
+    [
+        "(define p (list 1 2 3))", Inert
+        "(define q p)", Inert
+        "(inert? (set-car! p 99))", Bool true
+        "(=? (car p) 99)", Bool true
+        "(=? (car q) 99)", Bool true
+        "(inert? (set-cdr! p (list 7)))", Bool true
+        "(=? (car (cdr p)) 7)", Bool true
+        "(=? (length p) 2)", Bool true
+        // The tail cdr handed out earlier is the same object, so it sees it too.
+        "(define r (list 1 2))", Inert
+        "(define tail (cdr r))", Inert
+        "(set-car! tail 42)", Inert
+        "(=? (car (cdr r)) 42)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``mutating an immutable pair signals an error`` () =
+    // R-1RK 3.8 requires the error, and 4.7.2 is why a captured algorithm is immutable
+    // in the first place: an operative must not be rewritable under the combiner that
+    // captured it. A quoted literal is structure the reader produced, so it is
+    // immutable; `list` and `cons` build data the program made, so it is not.
+    withKernel (fun env ->
+        for expression in [ "(set-car! (quote (1 2)) 0)"; "(set-cdr! (quote (1 2)) 0)" ] do
+            match evalIn env expression with
+            | Status message -> Assert.Contains("immutable", message)
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value)
+        // and copy-es-immutable produces structure that refuses the same way
+        match evalIn env "(set-car! (copy-es-immutable (list 1 2)) 0)" with
+        | Status message -> Assert.Contains("immutable", message)
+        | value -> failwithf "mutating an immutable copy should fail, got %s" (showVal value)
+        for expression in [ "(set-car! 5 0)"; "(set-car! (list 1))" ] do
+            match evalIn env expression with
+            | Status _ -> ()
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``mutability follows where the structure came from`` () =
+    [
+        "(immutable-pair? (quote (1 2)))", Bool true
+        "(eqv? (immutable-pair? (list 1 2)) #f)", Bool true
+        "(eqv? (immutable-pair? (cons 1 2)) #f)", Bool true
+        "(immutable-pair? (copy-es-immutable (list 1 2)))", Bool true
+        // copy-es makes a mutable copy (6.4.2), copy-es-immutable an immutable one.
+        "(eqv? (immutable-pair? (copy-es (quote (1 2)))) #f)", Bool true
+        // Immutability is deep: there is no way for a mutable pair to be inside an
+        // immutable one (4.7.2).
+        "(immutable-pair? (car (copy-es-immutable (list (list 1) 2))))", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``cyclic structure does not hang the traversals`` () =
+    // set-cdr! makes cycles reachable, so the walks that assumed finite structure have
+    // to cope now rather than in a later phase. equal? terminates because a pair of
+    // cells already under comparison is taken as equal, which is also the right answer
+    // -- two structurally identical cycles are equal.
+    [
+        "(define p (list 1 2 3))", Inert
+        "(set-cdr! (cdr (cdr p)) p)", Inert
+        "(pair? p)", Bool true
+        "(=? (car p) 1)", Bool true
+        "(eq? p p)", Bool true
+        "(equal? p p)", Bool true
+        "(define q (list 1 2 3))", Inert
+        "(set-cdr! (cdr (cdr q)) q)", Inert
+        "(equal? p q)", Bool true
+        "(eqv? (eq? p q) #f)", Bool true
+        // A cycle is not a proper list, so the list predicates say so rather than
+        // walking forever.
+        "(eqv? (null? p) #f)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``an operative keeps the body it captured even if the source is mutated`` () =
+    // This is what ADR 0005 phase 0's acquisition seam was for, and the first point at
+    // which it does real work: the compiled-body memo is only sound because $vau took
+    // an immutable copy, so rewriting the list the body was built from cannot change
+    // what the operative does.
+    [
+        "(define body (list (list + 1 2)))", Inert
+        "(define f (eval (list* vau (list) (quote _) body) (get-current-environment)))", Inert
+        "(=? (f) 3)", Bool true
+        "(set-car! (car body) *)", Inert
+        // The source list changed; the operative did not.
+        "(=? (f) 3)", Bool true
+        "(=? (f) 3)", Bool true
     ] |> evalSessionKernel

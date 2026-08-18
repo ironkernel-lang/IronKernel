@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Accepted — phases 0-2 done, phases 3-6 outstanding
+Status: Accepted — phases 0-3 done, phases 4-6 outstanding
 
 ## Decision
 
@@ -246,11 +246,38 @@ did not, because they are exercised with symbols and numbers, which remain `eq?`
 when equal. That is worth knowing rather than assuming — a program that used
 `memq?` over freshly built lists would now get a different answer.
 
-**Phase 3 — mutation.** `set-car!` and `set-cdr!` (4.7.1), signalling on an
-immutable pair. `copy-es` (6.4.2) becomes a real copy with an observably fresh
-result, and `copy-es-immutable` (4.7.2) stops being the identity. These are the
-entries the module is named for, and the first point at which anything can
-actually change under a reference.
+**Phase 3 — mutation.** *Done.* `set-car!` and `set-cdr!` (4.7.1) write into a
+cell and signal on an immutable one, as 3.8 requires. `copy-es-immutable` (4.7.2)
+is a real deep copy, and `copy-es` (6.4.2) produces a mutable one.
+
+Mutability follows where structure came from: the reader produces immutable pairs,
+because a program is an algorithm rather than data the program made, while `cons`
+and `list` produce mutable ones. That reading of 4.7.2's rationale — mutating an
+algorithm "ought to be difficult to do by accident" — is what makes
+`(set-car! (quote (1 2)) 0)` an error and `(set-car! (list 1 2) 0)` fine.
+
+Phase 0's acquisition seam starts doing real work here, and there is now a test
+that would fail without it: an operative built from a list keeps its body when
+that list is mutated afterwards, which is what keeps the `compiledBody` memo
+sound.
+
+**This plan had the ordering wrong.** Cycle safety was scheduled for phase 4, on
+the reasoning that `encycle!` is what makes a cycle buildable. `set-cdr!` makes
+one buildable in *this* phase — `(set-cdr! p p)` — so the traversals that assumed
+finite structure had to cope here:
+
+- The two list active patterns detect a cycle with a second pointer advancing at
+  half speed, and report "not a proper list". That replaced the step limit phase 1
+  used, which was a number to tune rather than an answer.
+- `equal?` takes a pair of cells already under comparison as equal, which
+  terminates and is also the right answer: two structurally identical cycles are
+  equal. `eq?` cannot loop, since it never descends into a pair.
+- `showVal` already reported `<circular list>` for a pair matching neither
+  pattern, so it needed nothing.
+
+What is left for phase 4 is narrower than this plan assumed: `get-list-metrics`
+still answers "acyclic, of this length" unconditionally, and the `kernel.ikr` list
+derivations built on it still carry their no-cycles comments.
 
 **Phase 4 — cycle safety.** Now that `encycle!` is buildable, before it is built:
 `equal?` gets a termination-safe algorithm; `showVal` — already an explicit work

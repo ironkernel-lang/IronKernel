@@ -291,45 +291,79 @@ module Ast =
 
     and ThrowsError<'a> = Choice<LispError,'a>
 
-    /// R-1RK 4.7.2's operation at the value level: the object with an immutable
-    /// evaluation structure -- the set of pairs reachable from it without passing
-    /// through a non-pair. `$vau` (4.10.3) acquires immutable copies of the structures
-    /// it captures, which is what keeps an algorithm from changing under the combiner
-    /// that captured it.
+    /// R-1RK 4.7.2 at the value level: the object with an immutable evaluation
+    /// structure -- the set of pairs reachable from it without passing through a
+    /// non-pair. `$vau` (4.10.3) acquires immutable copies of what it captures, which
+    /// is what keeps an algorithm from changing under the combiner that captured it,
+    /// and what makes `OperativeRecord.compiledBody`'s memo of a compiled body sound.
     ///
-    /// Every IronKernel pair is already immutable, so this returns its argument and
-    /// costs nothing. It exists as a named seam because that stops being true when
-    /// pairs become mutable cells (ADR 0005). `OperativeRecord.compiledBody` memoises
-    /// a compiled body and is sound only while the body cannot change after capture,
-    /// so the capture sites route through here *before* mutation exists rather than
-    /// being found again afterwards.
-    let acquireImmutable (value: LispVal) = value
+    /// A structure already wholly immutable is returned as it is, which 4.7.2 permits
+    /// for an immutable pair and which keeps the common case -- capturing structure the
+    /// reader produced -- free. Anything else is copied, and the copy stops at
+    /// non-pairs, so shared non-pair referents stay `eq?` as the report requires.
+    /// Already-copied cells are remembered, so sharing is preserved and a cyclic
+    /// structure terminates.
+    let acquireImmutable (value: LispVal) =
+        let rec allImmutable seen current =
+            match current with
+            | Pair cell ->
+                if not cell.immutable then false
+                elif List.exists (fun other -> obj.ReferenceEquals(other, cell)) seen then true
+                else
+                    let seen = cell :: seen
+                    allImmutable seen cell.car && allImmutable seen cell.cdr
+            | _ -> true
+        if allImmutable [] value then value
+        else
+            let copies = System.Collections.Generic.Dictionary<PairCell, LispVal>(HashIdentity.Reference)
+            let rec copy current =
+                match current with
+                | Pair cell ->
+                    match copies.TryGetValue cell with
+                    | true, existing -> existing
+                    | _ ->
+                        let fresh = { car = Nil; cdr = Nil; immutable = true }
+                        copies.[cell] <- Pair fresh
+                        fresh.car <- copy cell.car
+                        fresh.cdr <- copy cell.cdr
+                        Pair fresh
+                | other -> other
+            copy value
 
     /// The same, for a body held as a list of forms rather than as one structure.
-    /// Identity today, and deliberately not `List.map acquireImmutable`: that would
-    /// allocate a new list on every operative construction to no effect.
-    let acquireImmutableForms (forms: LispVal list) = forms
+    let acquireImmutableForms (forms: LispVal list) =
+        if forms |> List.forall (fun form -> obj.ReferenceEquals(acquireImmutable form, form))
+        then forms
+        else forms |> List.map acquireImmutable
 
-    /// The pair constructors. Kernel structure is built immutable throughout phase 1,
-    /// so nothing observable changes; phase 3 adds the mutable constructors that
-    /// `cons` and `list` will use.
+    /// The pair constructors. Data a Kernel program builds at run time is mutable, so
+    /// that `(set-car! (list 1 2) 0)` has somewhere to write; structure the reader
+    /// produces is immutable, because it is the text of an algorithm rather than data
+    /// the program made (R-1RK 4.7.2's rationale: mutating an algorithm "ought to be
+    /// difficult to do by accident").
+    let cons car cdr = Pair { car = car; cdr = cdr; immutable = false }
+
     let consImmutable car cdr = Pair { car = car; cdr = cdr; immutable = true }
 
-    let ofList (values: LispVal list) = List.foldBack consImmutable values Nil
+    let ofList (values: LispVal list) = List.foldBack cons values Nil
 
-    let ofDotted (values: LispVal list) (tail: LispVal) =
+    let ofDotted (values: LispVal list) (tail: LispVal) = List.foldBack cons values tail
+
+    let ofListImmutable (values: LispVal list) = List.foldBack consImmutable values Nil
+
+    let ofDottedImmutable (values: LispVal list) (tail: LispVal) =
         List.foldBack consImmutable values tail
-
-    /// A bound on how far the list patterns walk. Nothing builds a cycle yet, but the
-    /// patterns answer "is this a proper list of the shape I expect", and once
-    /// `encycle!` exists (phase 5) the honest answer for a cyclic argument is no
-    /// rather than a hang.
-    let private chainLimit = 10_000_000
 
     /// Matches a proper list -- a chain of pairs ending at Nil -- and yields its
     /// elements. `Nil` matches as the empty list, so `| List [] ->` still reads the
     /// empty list and `| List (x :: rest) ->` still destructures a non-empty one.
+    ///
+    /// A cyclic argument is not a proper list, and saying so has to be cheap and
+    /// certain now that `set-cdr!` can build one: a second pointer advancing at half
+    /// speed meets the first inside any cycle, so the walk ends without a step limit to
+    /// tune and without allocating anything to remember where it has been.
     let (|List|_|) (value: LispVal) : LispVal list option =
+        let mutable slow = value
         let mutable current = value
         let mutable acc = []
         let mutable steps = 0
@@ -340,16 +374,23 @@ module Ast =
             | Nil ->
                 result <- Some(List.rev acc)
                 walking <- false
-            | Pair cell when steps < chainLimit ->
+            | Pair cell ->
                 acc <- cell.car :: acc
                 current <- cell.cdr
                 steps <- steps + 1
+                if steps % 2 = 0 then
+                    match slow with
+                    | Pair slowCell -> slow <- slowCell.cdr
+                    | _ -> ()
+                    if obj.ReferenceEquals(slow, current) then walking <- false
             | _ -> walking <- false
         result
 
     /// Matches an improper list: at least one pair, ending at something other than
-    /// Nil. Yields the elements before the tail, and the tail.
+    /// Nil. Yields the elements before the tail, and the tail. Cyclic arguments end the
+    /// walk the same way, and match neither this nor `List`.
     let (|DottedList|_|) (value: LispVal) : (LispVal list * LispVal) option =
+        let mutable slow = value
         let mutable current = value
         let mutable acc = []
         let mutable steps = 0
@@ -357,16 +398,19 @@ module Ast =
         let mutable walking = true
         while walking do
             match current with
-            | Pair cell when steps < chainLimit ->
+            | Pair cell ->
                 acc <- cell.car :: acc
                 current <- cell.cdr
                 steps <- steps + 1
+                if steps % 2 = 0 then
+                    match slow with
+                    | Pair slowCell -> slow <- slowCell.cdr
+                    | _ -> ()
+                    if obj.ReferenceEquals(slow, current) then walking <- false
             | Nil -> walking <- false
             | tail ->
-                if List.isEmpty acc then walking <- false
-                else
-                    result <- Some(List.rev acc, tail)
-                    walking <- false
+                if not (List.isEmpty acc) then result <- Some(List.rev acc, tail)
+                walking <- false
         result
 
     let makeObj = (fun x -> x :> obj  |> Obj)

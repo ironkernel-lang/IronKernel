@@ -71,7 +71,7 @@
             | badArgList -> fail (NumArgs(1,badArgList))
 
         let cons env cont = function
-            | [x; y] -> bounceContinue env cont (consImmutable x y)
+            | [x; y] -> bounceContinue env cont (cons x y)
             | badArgList -> fail (NumArgs(2,badArgList))
 
         /// R-1RK 4.2.1 and 4.3.1. One walk serves both predicates; `pairsByIdentity`
@@ -90,6 +90,9 @@
         let private compareValues pairsByIdentity left right =
             let pending = System.Collections.Generic.Stack<LispVal * LispVal>()
             pending.Push(left, right)
+            let visited =
+                System.Collections.Generic.HashSet<struct (PairCell * PairCell)>(
+                    HashIdentity.Structural)
             let mutable equal = true
 
             let pushLists leftValues rightValues =
@@ -123,6 +126,12 @@
                         // Reference-equal cells were settled above; distinct cells are
                         // distinct pairs however alike they look.
                         equal <- false
+                    // A pair of cells already under comparison is assumed equal. That is
+                    // what makes equal? terminate on cyclic structure, which R-1RK 4.3.1
+                    // requires and set-cdr! now makes reachable: if following the cycle
+                    // round ever disagreed, the disagreement is found before the cells
+                    // recur. eq? cannot loop, because it never descends into a pair.
+                    elif not (visited.Add(struct (left, right))) then ()
                     else
                         pending.Push(left.cdr, right.cdr)
                         pending.Push(left.car, right.car)
@@ -130,6 +139,26 @@
                 | _ -> equal <- false
 
             equal
+
+        /// R-1RK 4.7.1. The result is inert, and 3.8 requires an error when the pair is
+        /// immutable -- which is what protects a captured algorithm from being rewritten
+        /// under the combiner that captured it.
+        let private setPairPart name assign env cont args =
+            match args with
+            | [Pair cell; object'] ->
+                if cell.immutable then
+                    fail (Default(name + ": pair is immutable"))
+                else
+                    assign cell object'
+                    bounceContinue env cont Inert
+            | [found; _] -> fail (TypeMismatch("pair", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let setCar env cont args =
+            setPairPart "set-car!" (fun cell value -> cell.car <- value) env cont args
+
+        let setCdr env cont args =
+            setPairPart "set-cdr!" (fun cell value -> cell.cdr <- value) env cont args
 
         let private eqvValue left right = compareValues false left right
 
@@ -1366,6 +1395,16 @@
             | [object'] -> bounceContinue env cont (acquireImmutable object')
             | _ -> fail (NumArgs(1, args))
 
+        /// R-1RK 4.6: whether a pair may be mutated. Not a report feature -- it has no
+        /// predicate for this -- but the distinction is now observable through
+        /// set-car!, and a test can ask about it directly rather than by catching an
+        /// error.
+        let isImmutablePair env cont args =
+            match args with
+            | [Pair cell] -> bounceContinue env cont (Bool cell.immutable)
+            | [_] -> bounceContinue env cont (Bool false)
+            | _ -> fail (NumArgs(1, args))
+
         /// R-1RK 7.2.1: the primitive type predicate for type continuation.
         let isContinuation env cont args =
             typePredicate (function Continuation _ -> true | _ -> false) env cont args
@@ -1957,6 +1996,9 @@
                   ("extend-continuation", extendContinuation);
                   ("continuation?", isContinuation);
                   ("copy-es-immutable", copyEsImmutable);
+                  ("set-car!", setCar);
+                  ("set-cdr!", setCdr);
+                  ("immutable-pair?", isImmutablePair);
                   ("guard-continuation", guardContinuation);
                   ("guard-dynamic-extent", guardDynamicExtent);
                   ("+", plus);
