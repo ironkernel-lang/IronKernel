@@ -101,9 +101,8 @@ let ``type predicates cover the report's types`` () =
 
 [<Fact>]
 let ``get-list-metrics reports the shape of an improper list`` () =
-    // R-1RK 5.7.1 returns (pairs nils acyclic-prefix cycle-length). IronKernel's
-    // pairs are immutable and the optional Pair mutation module is unimplemented, so
-    // no cycle can be built: the cycle length is always zero.
+    // R-1RK 5.7.1 returns (pairs nils acyclic-prefix cycle-length). The cyclic cases
+    // live in PairMutationTests, beside the mutation that can build one.
     [
         "(equal? (get-list-metrics (list 1 2 3)) (list 3 1 3 0))", Bool true
         "(equal? (get-list-metrics ()) (list 0 1 0 0))", Bool true

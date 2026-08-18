@@ -1385,11 +1385,11 @@
             typePredicate (function Inert -> true | _ -> false) env cont args
 
         /// R-1RK 4.7.2. The result must have an immutable evaluation structure and be
-        /// initially equal? to the argument. Every IronKernel pair is already immutable,
-        /// and the report is explicit that in that case the result "may or may not be
-        /// eq? to object at the discretion of the implementation" -- so returning the
-        /// argument satisfies it exactly rather than approximately. Contrast copy-es
-        /// (6.4.2), which the report requires to return a *fresh* pair.
+        /// initially equal? to the argument. A mutable argument is therefore copied --
+        /// "if object is a mutable pair, then the result is not eq? to object" -- while
+        /// one that is already immutable may come back as itself, which the report
+        /// permits and `acquireImmutable` does. Contrast copy-es (6.4.2), which must
+        /// return a fresh pair either way.
         let copyEsImmutable env cont args =
             match args with
             | [object'] -> bounceContinue env cont (acquireImmutable object')
@@ -1428,12 +1428,6 @@
         let isCombiner env cont args =
             typePredicate (fun v -> isApplicativeValue v || isOperativeValue v) env cont args
 
-        /// R-1RK 5.7.1. Returns (p n a c): pairs, nils, acyclic prefix length and cycle
-        /// length of the improper list starting at the argument.
-        ///
-        /// IronKernel's pairs are immutable and it does not implement the optional Pair
-        /// mutation module, so no cyclic structure can be built and c is always zero
-        /// and a always equals p. The shape of the answer is still the report's.
         /// R-1RK 5.7.1. Returns `(p n a c)`: the number of pairs, the number of nils
         /// (0 or 1), the acyclic prefix length, and the cycle length of the improper
         /// list starting at the argument. `a + c = p`, and `n` and `c` are never both

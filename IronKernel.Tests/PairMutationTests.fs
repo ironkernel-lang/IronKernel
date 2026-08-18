@@ -44,9 +44,8 @@ let ``copy-es copies the evaluation structure and leaves non-pairs alone`` () =
 
 [<Fact>]
 let ``copy-es-immutable returns something equal? with an immutable structure`` () =
-    // R-1RK 4.7.2. Every IronKernel pair is already immutable, and the report allows
-    // the result to be eq? to the argument in exactly that case, so returning the
-    // argument satisfies the entry rather than approximating it.
+    // R-1RK 4.7.2. A mutable argument is copied, and one that is already immutable may
+    // come back as itself, which the report permits and this does.
     [
         "(=? (copy-es-immutable 5) 5)", Bool true
         "(define nested (list (list 1 2) 3))", Inert
