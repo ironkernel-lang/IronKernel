@@ -185,8 +185,15 @@ keeps the tail context it used to inherit from the lambda. Both have tests, and 
 tail-context test was validated against a negative control the same way sequencing's
 was: 23 against 2003.
 
-**The residual is larger than either change.** 47,260 body compilations remain in one
-run, and `let` accounted for only 90,583 of the original 339,599 dispatches' worth.
+**The residual, and a correction.** 47,260 body compilations remain in one run, and
+`let` accounted for only 90,583 of the original 339,599 dispatches' worth.
+
+> The explanation above leads with the recompilation `let` caused, and
+> [ADR 0008](0008-caching-compiled-bodies.md) measured how much that was worth: time
+> spent compiling fell from 415 ms to 57 ms, which is 358 ms of the 6,680 ms
+> improvement, about 5%. The recompilation was real and is the reason the counter
+> moved, but the cost was the operative construction, the `map`/`cons` traffic and
+> the `eval` -- not the compiler. The count was the symptom, not the bill.
 The rest come from other operatives built and applied once -- a `lambda` literal
 inside a loop is the obvious case. The general fix is to memoise compilation across
 operatives sharing a body, since the body `LispVal` is the same object every time the
