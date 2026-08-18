@@ -10,24 +10,11 @@
 ; If ⟨objects⟩ is a nonempty finite list, its last element is evaluated as a tail context. If ⟨objects⟩ is the empty list, the result is inert.
 ; Known in other schemes as `begin` or `block`.
 
-(define sequence
-  ((wrap
-     (vau (seq2) _
-          (seq2
-            (define aux
-              (vau (head & tail) env
-                   (if (null? tail)
-                     (eval head env)
-                     (seq2
-                       (eval head env)
-                       (eval (cons aux tail) env)))))
-            (vau body env
-                 (if (null? body)
-                   #inert
-                   (eval (cons aux body) env))))))
-   (vau (first second) env
-        ((wrap (vau _ _ (eval second env)))
-         (eval first env)))))
+; Primitive since ADR 0007, not derived. The report's derivation -- kept as a test
+; in StdlibTests rather than as the implementation -- costs a `null?`, two `eval`s
+; and a `cons` per element, and a dispatch census put sequencing at 84% of all
+; derived-operative dispatches. 1.3.2 permits this: "the derivation code is not
+; considered part of the definition of the feature".
 
 ; (list . objects)
 ; The list applicative returns objects.

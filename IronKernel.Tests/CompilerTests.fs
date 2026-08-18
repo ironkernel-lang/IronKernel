@@ -754,3 +754,30 @@ let ``operative bodies are compiled on first application`` () =
         let compiled = (operativeOf "twice").compiledBody
         assertEval env "(twice 1)" (Obj (2 :> obj))
         Assert.Same(Option.get compiled, Option.get (operativeOf "twice").compiledBody))
+
+[<Fact>]
+let ``the last form of a compiled sequence is a tail context`` () =
+    // R-1RK 5.1.1 requires the last element of $sequence to be evaluated as a tail
+    // context. The derivation got that from `aux`'s structure; the primitive and the
+    // `CSeq` lowering (ADR 0007) each have to preserve it deliberately, and the
+    // trampoline hides a mistake -- the answer is still right and the CLR stack still
+    // flat, so only the continuation captured at the deepest point shows the leak.
+    withKernel (fun env ->
+        ignore (evalIn env "(define captured (vector 0))")
+        defineCompiledProcedure
+            env
+            "countdown"
+            "(n)"
+            [ "(if (eqv? n 0)
+                   (sequence 1 (vector-set! captured 0 (call/cc (lambda (k) k))))
+                   (sequence 1 (countdown (- n 1))))" ]
+
+        let depthAfter iterations =
+            ignore (evalIn env (sprintf "(countdown %d)" iterations))
+            match evalIn env "(vector-ref captured 0)" with
+            | Continuation _ as continuation -> continuationDepth continuation
+            | other -> failwithf "expected a captured continuation, got %A" other
+
+        let shallow = depthAfter 10
+        let deep = depthAfter 1000
+        Assert.Equal(shallow, deep))

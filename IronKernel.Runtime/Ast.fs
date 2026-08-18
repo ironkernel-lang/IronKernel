@@ -202,6 +202,7 @@ module Ast =
     and PrimitiveIdentity =
         | PrimitiveIf
         | PrimitiveDefine
+        | PrimitiveSequence
     and PrimitiveOperativeRecord = {
         identity : PrimitiveIdentity option
         invoke : LispVal -> LispVal -> LispVal list -> Step

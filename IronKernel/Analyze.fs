@@ -27,12 +27,14 @@ module Analyze =
         | AnalyzeGuardedForm of LispVal
         | BuildGuardedIf of BindingGuard * CoreExpr
         | BuildGuardedDefine of BindingGuard * string * CoreExpr
+        | BuildGuardedSequence of BindingGuard * int * CoreExpr
         | BuildGuardedOperate of LispVal list
 
     type private LocatedAnalysisWork =
         | AnalyzeLocated of Source.LocatedValue
         | BuildLocatedIf of SourceSpan * string option * BindingGuard * CoreExpr
         | BuildLocatedDefine of SourceSpan * string option * BindingGuard * string * CoreExpr
+        | BuildLocatedSequence of SourceSpan * string option * BindingGuard * int * CoreExpr
         | BuildLocatedOperate of SourceSpan * string option * LispVal list
 
     let analyze (value: LispVal) : CoreExpr =
@@ -142,6 +144,19 @@ module Analyze =
                             :: BuildGuardedDefine(guard, name, fallback)
                             :: pending
                     | None -> completed <- fallback :: completed
+                  // R-1RK 5.1.1, primitive since ADR 0007. Lowering it compiles the
+                  // elements instead of handing them to the runtime as raw syntax,
+                  // which is the same reason `if` is lowered. `CSeq` gives the last
+                  // element the caller's own continuation, so the tail context 5.1.1
+                  // requires survives compilation.
+                  | (Atom ("sequence" | "$sequence" as name) :: forms) ->
+                    let fallback = COperate(CVar name, forms)
+                    match tryCreateBindingGuard env name PrimitiveSequence with
+                    | Some guard ->
+                        pending <-
+                            (forms |> List.map AnalyzeGuardedForm)
+                            @ (BuildGuardedSequence(guard, List.length forms, fallback) :: pending)
+                    | None -> completed <- fallback :: completed
                   | Atom name :: operands ->
                     // Prefer a real binding over CLR call sugar (same rule as Eval).
                     match getVar' env name with
@@ -166,6 +181,8 @@ module Analyze =
                 | [rhs] ->
                     completed <- CGuarded(guard, CDefine(CVar name, rhs), fallback) :: completed
                 | _ -> invalidOp "Guarded definition analysis is incomplete"
+            | BuildGuardedSequence (guard, count, fallback) ->
+                completed <- CGuarded(guard, CSeq(takeCompleted count), fallback) :: completed
             | BuildGuardedOperate operands ->
                 match takeCompleted 1 with
                 | [operator] -> completed <- COperate(operator, operands) :: completed
@@ -233,6 +250,12 @@ module Analyze =
                             AnalyzeLocated rhs
                             :: BuildLocatedDefine(located.span, sourceLine, guard, name, fallback)
                             :: pending
+                    | Source.LList (_ :: forms), CGuarded (guard, CSeq _, fallback) ->
+                        pending <-
+                            (forms |> List.map AnalyzeLocated)
+                            @ (BuildLocatedSequence(
+                                located.span, sourceLine, guard, List.length forms, fallback)
+                               :: pending)
                     | Source.LList (operator :: operands), COperate (_, rawOperands) ->
                         let isClrSugar =
                             match operator.kind with
@@ -265,6 +288,10 @@ module Analyze =
                         CLocated(span, sourceLine, CGuarded(guard, CDefine(CVar name, rhs), fallback))
                         :: completed
                 | _ -> invalidOp "Located definition analysis is incomplete"
+            | BuildLocatedSequence (span, sourceLine, guard, count, fallback) ->
+                completed <-
+                    CLocated(span, sourceLine, CGuarded(guard, CSeq(takeCompleted count), fallback))
+                    :: completed
             | BuildLocatedOperate (span, sourceLine, operands) ->
                 match takeCompleted 1 with
                 | [operator] ->
@@ -327,6 +354,8 @@ module Analyze =
                     completed <- ofList (Atom "if" :: operands) :: completed
                 | CIntrinsicOperate(PrimitiveDefine, operands) ->
                     completed <- ofList (Atom "define" :: operands) :: completed
+                | CIntrinsicOperate(PrimitiveSequence, operands) ->
+                    completed <- ofList (Atom "sequence" :: operands) :: completed
                 | CGuarded(_, _, fallback)
                 | CContractFold(_, _, fallback) ->
                     pending <- Reify fallback :: pending
