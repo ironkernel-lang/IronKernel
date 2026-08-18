@@ -247,24 +247,211 @@
             | [found] -> throwError(TypeMismatch("string", found))
             | bad -> throwError(NumArgs(1, bad))
 
-        let writeProc = function
-                | [ob] -> Console.Out.Write(showVal ob);returnM (Bool true)
-                | [ob; Port port] ->
-                    guardIO "write" (fun () ->
-                        use writer = new StreamWriter(port)
-                        writer.Write(showVal ob)
-                        returnM (Bool true))
-                | bad -> throwError (NumArgs(1, bad))
+        /// R-1RK 15.1.4. The current ports are keyed dynamic variables (chapter 10),
+        /// which is what makes `with-input-from-file` scope its port to a dynamic
+        /// extent, and they default to the standard input and output.
+        ///
+        /// The console ports are compared by identity where it matters: writing to one
+        /// goes through `Console.Out` rather than the raw stream, so that a host which
+        /// has redirected it -- as the example tests do -- still sees the output.
+        let private currentInputKey () = Guid "0f4a7c31-9b28-4d55-a7e6-1c83b5920af4"
+        let private currentOutputKey () = Guid "6d1e93b7-42fa-4c08-93b1-8ae7d0641c25"
 
-        let readProc port =
-               let parseReader (reader:TextReader) =
-                   match requireSourceServices () with
-                   | Choice1Of2 error -> throwError error
-                   | Choice2Of2 services -> reader.ReadLine() |> services.parseExpression
-               match port with
-                | [Port p] -> guardIO "read" (fun () -> use s = new StreamReader(p) in parseReader s)
-                | [] -> parseReader Console.In
-                | bad -> throwError (NumArgs(1, bad))
+        let private consoleInput = lazy (Port(Console.OpenStandardInput()))
+        let private consoleOutput = lazy (Port(Console.OpenStandardOutput()))
+
+        let private isConsole (candidate: LispVal) (which: Lazy<LispVal>) =
+            obj.ReferenceEquals(candidate, which.Force())
+
+        let private currentPort key (fallback: Lazy<LispVal>) cont =
+            match findDynamicBinding (key ()) cont with
+            | Some (Port _ as port) -> port
+            | _ -> fallback.Force()
+
+        let private currentInput cont = currentPort currentInputKey consoleInput cont
+        let private currentOutput cont = currentPort currentOutputKey consoleOutput cont
+
+        /// R-1RK 15.1.1 and 15.1.2. `port?` is the primitive type predicate; the other
+        /// two return false for a non-port rather than signalling, and "every port must
+        /// be admitted by at least one of these two".
+        // Spelled out rather than routed through `typePredicate`, which is defined
+        // further down the file than the ports are.
+        let private portPredicate test env cont args =
+            let rec loop = function
+                | [] -> bounceContinue env cont (Bool true)
+                | value :: rest ->
+                    if test value then loop rest else bounceContinue env cont (Bool false)
+            loop args
+
+        let isPort env cont args =
+            portPredicate (function Port _ -> true | _ -> false) env cont args
+
+        let isInputPort env cont args =
+            portPredicate (function Port stream -> stream.CanRead | _ -> false) env cont args
+
+        let isOutputPort env cont args =
+            portPredicate (function Port stream -> stream.CanWrite | _ -> false) env cont args
+
+        /// R-1RK 15.1.6. Closing is not mutation (see the chapter's preamble: a port's
+        /// state is administrative), and the result is inert.
+        let private closeFile name wanted env cont args =
+            match args with
+            | [Port stream as port] ->
+                if not (wanted stream) then fail (TypeMismatch(name + " port", port))
+                else
+                    try stream.Close() with _ -> ()
+                    bounceContinue env cont Inert
+            | [found] -> fail (TypeMismatch("port", found))
+            | _ -> fail (NumArgs(1, args))
+
+        let closeInputFile env cont args =
+            closeFile "input" (fun (s: IO.Stream) -> s.CanRead) env cont args
+
+        let closeOutputFile env cont args =
+            closeFile "output" (fun (s: IO.Stream) -> s.CanWrite) env cont args
+
+        let getCurrentInputPort env cont args =
+            match args with
+            | [] -> bounceContinue env cont (currentInput cont)
+            | _ -> fail (NumArgs(0, args))
+
+        let getCurrentOutputPort env cont args =
+            match args with
+            | [] -> bounceContinue env cont (currentOutput cont)
+            | _ -> fail (NumArgs(0, args))
+
+        let private openFile name access filename =
+            try Choice2Of2(Port(IO.File.Open(filename, IO.FileMode.OpenOrCreate, access)))
+            with ex -> Choice1Of2(Default(name + ": " + ex.Message))
+
+        /// R-1RK 15.1.3. "The opened port is accessed implicitly within the dynamic
+        /// extent of the call, and is automatically closed on normal return" -- so the
+        /// port is bound as a keyed dynamic variable and the combiner is called with no
+        /// operands, and a continuation after the call closes it.
+        ///
+        /// A non-local exit leaves the port open. The report's own preamble offers this
+        /// form as the safest of the three precisely because a *normal* return closes
+        /// it; closing on an abnormal one would need an exit guard (7.2.4), and is
+        /// recorded as a divergence rather than assumed.
+        let private withPortFromFile name access key env cont args =
+            match args with
+            | [Obj filename; combiner] when (filename :? string) ->
+                match openFile name access (filename :?> string) with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 (Port stream as port) ->
+                    let closeAfter _ c value _ =
+                        try stream.Close() with _ -> ()
+                        More(fun () -> continueEvalStep env c value)
+                    let afterCall = makeCPS env cont closeAfter
+                    let isolated = newEnvWithClr (ofEnvironment env) [] []
+                    bounceOperate
+                        isolated
+                        (makeDynamicBinding env afterCall (key ()) port)
+                        combiner
+                        []
+                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
+            | [found; _] -> fail (TypeMismatch("string", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let withInputFromFile env cont args =
+            withPortFromFile "with-input-from-file" IO.FileAccess.Read currentInputKey env cont args
+
+        let withOutputToFile env cont args =
+            withPortFromFile "with-output-to-file" IO.FileAccess.Write currentOutputKey env cont args
+
+        /// R-1RK 15.2.1. Like the above, but the port is handed to the combiner as an
+        /// operand rather than bound implicitly, and is likewise closed on return.
+        let private callWithFile name access env cont args =
+            match args with
+            | [Obj filename; combiner] when (filename :? string) ->
+                match openFile name access (filename :?> string) with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 (Port stream as port) ->
+                    let closeAfter _ c value _ =
+                        try stream.Close() with _ -> ()
+                        More(fun () -> continueEvalStep env c value)
+                    bounceOperate env (makeCPS env cont closeAfter) combiner [port]
+                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
+            | [found; _] -> fail (TypeMismatch("string", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let callWithInputFile env cont args =
+            callWithFile "call-with-input-file" IO.FileAccess.Read env cont args
+
+        let callWithOutputFile env cont args =
+            callWithFile "call-with-output-file" IO.FileAccess.Write env cont args
+
+        /// R-1RK 15.1.8. With no port the current output port is used, which is what
+        /// gives `with-output-to-file` its effect: the chapter's preamble has that form
+        /// accessed "implicitly", meaning through this default.
+        ///
+        /// Writing to the console port goes through `Console.Out` rather than the raw
+        /// standard-output stream, so that a host which has redirected it still sees
+        /// the output. The stream is not disposed after writing -- a port outlives one
+        /// write, and closing it is 15.1.6's job.
+        let private writeTo (port: LispVal) (value: LispVal) =
+            if isConsole port consoleOutput then
+                Console.Out.Write(showVal value)
+                returnM (Bool true)
+            else
+                match port with
+                | Port stream ->
+                    guardIO "write" (fun () ->
+                        // leaveOpen: disposing the writer must not close the port --
+                        // 15.1.6 is what closes it. Leaving the writer *undisposed*
+                        // instead is worse than it looks: its finalizer flushes, and a
+                        // flush to an already closed stream throws on the finalizer
+                        // thread, which aborts the process.
+                        use writer = new StreamWriter(stream, Text.Encoding.UTF8, 1024, true)
+                        writer.Write(showVal value)
+                        returnM (Bool true))
+                | found -> throwError (TypeMismatch("port", found))
+
+        let writeValue env cont args =
+            let finish result =
+                match result with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 value -> bounceContinue env cont value
+            match args with
+            | [value] -> finish (writeTo (currentOutput cont) value)
+            | [value; (Port _ as port)] -> finish (writeTo port value)
+            | [_; found] -> fail (TypeMismatch("port", found))
+            | _ -> fail (NumArgs(1, args))
+
+        /// R-1RK 15.1.7, and the counterpart of write: with no port the current input
+        /// port is read, which is how `with-input-from-file` takes effect.
+        let private readFrom (port: LispVal) =
+            let parseReader (reader: TextReader) =
+                match requireSourceServices () with
+                | Choice1Of2 error -> throwError error
+                | Choice2Of2 services ->
+                    // ReadLine returns null at end of input, and the parser dereferences
+                    // what it is given. IronKernel has no end-of-file object to return
+                    // instead, so this signals; before, a read past the end of a port
+                    // reached the parser as a null string and faulted the process.
+                    match reader.ReadLine() with
+                    | null -> throwError (Default "read: end of input")
+                    | line -> services.parseExpression line
+            if isConsole port consoleInput then parseReader Console.In
+            else
+                match port with
+                | Port stream ->
+                    guardIO "read" (fun () ->
+                        // leaveOpen, as for write: closing the port is 15.1.6's job.
+                        use reader = new StreamReader(stream, Text.Encoding.UTF8, true, 1024, true)
+                        parseReader reader)
+                | found -> throwError (TypeMismatch("port", found))
+
+        let readValue env cont args =
+            let finish result =
+                match result with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 value -> bounceContinue env cont value
+            match args with
+            | [] -> finish (readFrom (currentInput cont))
+            | [Port _ as port] -> finish (readFrom port)
+            | [found] -> fail (TypeMismatch("port", found))
+            | _ -> fail (NumArgs(0, args))
           
         let ioPrimitives : (string * (LispVal list -> ThrowsError<LispVal>)) list =
             [
@@ -272,8 +459,6 @@
                     ("open-output-file", makePort FileAccess.Write);
                     ("close-input-port", closePort);
                     ("close-output-port", closePort);
-                    ("read", readProc);
-                    ("write", writeProc);
                     ("read-contents", readContents);
                     ("read-all", readAll) ]
 
@@ -2051,6 +2236,19 @@
                   ("extend-continuation", extendContinuation);
                   ("continuation?", isContinuation);
                   ("copy-es-immutable", copyEsImmutable);
+                  ("port?", isPort);
+                  ("input-port?", isInputPort);
+                  ("output-port?", isOutputPort);
+                  ("close-input-file", closeInputFile);
+                  ("close-output-file", closeOutputFile);
+                  ("get-current-input-port", getCurrentInputPort);
+                  ("get-current-output-port", getCurrentOutputPort);
+                  ("with-input-from-file", withInputFromFile);
+                  ("with-output-to-file", withOutputToFile);
+                  ("call-with-input-file", callWithInputFile);
+                  ("call-with-output-file", callWithOutputFile);
+                  ("read", readValue);
+                  ("write", writeValue);
                   ("set-car!", setCar);
                   ("set-cdr!", setCdr);
                   ("immutable-pair?", isImmutablePair);
@@ -2221,7 +2419,13 @@
                 primitiveApplicatives
                 |> List.filter (fun (name, _) ->
                     (name <> "load" || Set.contains SourceLoading capabilities)
-                    && (not (Set.contains name (Set.ofList ["print"; "printf"; "show"]))
+                    && (not (Set.contains name
+                                (Set.ofList
+                                    [ "print"; "printf"; "show"; "read"; "write"
+                                      "close-input-file"; "close-output-file"
+                                      "get-current-input-port"; "get-current-output-port"
+                                      "with-input-from-file"; "with-output-to-file"
+                                      "call-with-input-file"; "call-with-output-file" ]))
                         || Set.contains HostIO capabilities)
                     && (not (Set.contains name asyncNames)
                         || Set.contains HostAsync capabilities)

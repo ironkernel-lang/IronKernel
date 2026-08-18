@@ -244,7 +244,9 @@ module Ast =
         | Operative of OperativeRecord
         | Applicative of LispVal
         | IOFunc of HostCapability * (LispVal list -> ThrowsError<LispVal>)
-        | Port of System.IO.FileStream
+        /// R-1RK 15. A stream rather than a FileStream, so that the standard input
+        /// and output can be ports too (15.1.4).
+        | Port of System.IO.Stream
         | Inert
         | Nil
         | Obj of obj
