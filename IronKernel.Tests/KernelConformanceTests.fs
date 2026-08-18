@@ -82,18 +82,38 @@ let private behaviouralChecks () : (string * string list) list = [
                "(eqv? (if #t 1 no-such-variable) 1)" ]
     "4.1.1", [ "(boolean? #t)"; "(boolean? #f)"; "(eqv? (boolean? 1) #f)"; "(boolean?)" ]
     "4.3.1", [ "(equal? (list 1 2) (list 1 2))"; "(eqv? (equal? 1 2) #f)"
-               "(equal? \"ab\" \"ab\")" ]
+               "(equal? \"ab\" \"ab\")"
+               // Weaker than eq?: true where eq? is false, and never the other way.
+               "(equal? (list 1) (list 1))"
+               // Reflexive on objects with no structural comparison of their own.
+               "(let ((v (vector 1 2))) (equal? v v))"
+               "(equal? car car)" ]
     "4.4.1", [ "(symbol? 'a)"; "(eqv? (symbol? 1) #f)"; "(symbol?)" ]
     "4.5.1", [ "(inert? #inert)"; "(eqv? (inert? 1) #f)"; "(inert?)" ]
     // 4.2.1 / 6.5.1: eq? is coarser here than the report's (see the divergence), so
     // these check what it does guarantee.
-    "4.2.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)"; "(eq? 1 1)" ]
+    "4.2.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)"; "(eq? 1 1)"
+               // "Two pairs returned by different calls to cons are not eq?, even if
+               // they have the same car and cdr" -- the distinction equal? does not
+               // make, and the reason eq? cannot be the structural comparison.
+               "(eqv? (eq? (list 1) (list 1)) #f)"
+               "(equal? (list 1) (list 1))"
+               // Reflexive, and the same pair reached two ways is the same pair.
+               "(let ((p (list 1 2))) (eq? p p))"
+               "(let ((p (list 1 2))) (eq? p (car (list p))))"
+               "(let ((p (list 1 2))) (eq? (cdr p) (cdr p)))"
+               // Environments have identity too, per the same section.
+               "(let ((e (make-environment))) (eq? e e))"
+               "(eqv? (eq? (make-environment) (make-environment)) #f)" ]
     "4.6.1", [ "(pair? (cons 1 2))"; "(eqv? (pair? ()) #f)" ]
     // 4.9.1: $define! binds in the current environment and returns inert.
     "4.7.2", [ "(=? (copy-es-immutable 5) 5)"
                "(equal? (copy-es-immutable (list (list 1 2) 3)) (list (list 1 2) 3))"
                "(pair? (copy-es-immutable (list 1 2)))" ]
     "6.4.2", [ "(=? (copy-es 5) 5)"
+               // "always returns a non-eq? pair when given a pair as argument"
+               "(let ((p (list 1 2))) (eqv? (eq? (copy-es p) p) #f))"
+               "(let ((p (list 1 2))) (equal? (copy-es p) p))"
                "(equal? (copy-es (list (list 1 2) 3)) (list (list 1 2) 3))"
                "(pair? (copy-es (list 1 2)))"
                // The structure is walked to the leaves, and the cdr of an improper
@@ -111,7 +131,10 @@ let private behaviouralChecks () : (string * string list) list = [
                "(eqv? (memq? 1 (list)) #f)" ]
     "4.9.1", [ "(let ((e (get-current-environment))) (sequence (eval (list $define! 'dz 11) e) (=? dz 11)))"
                "(inert? ($define! dy 1))" ]
-    "6.5.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)" ]
+    "6.5.1", [ "(eq? 'a 'a)"; "(eqv? (eq? 'a 'b) #f)"
+               // Generalized to zero or more arguments: true unless some two differ.
+               "(eq?)"; "(eq? 'a)"; "(eq? 'a 'a 'a)"
+               "(eqv? (eq? 'a 'a 'b) #f)" ]
     "6.7.6", [ // $letrec* binds sequentially, so a later binding sees an earlier one.
                "(=? (letrec* ((a 1) (b (+ a 1))) b) 2)" ]
     "6.7.7", [ "(=? (let-redirect (make-environment) ((x 5)) x) 5)"
@@ -152,7 +175,11 @@ let private behaviouralChecks () : (string * string list) list = [
     "6.3.10", [ "(=? (reduce (list 1 2 3 4) + 0) 10)"; "(=? (reduce () + 0) 0)"
                 "(=? (reduce (list 5) + 0) 5)" ]
     "6.6.1", [ "(equal? (list 1 (list 2)) (list 1 (list 2)))"
-               "(eqv? (equal? (list 1) (list 2)) #f)" ]
+               "(eqv? (equal? (list 1) (list 2)) #f)"
+               "(equal?)"; "(equal? 1)"; "(equal? 1 1 1)"
+               "(eqv? (equal? 1 1 2) #f)"
+               // 4.3.1: equal? must return true whenever eq? would.
+               "(let ((p (list 1))) (equal? p p))" ]
     "4.6.2", [ "(null? ())"; "(eqv? (null? (cons 1 2)) #f)" ]
     "4.6.3", [ "(eqv? (car (cons 1 2)) 1)"; "(eqv? (cdr (cons 1 2)) 2)" ]
     "4.8.1", [ "(environment? (get-current-environment))" ]
@@ -568,15 +595,12 @@ let private divergences () = [
            + "have no cell to write into and are absent. The four entries that need no "
            + "mutation are implemented. `copy-es-immutable` returns its argument, which "
            + "4.7.2 permits outright for an argument that is already an immutable pair; "
-           + "`copy-es` copies the structure, but the report's promise that the result "
-           + "is not `eq?` to a pair argument is unobservable here, since `eq?` compares "
-           + "structurally (see 4.2.1). Supporting the module fully means replacing the "
+           + "`copy-es` copies the structure, and its result is not `eq?` to a pair "
+           + "argument now that `eq?` compares pairs by identity. Supporting the module "
+           + "fully means replacing the "
            + "list representation with mutable cons cells and making every traversal "
            + "cycle-safe, including `equal?`. That work is planned in "
            + "[ADR 0005](adr/0005-mutable-pairs.md)."
-    "4.2.1", "`eq?` is bound to the same structural comparison as `eqv?`, so it is "
-             + "coarser than the report's, which distinguishes objects that `equal?` "
-             + "does not."
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."

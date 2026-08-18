@@ -74,7 +74,20 @@
             | [x; y] -> bounceContinue env cont (consImmutable x y)
             | badArgList -> fail (NumArgs(2,badArgList))
 
-        let private eqvValue left right =
+        /// R-1RK 4.2.1 and 4.3.1. One walk serves both predicates; `pairsByIdentity`
+        /// is what separates them.
+        ///
+        /// `eq?` is "effectively the same object, even in the presence of mutation",
+        /// and the report is explicit that "two pairs returned by different calls to
+        /// cons are not eq?, even if they have the same car and cdr and the
+        /// implementation doesn't support pair mutation". So eq? compares pairs by
+        /// cell identity. `equal?` compares them structurally -- "look the same as
+        /// long as nothing is mutated" -- which is weaker, as 4.3.1 requires.
+        ///
+        /// Everything else is judged the same way by both. Two equal exact integers,
+        /// or two equal symbols, are interchangeable in every way a program can
+        /// observe, and the report leaves eq? on such objects to the implementation.
+        let private compareValues pairsByIdentity left right =
             let pending = System.Collections.Generic.Stack<LispVal * LispVal>()
             pending.Push(left, right)
             let mutable equal = true
@@ -91,6 +104,12 @@
 
             while equal && pending.Count > 0 do
                 match pending.Pop() with
+                // An object is the same object as itself, whatever its type. Without
+                // this an environment, a vector or a primitive combiner was not equal
+                // to itself, because the cases below cover only the types with a
+                // structural comparison and everything else fell through to false --
+                // which breaks the reflexivity 4.2.1 and 4.3.1 both require.
+                | first, second when obj.ReferenceEquals(first, second) -> ()
                 | Inert, Inert -> ()
                 | Obj arg1, Obj arg2 -> equal <- arg1.Equals(arg2)
                 | Bool arg1, Bool arg2 -> equal <- arg1 = arg2
@@ -100,21 +119,40 @@
                 // materialised both chains before comparing them and walked each value
                 // twice over -- once failing DottedList, once matching List.
                 | Pair left, Pair right ->
-                    pending.Push(left.cdr, right.cdr)
-                    pending.Push(left.car, right.car)
+                    if pairsByIdentity then
+                        // Reference-equal cells were settled above; distinct cells are
+                        // distinct pairs however alike they look.
+                        equal <- false
+                    else
+                        pending.Push(left.cdr, right.cdr)
+                        pending.Push(left.car, right.car)
                 | Nil, Nil -> ()
                 | _ -> equal <- false
 
             equal
 
+        let private eqvValue left right = compareValues false left right
+
+        let private eqValue left right = compareValues true left right
+
         let eqv' = function
             | [left; right] -> returnM (Bool(eqvValue left right))
             | badArgList -> throwError (NumArgs(2,badArgList))
 
-        let eqv env cont parms =
-            match eqv' parms with
-            | Choice1Of2 e -> fail e
-            | Choice2Of2 q -> bounceContinue env cont q
+        /// R-1RK 6.5.1 and 6.6.1 generalize both predicates to zero or more arguments:
+        /// true unless some two of the arguments differ. Comparing neighbours settles
+        /// that, because both relations are transitive (4.2.1 rule 1, 4.3.1 rule 1).
+        let private variadicEquivalence compare env cont args =
+            let rec loop = function
+                | first :: (second :: _ as rest) ->
+                    if compare first second then loop rest
+                    else bounceContinue env cont (Bool false)
+                | _ -> bounceContinue env cont (Bool true)
+            loop args
+
+        let eqv env cont args = variadicEquivalence eqvValue env cont args
+
+        let eq env cont args = variadicEquivalence eqValue env cont args
 
         open System.IO
 
@@ -1931,7 +1969,7 @@
                   ("car", car);
                   ("cdr", cdr);
                   ("cons", cons);
-                  ("eq?", eqv);
+                  ("eq?", eq);
                   ("equal?", eqv);
                   ("boolean?", isBoolean);
                   ("symbol?", isSymbol);

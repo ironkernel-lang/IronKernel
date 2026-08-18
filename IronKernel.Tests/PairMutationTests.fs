@@ -120,3 +120,85 @@ let ``the empty list has one spelling that a program can observe`` () =
         "(eqv? (pair? (#inert)) #f)", Bool true
         "(=? (length (#inert)) 0)", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``eq? distinguishes pairs that equal? does not`` () =
+    // R-1RK 4.2.1: eq? is "effectively the same object, even in the presence of
+    // mutation", and the report is explicit that "two pairs returned by different
+    // calls to cons are not eq?, even if they have the same car and cdr and the
+    // implementation doesn't support pair mutation". equal? is the weaker predicate
+    // (4.3.1) and still says they look alike.
+    [
+        "(eqv? (eq? (list 1) (list 1)) #f)", Bool true
+        "(eqv? (eq? (cons 1 2) (cons 1 2)) #f)", Bool true
+        "(equal? (list 1) (list 1))", Bool true
+        // The same pair, reached two different ways, is the same pair.
+        "(define p (list 1 2))", Inert
+        "(eq? p p)", Bool true
+        "(eq? p (car (list p)))", Bool true
+        // cdr shares the tail rather than copying it, so the tail is one object.
+        "(eq? (cdr p) (cdr p))", Bool true
+        "(eq? (car (cdr (list 0 p))) p)", Bool true
+        // Environments have identity for the same reason the report gives.
+        "(eqv? (eq? (make-environment) (make-environment)) #f)", Bool true
+        "(define e (make-environment))", Inert
+        "(eq? e e)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``both equivalence predicates are reflexive on every kind of object`` () =
+    // The structural walk covered only the types with a structural comparison and let
+    // everything else fall through to false, so an environment, a vector and even a
+    // primitive combiner were not equal to themselves. Reflexivity is rule 1 of both
+    // 4.2.1 and 4.3.1.
+    [
+        "(define e (get-current-environment))", Inert
+        "(define v (vector 1 2))", Inert
+        "(eq? e e)", Bool true
+        "(equal? e e)", Bool true
+        "(eq? v v)", Bool true
+        "(equal? v v)", Bool true
+        "(eq? car car)", Bool true
+        "(equal? car car)", Bool true
+        "(define f (lambda (x) x))", Inert
+        "(eq? f f)", Bool true
+        "(call/cc (lambda (k) (eq? k k)))", Bool true
+        // and on the values that already had a comparison
+        "(eq? 'a 'a)", Bool true
+        "(eq? 1 1)", Bool true
+        "(eq? () ())", Bool true
+        "(eq? #t #t)", Bool true
+        "(eq? #inert #inert)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``eq? and equal? take zero or more arguments`` () =
+    // R-1RK 6.5.1 and 6.6.1 generalize both to zero or more: true unless some two of
+    // the arguments differ. Both used to require exactly two.
+    [
+        "(eq?)", Bool true
+        "(eq? 'a)", Bool true
+        "(eq? 'a 'a 'a)", Bool true
+        "(eqv? (eq? 'a 'a 'b) #f)", Bool true
+        "(equal?)", Bool true
+        "(equal? 1)", Bool true
+        "(equal? (list 1) (list 1) (list 1))", Bool true
+        "(eqv? (equal? (list 1) (list 1) (list 2)) #f)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``copy-es returns a pair that is not eq? to its argument`` () =
+    // R-1RK 6.4.2 promises this outright. It was unobservable while eq? compared
+    // structurally, which is why the 4.7 divergence used to say so.
+    [
+        "(define p (list 1 (list 2)))", Inert
+        "(eqv? (eq? (copy-es p) p) #f)", Bool true
+        "(equal? (copy-es p) p)", Bool true
+        // The copy goes all the way down: the nested pair is fresh too.
+        "(eqv? (eq? (car (cdr (copy-es p))) (car (cdr p))) #f)", Bool true
+        // Non-pair referents come through as themselves (4.7.2's "corresponding
+        // non-pair referents being eq?").
+        "(eq? (car (copy-es (list 'a))) 'a)", Bool true
+        // copy-es-immutable may return its argument, and does.
+        "(eq? (copy-es-immutable p) p)", Bool true
+    ] |> evalSessionKernel

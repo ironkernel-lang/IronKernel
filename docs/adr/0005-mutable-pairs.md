@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Accepted — phases 0 and 1 done, phases 2-6 outstanding
+Status: Accepted — phases 0-2 done, phases 3-6 outstanding
 
 ## Decision
 
@@ -219,13 +219,32 @@ look if the interpreted path ever needs to be faster.
 
 The full suite is 114s against 107s on master, all 342 tests passing.
 
-**Phase 2 — `eq?` becomes identity.** With cells, two `equal?` lists can be
-different objects, which is the distinction 4.2.1 asks for and IronKernel has
-never been able to make. `eq?` moves to reference identity on pairs, keeping its
-current behaviour on atoms, numbers and the rest. This retires the 4.2.1
-divergence and changes `assq` and `memq?` (6.4.3, 6.4.4), which are `assoc` and
-`member?` over `eq?` — their tests currently pass *because* `eq?` is structural
-and will need revisiting deliberately.
+**Phase 2 — `eq?` becomes identity.** *Done.* `eq?` and `equal?` were both bound
+to the same structural walk; they now share one traversal that differs in a single
+respect — `eq?` compares pairs by cell identity, `equal?` compares them
+structurally. That is exactly what 4.2.1 asks for: "two pairs returned by
+different calls to cons are not eq?, even if they have the same car and cdr and
+the implementation doesn't support pair mutation". Environments were already
+distinguished the same way. The 4.2.1 divergence is retired.
+
+Two further bugs surfaced while splitting them, both in required entries and both
+of the same shape as the `Nil` one that preceded phase 1. The structural walk
+covered only the types with a structural comparison and let everything else fall
+through to *not equal*, so an environment, a vector, a primitive combiner and a
+continuation were **not equal to themselves** — reflexivity is rule 1 of both
+4.2.1 and 4.3.1. A reference-equality case ahead of the type-specific ones fixes
+all of them at once. And neither predicate was variadic, though 6.5.1 and 6.6.1
+generalize both to zero or more arguments.
+
+`copy-es`'s promise that its result is not `eq?` to a pair argument (6.4.2) became
+observable at this point, so the 4.7 divergence no longer has to record it as
+unobservable.
+
+The expected fallout did not materialise: `assq` and `memq?` are `assoc` and
+`member?` over `eq?`, and this plan expected their tests to need revisiting. They
+did not, because they are exercised with symbols and numbers, which remain `eq?`
+when equal. That is worth knowing rather than assuming — a program that used
+`memq?` over freshly built lists would now get a different answer.
 
 **Phase 3 — mutation.** `set-car!` and `set-cdr!` (4.7.1), signalling on an
 immutable pair. `copy-es` (6.4.2) becomes a real copy with an observably fresh
