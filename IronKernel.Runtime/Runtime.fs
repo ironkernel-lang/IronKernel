@@ -103,6 +103,9 @@
             | Obj arg1, Obj arg2 -> ValueSome(arg1.Equals(arg2))
             | Bool arg1, Bool arg2 -> ValueSome(arg1 = arg2)
             | Atom arg1, Atom arg2 -> ValueSome(arg1 = arg2)
+            // Keywords are pure names, like symbols: two spellings of :foo are
+            // interchangeable in every way a program can observe.
+            | Keyword arg1, Keyword arg2 -> ValueSome(arg1 = arg2)
             | PromptTag arg1, PromptTag arg2 -> ValueSome(arg1 = arg2)
             // Compared cell by cell rather than through the list patterns, which
             // materialised both chains before comparing them and walked each value

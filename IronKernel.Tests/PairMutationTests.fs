@@ -431,3 +431,16 @@ let ``append! rejects arguments it cannot mutate`` () =
         match evalIn env "(let ((p (list 1 2))) (encycle! p 0 2) (append! p (list 3)))" with
         | Status message -> Assert.Contains("acyclic", message)
         | value -> failwithf "a cyclic argument should signal an error, got %s" (showVal value))
+
+[<Fact>]
+let ``keywords compare by name under all equivalence predicates`` () =
+    // Keywords are pure names, like symbols: two spellings of :foo denote the
+    // same keyword. Without a Keyword case in compareStep they fell through to
+    // reference comparison and (eqv? :foo :foo) was #f.
+    [
+        "(eq? :foo :foo)", Bool true
+        "(eqv? :foo :foo)", Bool true
+        "(equal? :foo :foo)", Bool true
+        "(eqv? :foo :bar)", Bool false
+        "(equal? (cons :a (cons 1 ())) (cons :a (cons 1 ())))", Bool true
+    ] |> evalSession
