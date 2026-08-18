@@ -27,6 +27,15 @@ reals take the representation 12.2 sanctions directly — non-robust, bounded by
 infinities — and `with-strict-arithmetic` decides whether a result with no primary
 value signals or is returned.
 
+Pairs are mutable cons cells, so module **Pair mutation** (4.7, 5.8, 6.4) is
+complete: `set-car!`, `set-cdr!`, `encycle!` and `append!` all work, `eq?` is
+object identity, and the traversals that a cycle would otherwise trap — `equal?`,
+the reader's list patterns, `get-list-metrics`, `length` — measure a cycle instead
+of walking into one. `(length p)` of a cyclic list is `#e+infinity`. Mutability
+follows provenance: the reader produces immutable pairs, `cons` and `list`
+mutable ones, so a captured algorithm cannot be rewritten under the combiner that
+captured it. See [`ADR 0005`](docs/adr/0005-mutable-pairs.md).
+
 Chapter 7's continuations are complete, including the entry/exit guards: an
 abnormal pass selects interceptors by walking the source and destination
 continuation chains, and `dynamic-wind` is derivable from them exactly as the

@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Accepted — phases 0-5 done, phase 6 outstanding
+Status: Implemented
 
 ## Decision
 
@@ -320,9 +320,23 @@ The test that guarded the 4.7 divergence's "these are absent" claim has now
 asserted the opposite of what it started as, having forced a deliberate update in
 each of phases 3 and 5. That was the point of writing it.
 
-**Phase 6 — re-validate and record.** Benchmarks against the baseline, the CLR
-fault sweep extended with cyclic and mutation cases, the conformance matrix
-regenerated, and the 4.7 and 4.2.1 divergences removed.
+**Phase 6 — re-validate and record.** *Done.* Most of it happened in each phase
+rather than at the end: benchmarks were re-measured every time, the fault sweep
+grew mutation and cyclic cases as they became reachable, the matrix was
+regenerated, and the divergences were updated as they stopped being true. What was
+left for a final pass was finding the claims that had quietly gone stale — seven
+of them, in `kernel.ikr`, `Runtime.fs` and the tests, all asserting that pairs are
+immutable or that cycles cannot arise. One was a duplicated doc comment left
+sitting above the corrected one on `get-list-metrics`, saying the opposite of the
+code beneath it. `$list-shaped?` was dead once the shape predicates moved to the
+metrics, and is gone.
+
+The 4.2.1 divergence is retired, and 4.7 now records one condition rather than a
+missing half: 6.4.1 makes it an error for two arguments of `append!` to share a
+last pair, which is a condition on the caller and is not checked. A 6.3 divergence
+was added along the way, recording that the derivations that walk a list's
+elements diverge on a cyclic argument exactly as the report's own derivations of
+them do.
 
 ## Baseline to hold
 
@@ -345,19 +359,34 @@ will show it first.
 
 ## Consequences
 
-The change retires two divergences (4.7 and 4.2.1), completes an optional module,
-and makes two required entries — `equal?` and `get-list-metrics` — honest about
-cycles rather than correct only because cycles cannot occur.
+The change retired two divergences (4.2.1 and the missing half of 4.7), completed
+an optional module, and made `equal?` and `get-list-metrics` honest about cycles
+rather than correct only because cycles could not occur. It also found five bugs
+that had nothing to do with pairs and everything to do with the assumption the
+representation encouraged: the empty list had two spellings and only one was
+recognised, and `eq?`/`equal?` were not reflexive on environments, vectors,
+combiners or continuations. All were in required entries, and all were found by
+looking hard at a traversal rather than by a test failing.
 
-It also removes a simplifying assumption the codebase currently benefits from
-everywhere: that a value's structure is finite and cannot change while being
-walked. Every traversal added after this lands has to be written with that in
-mind, and the analyzer and compiler are protected only by phase 0's copying, not
-by the type system.
+It removes a simplifying assumption the codebase benefited from everywhere: that a
+value's structure is finite and cannot change while being walked. Every traversal
+added from here has to be written with that in mind. The rule the phases converged
+on is worth keeping: **anything asking about a cell matches `Pair` or `Nil`
+directly; only code that genuinely wants the elements uses the list pattern, and
+then once.** Ignoring it is what made the first cut of phase 1 several times
+slower.
 
-The phases are ordered so that each is independently reviewable and the suite
-stays green throughout. Phases 0 and 1 change no behaviour at all; phase 2 changes
-behaviour that is currently a recorded divergence; phases 3 to 5 add the module.
-If the work stops after any phase, the result is a consistent system rather than a
-half-migration — which is the main reason for doing it in this order rather than
-starting with the entries the module is named for.
+The final cost, against the baseline above:
+
+| Method | before | after | |
+|---|---:|---:|---|
+| ColdCompile | 105.4 ns / 592 B | ~150 ns / 808 B | +40% |
+| Interpreted | 371.1 ns / 1872 B | ~405 ns / 2024 B | +9% |
+| CompiledGeneric | 173.6 ns / 808 B | ~176 ns / 808 B | +1%, allocation identical |
+| CompiledFolded | 51.9 ns / 304 B | ~52 ns / 304 B | +1%, allocation identical |
+
+The steady-state compiled paths are where they were. The residue is paid turning a
+cons chain into an F# list for code that wants the elements — compiling a form, and
+evaluating one interpreted — and is the obvious lever if the interpreted path ever
+needs to be faster: rewrite the analyzer and evaluator against cells directly
+rather than through the list patterns.

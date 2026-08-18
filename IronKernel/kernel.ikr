@@ -522,9 +522,9 @@
                       (if (equal? object (car rest)) #t (aux (cdr rest)))))))
       (aux ls))))
 
-; --- R-1RK pair mutation features that do not mutate (6.4) -------------------
-; The Pair mutation module also has set-car!, set-cdr!, encycle! and append!,
-; which IronKernel's immutable pairs cannot support; these four need no mutation.
+; --- R-1RK module Pair mutation, the entries derived here (6.4) --------------
+; set-car! and set-cdr! are primitives; encycle! and append! are further down,
+; after the shape predicates they depend on.
 
 ; 6.4.3 / 6.4.4: assq and memq? are assoc and member? with eq? in place of
 ; equal?. IronKernel binds eq? to the same structural comparison as eqv?
@@ -548,14 +548,6 @@
 (define copy-es
   (lambda (x)
     (if (pair? x) (cons (copy-es (car x)) (copy-es (cdr x))) x)))
-
-; 6.3.8 / 6.3.9: with no cycles possible, a countable list is a finite list, and both
-; reduce to "the improper list starting here is terminated by nil".
-(define $list-shaped?
-  (lambda (xs)
-    (letrec ((aux (lambda (ys)
-                    (if (null? ys) #t (if (pair? ys) (aux (cdr ys)) #f)))))
-      (aux xs))))
 
 (define $every?
   (lambda (ok? xs)
@@ -632,8 +624,8 @@
         (aux (car lists) (cdr lists))))))
 
 ; 6.3.10: (reduce list binary identity). The report also gives a six-argument form
-; for cyclic lists; with no cycles to describe, the three-argument form is the whole
-; of it here.
+; that handles a cyclic list; only the three-argument form is implemented, so this
+; one walks its argument and diverges on a cycle. Recorded as a 6.3 divergence.
 (define reduce
   (lambda (ls binary identity)
     (letrec ((aux (lambda (rest acc)
