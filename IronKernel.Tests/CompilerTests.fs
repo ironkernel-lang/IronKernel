@@ -805,3 +805,24 @@ let ``the last form of a let body is a tail context`` () =
             | other -> failwithf "expected a captured continuation, got %A" other
 
         Assert.Equal(depthAfter 10, depthAfter 1000))
+
+[<Fact>]
+let ``analysis of a sugar-shaped name does not depend on the environment`` () =
+    // ADR 0008 step 2. "Prefer a real binding over CLR call sugar" is a question about
+    // the environment the code *runs* in, and the analyzer used to answer it from the
+    // environment it happened to compile against: the same source produced a plain
+    // combination where the name was bound and a desugared one where it was not.
+    // That is wrong if the two environments disagree, and it is the reason a compiled
+    // body cannot be reused across closures. Both now analyse identically, and
+    // `operateNamed` decides at run time.
+    let bound = freshEnv ()
+    // freshEnv is primitives only, so bind something that needs no library.
+    ignore (evalIn bound "(define a/b 5)")
+    let unbound = freshEnv ()
+    Assert.True((getVar' bound "a/b").IsSome)
+    Assert.True((getVar' unbound "a/b").IsNone)
+
+    let core env = showCore (analyzeGuarded env (parseOk "(a/b 1)"))
+    Assert.Equal(core bound, core unbound)
+    // And it is the plain combination, not the desugared shape, in both.
+    Assert.Contains("var:a/b", core unbound)

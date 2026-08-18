@@ -158,13 +158,13 @@ module Analyze =
                             @ (BuildGuardedSequence(guard, List.length forms, fallback) :: pending)
                     | None -> completed <- fallback :: completed
                   | Atom name :: operands ->
-                    // Prefer a real binding over CLR call sugar (same rule as Eval).
-                    match getVar' env name with
-                    | Some _ -> completed <- COperate(CVar name, operands) :: completed
-                    | None ->
-                        match tryRewrite name operands with
-                        | Some rewritten -> pending <- AnalyzeGuardedForm rewritten :: pending
-                        | None -> completed <- COperate(CVar name, operands) :: completed
+                    // "Prefer a real binding over CLR call sugar" is a run-time
+                    // question, and since ADR 0008 step 2 it is answered at run time
+                    // by `operateNamed`. Deciding it here read the closure, which made
+                    // the compiled form depend on the environment it was compiled
+                    // against rather than the one it runs in -- wrong if the two
+                    // disagree, and the obstacle to reusing a compiled body at all.
+                    completed <- COperate(CVar name, operands) :: completed
                   | op :: operands ->
                     pending <- AnalyzeGuardedForm op :: BuildGuardedOperate operands :: pending
                   | [] -> completed <- analyze form :: completed
@@ -257,19 +257,15 @@ module Analyze =
                                 located.span, sourceLine, guard, List.length forms, fallback)
                                :: pending)
                     | Source.LList (operator :: operands), COperate (_, rawOperands) ->
-                        let isClrSugar =
-                            match operator.kind with
-                            | Source.LAtom name when getVar' env name |> Option.isNone ->
-                                tryRewrite name (List.map Source.toLispVal operands)
-                                |> Option.isSome
-                            | _ -> false
-                        if isClrSugar then
-                            completed <- CLocated(located.span, sourceLine, expression) :: completed
-                        else
-                            pending <-
-                                AnalyzeLocated operator
-                                :: BuildLocatedOperate(located.span, sourceLine, rawOperands)
-                                :: pending
+                        // The sugar test that used to sit here is gone with the one
+                        // above it: `analyzeGuarded` no longer returns a rewritten
+                        // form, so there is no desugared shape whose children would
+                        // not line up with the source.
+                        ignore operands
+                        pending <-
+                            AnalyzeLocated operator
+                            :: BuildLocatedOperate(located.span, sourceLine, rawOperands)
+                            :: pending
                     | _ -> completed <- CLocated(located.span, sourceLine, expression) :: completed
             | BuildLocatedIf (span, sourceLine, guard, fallback) ->
                 match takeCompleted 3 with

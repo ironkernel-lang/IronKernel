@@ -186,3 +186,33 @@ let ``clr-open denied without RawClrInterop`` () =
     | Choice1Of2 (UnboundVar _)
     | Choice1Of2 (CapabilityDenied _) -> ()
     | other -> failwithf "expected denial, got %A" other
+
+[<Fact>]
+let ``a binding wins over a CLR sugar name shape`` () =
+    // R-1RK has no syntactically privileged operator names, so a binding whose name
+    // happens to look like CLR sugar is still just a binding. Since ADR 0008 step 2
+    // the compiled path decides this the same way the interpreter always has, at the
+    // point of call, rather than when the form was analysed.
+    evalSessionKernel [
+        "(define a/b (lambda (x) (* x 10)))", Inert
+        "(a/b 4)", Obj 40
+        // Inside a procedure body, which is the compiled path.
+        "((lambda () (a/b 4)))", Obj 40
+        // A body that is applied more than once, so the second call goes through the
+        // call site's cache rather than a fresh resolution.
+        "(define twice (lambda () (+ (a/b 1) (a/b 2))))", Inert
+        "(twice)", Obj 30
+        "(twice)", Obj 30
+    ]
+
+[<Fact>]
+let ``CLR sugar still resolves when the name is unbound`` () =
+    // The other half: with no binding to prefer, the rewrite happens at the call.
+    evalSessionKernel [
+        "(=? (System.Math/Abs -3) 3)", Bool true
+        """(=? (.-Length "hello") 5)""", Bool true
+        // In a compiled body, and on a repeated call.
+        """(define len (lambda (s) (.-Length s)))""", Inert
+        """(=? (len "hello") 5)""", Bool true
+        """(=? (len "worlds") 6)""", Bool true
+    ]
