@@ -277,7 +277,7 @@ module Eval =
         | Atom id ->
             match getVar env id with
             | Choice2Of2 r -> More (fun () -> continueEvalStep env cont r)
-            | Choice1Of2 e -> fail e
+            | Choice1Of2 e -> signal cont e
         // One walk of the operand chain, not two. Matching `List (Atom name :: args)`
         // and then `List (op :: args)` materialised the operands twice for every
         // combination whose operator is not a symbol, and once for every one that is.
@@ -350,13 +350,13 @@ module Eval =
         | CompiledCombiner f -> f _env cont args
         | ContractedCombiner contracted ->
             match validateArguments contracted.contract args with
-            | Some error -> fail error
+            | Some error -> signal cont error
             | None when contracted.contract.result = AnyShape ->
                 More (fun () -> operateStep _env cont contracted.combiner args)
             | None ->
                 let validate e c value _ =
                     match validateResult contracted.contract value with
-                    | Some error -> fail error
+                    | Some error -> signal c error
                     | None -> More (fun () -> continueEvalStep e c value)
                 More (fun () ->
                     operateStep
@@ -369,7 +369,7 @@ module Eval =
                 signal cont (CapabilityDenied(sprintf "I/O requires %A" requiredCapability))
             else
                 match evalArgs _env (newContinuation _env) args with
-                | Choice1Of2 e -> fail e
+                | Choice1Of2 e -> signal cont e
                 // The result has to be handed to `cont`, not returned as `Done`.
                 // `Done` ends the trampoline, which was harmless while every combiner
                 // ran inside its own nested `run`, but since compiled code shares one
@@ -378,7 +378,7 @@ module Eval =
                 // whole form and the binding never happened.
                 | Choice2Of2 q ->
                     match f q with
-                    | Choice1Of2 error -> fail error
+                    | Choice1Of2 error -> signal cont error
                     | Choice2Of2 value -> More (fun () -> continueEvalStep _env cont value)
         | Applicative f -> evalArgsExStep _env cont args f
         | Continuation (cr, capturedPrompt, ct') ->
@@ -451,10 +451,10 @@ module Eval =
 
             let newEnv = newEnv [closure]
             match run (bindArgsStep newEnv (newContinuation _env) prms args) with
-            | Choice1Of2 error -> fail error
+            | Choice1Of2 error -> signal cont error
             | Choice2Of2 _ ->
                 match defineVar newEnv envarg _env with
-                | Choice1Of2 error -> fail error
+                | Choice1Of2 error -> signal cont error
                 | Choice2Of2 _ -> evalBody newEnv
         // The empty list is spelled `List []` everywhere a Kernel program can observe
         // it. Returning the bare `Nil` case here made a value that was neither `null?`
@@ -523,7 +523,7 @@ module Eval =
             | badForm -> bindingError <- Some(BadSpecialForm("invalid arguments", badForm))
 
         match bindingError with
-        | Some error -> fail error
+        | Some error -> signal cont error
         | None -> More(fun () -> continueEvalStep env cont Inert)
 
     and resumeEvaluatedStep env cont (resumption: ResumptionRecord) argument : Step =

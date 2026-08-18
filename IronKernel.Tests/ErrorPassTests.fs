@@ -104,3 +104,84 @@ let ``the error's diagnostic survives the pass`` () =
             | Status message -> message
             | value -> failwithf "the guarded form should signal, got %s" (showVal value)
         Assert.Equal(bare, guarded))
+
+[<Fact>]
+let ``errors that reach the guard are not limited to one kind`` () =
+    // Phase 2 routed `signal`, but 39 sites still converted a ThrowsError to a Step
+    // with `fail`, which consults no continuation -- so whether an error could be
+    // intercepted depended on which primitive raised it. A guard caught (car 5) and
+    // missed an unbound variable. These are the kinds that were escaping.
+    [
+        trying, Inert
+        // Symbol lookup: Eval's bare-Atom case, the one that surfaced the gap.
+        """(equal? (try (lambda () nope)) "caught")""", Bool true
+        """(equal? (try (lambda () (eval (quote nope) (get-current-environment)))) "caught")""", Bool true
+        // Arithmetic, through the numeric fold.
+        """(equal? (try (lambda () (/ 1 0))) "caught")""", Bool true
+        """(equal? (try (lambda () (+ 1 "x"))) "caught")""", Bool true
+        // Vectors, through the index check.
+        """(equal? (try (lambda () (vector-ref (vector 1 2) 9))) "caught")""", Bool true
+        // Applying a non-combiner, and the wrong operand count.
+        """(equal? (try (lambda () (car))) "caught")""", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``dynamic-wind cleans up after a failure`` () =
+    // R-1RK 7.2.5's derivation of dynamic-wind, unchanged from the version in
+    // ContinuationFeatureTests. What is new is the third case: before 7.2.7 routed
+    // through the guards, `after` ran on a normal return and on an abnormal pass but
+    // not when the body signalled -- which is most of what one wants dynamic-wind for.
+    [
+        "(define top (get-current-environment))", Inert
+        "(define trace (list))", Inert
+        "(define note (lambda (x) (set! top trace (cons x trace))))", Inert
+        """(define dynamic-wind
+              (lambda (before thunk after)
+                (guard-dynamic-extent
+                  (list (list root-continuation (lambda (value ignored) (before) value)))
+                  (lambda () (before) (let ((result (thunk))) (after) result))
+                  (list (list root-continuation (lambda (value ignored) (after) value))))))""", Inert
+        trying, Inert
+        """(equal?
+              (try (lambda ()
+                     (dynamic-wind (lambda () (note 1)) (lambda () (car 5)) (lambda () (note 2)))))
+              "caught")""", Bool true
+        // `before` and `after` each ran once, and `after` ran last -- on the way out
+        // of an extent left by signalling, not by returning or escaping.
+        "(=? (length trace) 2)", Bool true
+        "(=? (car trace) 2)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``the report's $binds? derivation works`` () =
+    // R-1RK 6.7.1 derives $binds? in Kernel: guard the lookup with an exit guard on
+    // error-continuation and let the interceptor divert with #f. The report writes
+    // the divert as `(apply divert #f)`, passing #f as an *atomic* operand tree.
+    // IronKernel represents an operand tree as a list, so an atomic tree has no
+    // spelling (the recorded 7.2.5 divergence) and `(divert #f)` delivers `(#f)`.
+    // The body returns `(list #t)` to match, and the caller takes the car of either.
+    // That is a transcription difference, not a semantic one: what decides the
+    // predicate is still whether looking the symbol up signals.
+    [
+        """(define binds?
+              (vau (exp & ss) dynamic
+                (car
+                  (guard-dynamic-extent
+                    ()
+                    (lambda ()
+                      (let ((env (eval exp dynamic)))
+                        (map (lambda (sym) (eval sym env)) ss))
+                      (list #t))
+                    (list (list error-continuation (lambda (_ divert) (divert #f))))))))""", Inert
+        "(define here (get-current-environment))", Inert
+        "(define bound 1)", Inert
+        "(binds? here bound)", Bool true
+        "(binds? here bound here)", Bool true
+        "(not? (binds? here nope))", Bool true
+        // All the symbols have to be bound, not just one of them.
+        "(not? (binds? here bound nope))", Bool true
+        // And it agrees with the primitive, which stays: the point of the derivation
+        // is that it introduces no capability the language did not already have.
+        "(eq? (binds? here bound) ($binds? here bound))", Bool true
+        "(eq? (binds? here nope) ($binds? here nope))", Bool true
+    ] |> evalSessionKernel

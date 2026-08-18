@@ -40,7 +40,7 @@ module Compiler =
         static member Lookup(env: LispVal, cont: LispVal, name: string) : Step =
             match SymbolTable.getVar env name with
             | Choice2Of2 r -> bounceContinue env cont r
-            | Choice1Of2 e -> Done(throwError e)
+            | Choice1Of2 e -> signal cont e
         static member IfThenElse(env: LispVal, cont: LispVal, fc: KernelFunc, fa: KernelFunc, fb: KernelFunc) : Step =
             fc.Invoke(
                 env,
@@ -48,7 +48,7 @@ module Compiler =
                     match value with
                     | Bool true -> fa.Invoke(e, c)
                     | Bool false -> fb.Invoke(e, c)
-                    | found -> Done(throwError (TypeMismatch("bool", found)))))
+                    | found -> signal c (TypeMismatch("bool", found))))
         static member Seq(env: LispVal, cont: LispVal, forms: KernelFunc[]) : Step =
             if forms.Length = 0 then bounceContinue env cont Inert
             else
@@ -61,7 +61,7 @@ module Compiler =
                 env,
                 makeCPS env cont (fun e c value _ ->
                     match SymbolTable.defineVar e name value with
-                    | Choice1Of2 error -> Done(throwError error)
+                    | Choice1Of2 error -> signal c error
                     | Choice2Of2 _ -> bounceContinue e c Inert))
         static member EvalForms(env: LispVal, cont: LispVal, fe: KernelFunc, fx: KernelFunc) : Step =
             fe.Invoke(
