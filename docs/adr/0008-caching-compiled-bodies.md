@@ -109,11 +109,31 @@ Make compilation closure-independent, then the key is just the body cell:
    Benchmarks are unchanged -- the resolution, not the comparison, is what the check
    costs -- so this buys correctness of reach rather than speed.
 2. Decide the CLR-sugar question at run time rather than at analysis time, or record
-   the dependency in the key.
+   the dependency in the key. **Done, and it was smaller than expected.**
+   `tryRewrite` is a pure function of the name and operands -- it never consults an
+   environment -- so the only closure-dependent part was the *test* "is this name
+   bound", and the interpreter had always applied that at the point of call. The
+   compiled dispatch paths now do the same: a name that resolves to nothing is tried
+   as sugar before signalling, exactly as `evalValidStep` does, and the analyzer emits
+   the plain combination either way. `ColdCompile` improves from 149.6 ns / 808 B to
+   140.1 ns / 784 B, because analysis no longer resolves a binding per named
+   combination, and CLR sugar in a tight loop is unchanged -- the reflection call
+   dominates the rewrite.
 3. Only then add the cache, keyed on the first body form's `PairCell`, with the
    call-site sharing measured rather than assumed.
 
-Step 1 is a small change with its own justification. Step 2 is the real work.
+Step 1 was a small change with its own justification. Step 2 turned out to be one
+too. **Analysis is now closure-independent**, which was the blocker; what remains
+before step 3 is the shared-inline-cache question above, which is a performance
+matter rather than a correctness one.
+
+A third inconsistency turned up while doing this and is worth recording even though
+nothing reaches it today. The env-less `analyze` -- used by `compileLispVal` and
+`compileSource`, neither of which has a production caller -- rewrote sugar-shaped
+names *unconditionally*, so it would have preferred sugar over a binding, which is
+the opposite of the rule `Eval` and `analyzeGuarded` applied. Moving the decision to
+run time makes all three agree by construction rather than by three copies of one
+rule.
 
 ## Alternatives
 

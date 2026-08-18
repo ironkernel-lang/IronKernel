@@ -14,10 +14,20 @@ module RuntimeDispatch =
     /// instead of starting a nested one. Nesting would cost CLR stack on every
     /// Kernel tail call, trap escaping continuations behind a collapsed result,
     /// and turn `Await` into a blocking wait. See ADR 0004.
-    let appNamed env cont name (operands: LispVal[]) : Step =
+    /// A name that resolves to nothing may still be CLR call sugar. The interpreter
+    /// has always tried the binding first and the rewrite second; since ADR 0008
+    /// step 2 the compiled paths do the same, instead of the analyzer deciding it
+    /// from the environment it happened to compile against.
+    let private operateNamed env cont name operands =
         match getVar env name with
-        | Choice1Of2 error -> signal cont error
-        | Choice2Of2 combiner -> bounceOperate env cont combiner (Array.toList operands)
+        | Choice2Of2 combiner -> bounceOperate env cont combiner operands
+        | Choice1Of2 error ->
+            match ClrSugar.tryRewrite name operands with
+            | Some rewritten -> bounceEval env cont rewritten
+            | None -> signal cont error
+
+    let appNamed env cont name (operands: LispVal[]) : Step =
+        operateNamed env cont name (Array.toList operands)
 
     /// One call site's resolved binding, immutable once constructed so that it can
     /// be published to other threads with a single reference write.
@@ -120,10 +130,7 @@ module RuntimeDispatch =
                     dispatch resolved env cont
                 // Not a simple chain: dispatch without caching rather than storing a
                 // snapshot that could never be revalidated.
-                | ValueNone ->
-                    match getVar env name with
-                    | Choice1Of2 error -> signal cont error
-                    | Choice2Of2 combiner -> bounceOperate env cont combiner operands
+                | ValueNone -> operateNamed env cont name operands
 
     type GeneratedFunc = Func<LispVal, LispVal, Step>
 
