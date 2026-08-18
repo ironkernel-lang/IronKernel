@@ -266,3 +266,36 @@ let ``with-narrow-arithmetic requires a boolean and a combiner`` () =
             match evalIn env expression with
             | Status _ -> ()
             | value -> failwithf "%s should signal an error, got %s" expression (showVal value))
+
+[<Fact>]
+let ``strict arithmetic signals on overflow`` () =
+    // R-1RK 12.3.3: "A numeric overflow occurs when the primary value of an inexact
+    // result would exceed the largest magnitude representable by its restricted
+    // format." Under a cleared strict-arithmetic that gives an infinity, which is what
+    // the report says for that case; set, it is one of the events that signal.
+    [
+        "(with-strict-arithmetic #f (lambda () (eqv? (finite? (* 1e308 10)) #f)))", Bool true
+        "(with-strict-arithmetic #f (lambda () (positive? (* 1e308 10))))", Bool true
+        // An infinite operand going in is not an overflow, whatever comes out --
+        // detecting it needs the operands, not just the result.
+        "(eqv? (+ #e+infinity 1) #e+infinity)", Bool true
+        "(eqv? (* #e+infinity 2) #e+infinity)", Bool true
+        // Ordinary arithmetic is untouched.
+        "(=? (* 2 3) 6)", Bool true
+        "(=? (* 2.0 3.0) 6.0)", Bool true
+        "(=? (+ 1e300 1e300) 2e300)", Bool true
+    ] |> evalSessionKernel
+
+[<Fact>]
+let ``an overflow under strict arithmetic is an error`` () =
+    withKernel (fun env ->
+        for expression in [ "(* 1e308 10)"; "(+ 1e308 1e308)"; "(- (- 0 1e308) 1e308)" ] do
+            match evalIn env expression with
+            | Status message -> Assert.Contains("overflow", message)
+            | value -> failwithf "%s should signal an error, got %s" expression (showVal value)
+        // Underflow is not detected, and is recorded as a divergence rather than
+        // guessed at: a zero result from non-zero operands is an underflow for
+        // multiplication and an exact answer for subtraction.
+        match evalIn env "(* 1e-300 1e-300)" with
+        | Obj (:? double as value) -> Assert.Equal(0.0, value)
+        | value -> failwithf "underflow gave %s" (showVal value))
