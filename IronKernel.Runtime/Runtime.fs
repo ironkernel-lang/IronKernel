@@ -547,6 +547,54 @@
                 let next e c _ _ = sequenceForms e c rest
                 bounceEval env (makeCPS env cont next) head
 
+        /// R-1RK 5.10.1. Evaluates each binding's expression in the dynamic
+        /// environment, left to right, then evaluates the body in a fresh child of
+        /// that environment with the definiends bound.
+        ///
+        /// Primitive rather than derived (ADR 0007). The derivation builds
+        /// `((lambda (formals) . body) . expressions)` and evaluates it, so every
+        /// `let` constructs a fresh operative -- and a fresh operative has no
+        /// compiled body, so ADR 0004 phase 3's memo never hits and the body is
+        /// compiled again on the single application it will ever receive. On the
+        /// heaviest example that was 90,583 of 339,599 body compilations in one run.
+        ///
+        /// Binding reuses `bindArgsStep`, so a definiend tree destructures exactly as
+        /// it does for an operative's formals, and the body runs through
+        /// `sequenceForms`, so its last form keeps the tail context 5.10.1 inherits
+        /// from the lambda it used to expand into.
+        let letForms env cont args =
+            match args with
+            | bindings :: body ->
+                match bindings with
+                | List binds ->
+                    let split =
+                        binds
+                        |> List.map (function
+                            // `(formal expression)`, read exactly as the derivation's
+                            // `car`/`cadr` read it.
+                            | List (formal :: expression :: _) -> Some(formal, expression)
+                            | _ -> None)
+                    if List.exists Option.isNone split then
+                        signal cont (BadSpecialForm("invalid let bindings", bindings))
+                    else
+                        let pairs = List.map Option.get split
+                        let formals = ofList (List.map fst pairs)
+                        let rec evaluateRemaining c evaluatedRev remaining =
+                            match remaining with
+                            | [] ->
+                                let child = newEnv [env]
+                                match run (bindArgsStep child (newContinuation env) formals
+                                                         (List.rev evaluatedRev)) with
+                                | Choice1Of2 error -> signal c error
+                                | Choice2Of2 _ -> sequenceForms child c body
+                            | expression :: rest ->
+                                let collect _ nextCont value _ =
+                                    evaluateRemaining nextCont (value :: evaluatedRev) rest
+                                More(fun () -> bounceEval env (makeCPS env c collect) expression)
+                        evaluateRemaining cont [] (List.map snd pairs)
+                | found -> signal cont (TypeMismatch("list", found))
+            | [] -> signal cont (NumArgs(1, args))
+
         let loadAndEval env cont = function
             | _ when not (has SourceLoading env) ->
                 signal cont (CapabilityDenied "source loading requires SourceLoading")
@@ -756,6 +804,7 @@
             [
                   ("vau"    , vau);
                   ("sequence", sequenceForms);
+                  ("let"    , letForms);
                   ("$binds?", bindsPredicate);
                   ("define" , define);
                   ("if"     , if_then_else);
