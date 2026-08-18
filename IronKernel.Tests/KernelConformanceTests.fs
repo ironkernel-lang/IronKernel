@@ -230,7 +230,21 @@ let private behaviouralChecks () : (string * string list) list = [
                "(countable-list?)" ]
     // 6.3.10: (reduce list binary identity) -- the list comes first here.
     "6.3.10", [ "(=? (reduce (list 1 2 3 4) + 0) 10)"; "(=? (reduce () + 0) 0)"
-                "(=? (reduce (list 5) + 0) 5)" ]
+                "(=? (reduce (list 5) + 0) 5)"
+                // The six-argument syntax, which is the one that reduces a *cyclic*
+                // list: precycle converts each element of the cycle, incycle reduces
+                // those, postcycle converts the result back for binary. Here with an
+                // acyclic prefix of 2 and a cycle of 3, and postcycle doubling the
+                // cycle's contribution so that it is visibly applied.
+                "(let ((ls (list 10 20 1 2 3)))"
+                + " (sequence (encycle! ls 2 3)"
+                + " (and? (=? (reduce ls + 0 (lambda (x) x) + (lambda (x) x)) 36)"
+                + " (=? (reduce ls + 0 (lambda (x) x) + (lambda (x) (* x 2))) 42))))"
+                // A pure cycle: the acyclic prefix is empty, so binary is never called
+                // and the result is postcycle's alone.
+                "(let ((ls (list 1 2 3)))"
+                + " (sequence (encycle! ls 0 3)"
+                + " (=? (reduce ls + 0 (lambda (x) x) + (lambda (x) x)) 6)))" ]
     "6.6.1", [ "(equal? (list 1 (list 2)) (list 1 (list 2)))"
                "(eqv? (equal? (list 1) (list 2)) #f)"
                "(equal?)"; "(equal? 1)"; "(equal? 1 1 1)"
@@ -785,9 +799,11 @@ let private divergences () = [
            + "`countable-list?` go through `get-list-metrics`, which measures a cycle "
            + "rather than walking into one. `list-tail`, `filter`, `reduce`, `append` "
            + "and the rest walk elements and diverge on a cyclic argument, as the "
-           + "report's own derivations of them do. The report's six-argument `reduce` "
-           + "(6.3.10), which is the entry that would handle a cyclic list, is not "
-           + "implemented: only the three-argument form is."
+           + "report's own derivations of them do. `reduce` (6.3.10) is the exception "
+           + "and is complete: its six-argument syntax reduces a cyclic list through "
+           + "the caller's `precycle`/`incycle`/`postcycle`, with the call counts the "
+           + "report fixes. Its three-argument syntax still diverges on a cycle, which "
+           + "is what the report specifies -- there the second syntax \"must be used\"."
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."
