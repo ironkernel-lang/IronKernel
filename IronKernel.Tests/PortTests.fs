@@ -381,3 +381,38 @@ let ``opening for output truncates what was there`` () =
             "(with-output-to-file " + file + " (lambda () (write 1)))", Bool true
             "(=? (with-input-from-file " + file + " (lambda () (read))) 1)", Bool true
         ] |> evalSessionKernel)
+
+[<Fact>]
+let ``a port closes however the call leaves`` () =
+    // Chapter 15's preamble promises closing on a normal return; an escape used to
+    // leak the handle. An exit guard (7.2.4) selecting on root-continuation now closes
+    // it on an abnormal pass as well, so the file is readable straight afterwards --
+    // which on Windows it would not be with the handle still open.
+    withTempFiles 1 (fun paths ->
+        let file = quoted paths.[0]
+        [
+            "(=? (call/cc (lambda (out) (with-output-to-file " + file
+            + " (lambda () (sequence (write (quote a)) (apply-continuation out 7)))))) 7)", Bool true
+            "(eq? (with-input-from-file " + file + " (lambda () (read))) (quote a))", Bool true
+            // The same for the explicit-port form.
+            "(=? (call/cc (lambda (out) (call-with-output-file " + file
+            + " (lambda (p) (sequence (write (quote b) p) (apply-continuation out 8)))))) 8)", Bool true
+            "(eq? (with-input-from-file " + file + " (lambda () (read))) (quote b))", Bool true
+            // A normal return still closes, and still returns the combiner's result.
+            "(with-output-to-file " + file + " (lambda () (write (quote c))))", Bool true
+            "(eq? (with-input-from-file " + file + " (lambda () (read))) (quote c))", Bool true
+        ] |> evalSessionKernel)
+
+[<Fact>]
+let ``applying a continuation directly bypasses the guards`` () =
+    // Recorded as a 7.2.5 divergence rather than left to be discovered: R-1RK does not
+    // make continuations applicable at all, so `(k 1)` is a dialect extension, and it
+    // does not go through selection and interception. apply-continuation does.
+    [
+        // Through the report's mechanism, the exit guard fires.
+        "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda () (apply-continuation out 1)) (list (list root-continuation (lambda (v d) (* v 10))))))) 10)",
+            Bool true
+        // Applied directly, it does not.
+        "(=? (call/cc (lambda (out) (guard-dynamic-extent (list) (lambda () (out 1)) (list (list root-continuation (lambda (v d) (* v 10))))))) 1)",
+            Bool true
+    ] |> evalSessionKernel

@@ -514,7 +514,12 @@ let private behaviouralChecks () : (string * string list) list = [
                 "(with-strict-arithmetic #f (lambda ()"
                 + " (number? (- #e+infinity #e+infinity))))"
                 "(with-strict-arithmetic #f (lambda ()"
-                + " (eqv? (robust? (- #e+infinity #e+infinity)) #f)))" ]
+                + " (eqv? (robust? (- #e+infinity #e+infinity)) #f)))"
+                // 12.3.3: overflow is one of the "survivable but dubious arithmetic
+                // events" strict arithmetic signals; cleared, it gives an infinity.
+                "(with-strict-arithmetic #f (lambda () (eqv? (finite? (* 1e308 10)) #f)))"
+                // An infinite operand in is not an overflow, whatever comes out.
+                "(eqv? (+ #e+infinity 1) #e+infinity)" ]
     // R-1RK 12.7.1. Narrowing is advice, so the checks assert what the report
     // actually requires: the binder and accessor behave as a keyed dynamic variable,
     // and the bounding information is no less restrictive when the variable is set
@@ -698,11 +703,12 @@ let private behaviouralChecks () : (string * string list) list = [
 /// Divergences the matrix cannot express as a status, recorded so that a `verified`
 /// row is not read as "identical to the report".
 let private divergences () = [
-    "15.1.3", "`with-input-from-file` and `with-output-to-file` close their port on "
-              + "a *normal* return, which is what chapter 15's preamble asks of them, "
-              + "but not on a non-local exit: an escape out of the combiner leaves the "
-              + "port open. Closing on an abnormal pass as well would take an exit "
-              + "guard (7.2.4), which the implementation has but this does not yet use."
+    "7.2.5", "Applying a continuation object directly, as in `(k 1)`, bypasses the "
+             + "selection and interception of 7.2.5: no guard is consulted. That is a "
+             + "dialect extension rather than a gap in the report, which does not make "
+             + "continuations applicable at all -- `apply-continuation` (7.3.1) and "
+             + "`continuation->applicative` (7.2.5) are its mechanisms, and both "
+             + "intercept correctly. Anything relying on a guard should use those."
     "3.6", "Two spellings differ from the report's, and both round-trip through "
            + "`read`, because IronKernel's reader accepts them. A dotted pair writes "
            + "as `(1 & 2)` rather than `(1 . 2)`, since `.` is the CLR interop "
@@ -734,12 +740,13 @@ let private divergences () = [
             + "advised to maintain the most restrictive bounding and robustness "
             + "information it (correctly) can\"), and IronKernel maintains the "
             + "infinite bounds of 12.2 either way."
-    "12.3.3", "Under strict arithmetic the report signals on numeric overflow and "
-              + "underflow as well as on a result with no primary value. IronKernel "
-              + "signals only the latter: an overflow still yields an infinity and an "
-              + "underflow a zero, which is the report's behaviour for *cleared* "
-              + "strict-arithmetic. Its initial value here is true, which the report "
-              + "leaves open."
+    "12.3.3", "Under strict arithmetic, overflow and a result with no primary value "
+              + "both signal; underflow does not, and still gives zero. Telling an "
+              + "underflow apart needs the operation and not just its operands -- a "
+              + "zero result from non-zero operands is an underflow for multiplication "
+              + "and an exact answer for subtraction -- so it is left undetected "
+              + "rather than guessed at. The variable's initial value here is true, "
+              + "which the report leaves open."
     "7.2.7", "Signalling an error is not an abnormal pass to `error-continuation`. "
              + "IronKernel reports errors on a separate channel that unwinds the "
              + "computation directly, so an exit guard is *not* selected when an error "
@@ -771,12 +778,12 @@ let private divergences () = [
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."
-    "12.8", "Exactness is carried by a value's representation rather than by the "
-            + "exactness tag the report describes, since module Inexact (12.6) is "
-            + "unimplemented: `1/2` is an exact ratio and `0.5` is a double. One "
-            + "consequence is that `numerator` and `denominator` of an inexact real "
-            + "return exact integers -- `(denominator 0.1)` is 2^55 -- rather than "
-            + "inexact ones."
+    "12.8", "Exactness is carried by a value's representation rather than by a "
+            + "separate tag: `1/2` is an exact ratio and `0.5` is a double, and "
+            + "`exact?` reads the representation. Module Inexact (12.6) is supported "
+            + "on that basis. One consequence is that `numerator` and `denominator` of "
+            + "an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- "
+            + "rather than inexact ones."
 ]
 
 let private conformanceEnv () =

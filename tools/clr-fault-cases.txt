@@ -213,3 +213,7 @@
 (show (/ 1.0 3.0))
 (show 1/3)
 (show "a \"quoted\" string")
+(* 1e308 10)
+(with-strict-arithmetic #f (lambda () (* 1e308 10)))
+(* 1e-300 1e-300)
+(call/cc (lambda (out) (with-output-to-file "ovf-esc.txt" (lambda () (apply-continuation out 1)))))

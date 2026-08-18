@@ -332,141 +332,6 @@
             | [] -> bounceContinue env cont (currentOutput cont)
             | _ -> fail (NumArgs(0, args))
 
-        let private openFile name access filename =
-            let mode =
-                if access = IO.FileAccess.Read then IO.FileMode.Open else IO.FileMode.Create
-            try Choice2Of2(Port(IO.File.Open(filename, mode, access)))
-            with ex -> Choice1Of2(Default(name + ": " + ex.Message))
-
-        /// R-1RK 15.1.3. "The opened port is accessed implicitly within the dynamic
-        /// extent of the call, and is automatically closed on normal return" -- so the
-        /// port is bound as a keyed dynamic variable and the combiner is called with no
-        /// operands, and a continuation after the call closes it.
-        ///
-        /// A non-local exit leaves the port open. The report's own preamble offers this
-        /// form as the safest of the three precisely because a *normal* return closes
-        /// it; closing on an abnormal one would need an exit guard (7.2.4), and is
-        /// recorded as a divergence rather than assumed.
-        let private withPortFromFile name access key env cont args =
-            match args with
-            | [Obj filename; combiner] when (filename :? string) ->
-                match openFile name access (filename :?> string) with
-                | Choice1Of2 error -> fail error
-                | Choice2Of2 (Port stream as port) ->
-                    let closeAfter _ c value _ =
-                        try stream.Close() with _ -> ()
-                        More(fun () -> continueEvalStep env c value)
-                    let afterCall = makeCPS env cont closeAfter
-                    let isolated = newEnvWithClr (ofEnvironment env) [] []
-                    bounceOperate
-                        isolated
-                        (makeDynamicBinding env afterCall (key ()) port)
-                        combiner
-                        []
-                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
-            | [found; _] -> fail (TypeMismatch("string", found))
-            | _ -> fail (NumArgs(2, args))
-
-        let withInputFromFile env cont args =
-            withPortFromFile "with-input-from-file" IO.FileAccess.Read currentInputKey env cont args
-
-        let withOutputToFile env cont args =
-            withPortFromFile "with-output-to-file" IO.FileAccess.Write currentOutputKey env cont args
-
-        /// R-1RK 15.2.1. Like the above, but the port is handed to the combiner as an
-        /// operand rather than bound implicitly, and is likewise closed on return.
-        let private callWithFile name access env cont args =
-            match args with
-            | [Obj filename; combiner] when (filename :? string) ->
-                match openFile name access (filename :?> string) with
-                | Choice1Of2 error -> fail error
-                | Choice2Of2 (Port stream as port) ->
-                    let closeAfter _ c value _ =
-                        try stream.Close() with _ -> ()
-                        More(fun () -> continueEvalStep env c value)
-                    bounceOperate env (makeCPS env cont closeAfter) combiner [port]
-                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
-            | [found; _] -> fail (TypeMismatch("string", found))
-            | _ -> fail (NumArgs(2, args))
-
-        let callWithInputFile env cont args =
-            callWithFile "call-with-input-file" IO.FileAccess.Read env cont args
-
-        let callWithOutputFile env cont args =
-            callWithFile "call-with-output-file" IO.FileAccess.Write env cont args
-
-        /// R-1RK 15.1.8. With no port the current output port is used, which is what
-        /// gives `with-output-to-file` its effect: the chapter's preamble has that form
-        /// accessed "implicitly", meaning through this default.
-        ///
-        /// Writing to the console port goes through `Console.Out` rather than the raw
-        /// standard-output stream, so that a host which has redirected it still sees
-        /// the output. The stream is not disposed after writing -- a port outlives one
-        /// write, and closing it is 15.1.6's job.
-        let private writeTo (port: LispVal) (value: LispVal) =
-            if isConsole port consoleOutput then
-                Console.Out.Write(showVal value)
-                returnM (Bool true)
-            else
-                match port with
-                | Port stream ->
-                    guardIO "write" (fun () ->
-                        // leaveOpen: disposing the writer must not close the port --
-                        // 15.1.6 is what closes it. Leaving the writer *undisposed*
-                        // instead is worse than it looks: its finalizer flushes, and a
-                        // flush to an already closed stream throws on the finalizer
-                        // thread, which aborts the process.
-                        use writer = new StreamWriter(stream, Text.Encoding.UTF8, 1024, true)
-                        writer.Write(showVal value)
-                        returnM (Bool true))
-                | found -> throwError (TypeMismatch("port", found))
-
-        let writeValue env cont args =
-            let finish result =
-                match result with
-                | Choice1Of2 error -> fail error
-                | Choice2Of2 value -> bounceContinue env cont value
-            match args with
-            | [value] -> finish (writeTo (currentOutput cont) value)
-            | [value; (Port _ as port)] -> finish (writeTo port value)
-            | [_; found] -> fail (TypeMismatch("port", found))
-            | _ -> fail (NumArgs(1, args))
-
-        /// R-1RK 15.1.7, and the counterpart of write: with no port the current input
-        /// port is read, which is how `with-input-from-file` takes effect.
-        let private readFrom (port: LispVal) =
-            let parseReader (reader: TextReader) =
-                match requireSourceServices () with
-                | Choice1Of2 error -> throwError error
-                | Choice2Of2 services ->
-                    // ReadLine returns null at end of input, and the parser dereferences
-                    // what it is given. IronKernel has no end-of-file object to return
-                    // instead, so this signals; before, a read past the end of a port
-                    // reached the parser as a null string and faulted the process.
-                    match reader.ReadLine() with
-                    | null -> throwError (Default "read: end of input")
-                    | line -> services.parseExpression line
-            if isConsole port consoleInput then parseReader Console.In
-            else
-                match port with
-                | Port stream ->
-                    guardIO "read" (fun () ->
-                        // leaveOpen, as for write: closing the port is 15.1.6's job.
-                        use reader = new StreamReader(stream, Text.Encoding.UTF8, true, 1024, true)
-                        parseReader reader)
-                | found -> throwError (TypeMismatch("port", found))
-
-        let readValue env cont args =
-            let finish result =
-                match result with
-                | Choice1Of2 error -> fail error
-                | Choice2Of2 value -> bounceContinue env cont value
-            match args with
-            | [] -> finish (readFrom (currentInput cont))
-            | [Port _ as port] -> finish (readFrom port)
-            | [found] -> fail (TypeMismatch("port", found))
-            | _ -> fail (NumArgs(0, args))
-          
         let ioPrimitives : (string * (LispVal list -> ThrowsError<LispVal>)) list =
             [
                     ("open-input-file", makePort FileAccess.Read);
@@ -1143,6 +1008,164 @@
                     Choice2Of2(Continuation(innerRecord, metaCont, ct))
             | found -> Choice1Of2(TypeMismatch("continuation", found))
 
+        let private openFile name access filename =
+            let mode =
+                if access = IO.FileAccess.Read then IO.FileMode.Open else IO.FileMode.Create
+            try Choice2Of2(Port(IO.File.Open(filename, mode, access)))
+            with ex -> Choice1Of2(Default(name + ": " + ex.Message))
+
+        /// R-1RK 15.1.3. "The opened port is accessed implicitly within the dynamic
+        /// extent of the call, and is automatically closed on normal return" -- so the
+        /// port is bound as a keyed dynamic variable and the combiner is called with no
+        /// operands, and a continuation after the call closes it.
+        ///
+        /// A non-local exit leaves the port open. The report's own preamble offers this
+        /// form as the safest of the three precisely because a *normal* return closes
+        /// it; closing on an abnormal one would need an exit guard (7.2.4), and is
+        /// recorded as a divergence rather than assumed.
+        /// The port is closed on the way out whichever way the call leaves. A normal
+        /// return runs through a continuation that closes it; an abnormal pass out of
+        /// the call is caught by an exit guard (7.2.4) selecting on root-continuation,
+        /// which closes it and passes the value on unchanged.
+        ///
+        /// Chapter 15's preamble only promises closing on a *normal* return, so the
+        /// guard is not conformance but housekeeping: without it, escaping from the
+        /// combiner leaked the handle. Closing twice is harmless.
+        let private closingGuard (stream: IO.Stream) =
+            let intercept e c args =
+                match args with
+                | value :: _ ->
+                    try stream.Close() with _ -> ()
+                    More(fun () -> continueEvalStep e c value)
+                | [] -> fail (NumArgs(2, args))
+            ofList [ofList [rootContinuation (); Applicative(PrimitiveOperative { identity = None; invoke = intercept })]]
+
+        let private withPortFromFile name access key env cont args =
+            match args with
+            | [Obj filename; combiner] when (filename :? string) ->
+                match openFile name access (filename :?> string) with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 (Port stream as port) ->
+                    let closeAfter _ c value _ =
+                        try stream.Close() with _ -> ()
+                        More(fun () -> continueEvalStep env c value)
+                    let afterCall = makeCPS env cont closeAfter
+                    match buildGuarded env afterCall Nil (closingGuard stream) with
+                    | Choice1Of2 error -> fail error
+                    | Choice2Of2 guarded ->
+                        let isolated = newEnvWithClr (ofEnvironment env) [] []
+                        bounceOperate
+                            isolated
+                            (makeDynamicBinding env guarded (key ()) port)
+                            combiner
+                            []
+                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
+            | [found; _] -> fail (TypeMismatch("string", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let withInputFromFile env cont args =
+            withPortFromFile "with-input-from-file" IO.FileAccess.Read currentInputKey env cont args
+
+        let withOutputToFile env cont args =
+            withPortFromFile "with-output-to-file" IO.FileAccess.Write currentOutputKey env cont args
+
+        /// R-1RK 15.2.1. Like the above, but the port is handed to the combiner as an
+        /// operand rather than bound implicitly, and is likewise closed on return.
+        let private callWithFile name access env cont args =
+            match args with
+            | [Obj filename; combiner] when (filename :? string) ->
+                match openFile name access (filename :?> string) with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 (Port stream as port) ->
+                    let closeAfter _ c value _ =
+                        try stream.Close() with _ -> ()
+                        More(fun () -> continueEvalStep env c value)
+                    let afterCall = makeCPS env cont closeAfter
+                    match buildGuarded env afterCall Nil (closingGuard stream) with
+                    | Choice1Of2 error -> fail error
+                    | Choice2Of2 guarded -> bounceOperate env guarded combiner [port]
+                | Choice2Of2 _ -> fail (Default(name + ": could not open the file"))
+            | [found; _] -> fail (TypeMismatch("string", found))
+            | _ -> fail (NumArgs(2, args))
+
+        let callWithInputFile env cont args =
+            callWithFile "call-with-input-file" IO.FileAccess.Read env cont args
+
+        let callWithOutputFile env cont args =
+            callWithFile "call-with-output-file" IO.FileAccess.Write env cont args
+
+        /// R-1RK 15.1.8. With no port the current output port is used, which is what
+        /// gives `with-output-to-file` its effect: the chapter's preamble has that form
+        /// accessed "implicitly", meaning through this default.
+        ///
+        /// Writing to the console port goes through `Console.Out` rather than the raw
+        /// standard-output stream, so that a host which has redirected it still sees
+        /// the output. The stream is not disposed after writing -- a port outlives one
+        /// write, and closing it is 15.1.6's job.
+        let private writeTo (port: LispVal) (value: LispVal) =
+            if isConsole port consoleOutput then
+                Console.Out.Write(showVal value)
+                returnM (Bool true)
+            else
+                match port with
+                | Port stream ->
+                    guardIO "write" (fun () ->
+                        // leaveOpen: disposing the writer must not close the port --
+                        // 15.1.6 is what closes it. Leaving the writer *undisposed*
+                        // instead is worse than it looks: its finalizer flushes, and a
+                        // flush to an already closed stream throws on the finalizer
+                        // thread, which aborts the process.
+                        use writer = new StreamWriter(stream, Text.Encoding.UTF8, 1024, true)
+                        writer.Write(showVal value)
+                        returnM (Bool true))
+                | found -> throwError (TypeMismatch("port", found))
+
+        let writeValue env cont args =
+            let finish result =
+                match result with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 value -> bounceContinue env cont value
+            match args with
+            | [value] -> finish (writeTo (currentOutput cont) value)
+            | [value; (Port _ as port)] -> finish (writeTo port value)
+            | [_; found] -> fail (TypeMismatch("port", found))
+            | _ -> fail (NumArgs(1, args))
+
+        /// R-1RK 15.1.7, and the counterpart of write: with no port the current input
+        /// port is read, which is how `with-input-from-file` takes effect.
+        let private readFrom (port: LispVal) =
+            let parseReader (reader: TextReader) =
+                match requireSourceServices () with
+                | Choice1Of2 error -> throwError error
+                | Choice2Of2 services ->
+                    // ReadLine returns null at end of input, and the parser dereferences
+                    // what it is given. IronKernel has no end-of-file object to return
+                    // instead, so this signals; before, a read past the end of a port
+                    // reached the parser as a null string and faulted the process.
+                    match reader.ReadLine() with
+                    | null -> throwError (Default "read: end of input")
+                    | line -> services.parseExpression line
+            if isConsole port consoleInput then parseReader Console.In
+            else
+                match port with
+                | Port stream ->
+                    guardIO "read" (fun () ->
+                        // leaveOpen, as for write: closing the port is 15.1.6's job.
+                        use reader = new StreamReader(stream, Text.Encoding.UTF8, true, 1024, true)
+                        parseReader reader)
+                | found -> throwError (TypeMismatch("port", found))
+
+        let readValue env cont args =
+            let finish result =
+                match result with
+                | Choice1Of2 error -> fail error
+                | Choice2Of2 value -> bounceContinue env cont value
+            match args with
+            | [] -> finish (readFrom (currentInput cont))
+            | [Port _ as port] -> finish (readFrom port)
+            | [found] -> fail (TypeMismatch("port", found))
+            | _ -> fail (NumArgs(0, args))
+          
         let guardContinuation env cont args =
             match args with
             | [entry; (Continuation _ as target); exit] ->
@@ -1355,11 +1378,43 @@
         /// of the strict-arithmetic keyed dynamic variable". The variable is only read
         /// when the result actually has no primary value, so the ordinary path pays a
         /// type test rather than a walk of the continuation.
-        let private continueNumeric env cont value =
+        /// R-1RK 12.3.3: "A numeric overflow occurs when the primary value of an
+        /// inexact result would exceed the largest magnitude representable by its
+        /// restricted format", and under strict arithmetic that is an error rather than
+        /// the infinity a cleared variable would give.
+        ///
+        /// Detecting it needs the operands as well as the result: an infinite result is
+        /// an overflow only if nothing infinite went in. `(log 0)` is a genuine limit
+        /// rather than an overflow, and reaches its infinity by a different path than
+        /// this one.
+        ///
+        /// Underflow is not detected. A zero result from non-zero operands is an
+        /// underflow for multiplication but an exact answer for subtraction, so telling
+        /// them apart needs the operation and not just its operands; that is left
+        /// recorded as a divergence rather than guessed at.
+        let private isFiniteOperand = function
+            | Obj (:? double as value) -> not (Double.IsInfinity value)
+            | Obj (:? float32 as value) -> not (Single.IsInfinity value)
+            | Obj (:? ExactInfinity) -> false
+            | _ -> true
+
+        let private overflowed (operands: LispVal list) (result: obj) =
+            let infinite =
+                match result with
+                | :? double as value -> Double.IsInfinity value
+                | :? float32 as value -> Single.IsInfinity value
+                | _ -> false
+            infinite && operands |> List.forall isFiniteOperand
+
+        let private continueNumericFrom operands env cont value =
             match value with
             | Obj result when hasNoPrimaryValue result && isStrictArithmetic cont ->
                 fail (Default "arithmetic result has no primary value")
+            | Obj result when overflowed operands result && isStrictArithmetic cont ->
+                fail (Default "arithmetic overflow")
             | _ -> bounceContinue env cont value
+
+        let private continueNumeric env cont value = continueNumericFrom [] env cont value
 
         /// R-1RK 12.5.4 / 12.5.5: (+ . numbers) and (* . numbers) are variadic, with
         /// the empty sum zero and the empty product one. Folding left keeps the CLR
@@ -1370,7 +1425,7 @@
             | [] -> bounceContinue env cont (Obj identity)
             | first :: rest ->
                 let rec loop acc = function
-                    | [] -> continueNumeric env cont acc
+                    | [] -> continueNumericFrom args env cont acc
                     | next :: remaining ->
                         match op acc next with
                         | Choice2Of2 result -> loop result remaining
@@ -1384,7 +1439,7 @@
             match args with
             | [a; b] ->
                 match op a b with
-                | Choice2Of2 result -> continueNumeric env cont result
+                | Choice2Of2 result -> continueNumericFrom args env cont result
                 | Choice1Of2 error -> fail error
             | _ -> foldNumeric op identity env cont args
 
@@ -1407,7 +1462,7 @@
             match args with
             | [a; b] ->
                 match opDivide a b with
-                | Choice2Of2 result -> continueNumeric env cont result
+                | Choice2Of2 result -> continueNumericFrom args env cont result
                 | Choice1Of2 error -> fail error
             | numerator :: (_ :: _ as divisors) ->
                 let rec product acc = function
@@ -1420,7 +1475,7 @@
                 | Choice1Of2 error -> fail error
                 | Choice2Of2 divisor ->
                     match opDivide numerator divisor with
-                    | Choice2Of2 result -> continueNumeric env cont result
+                    | Choice2Of2 result -> continueNumericFrom args env cont result
                     | Choice1Of2 error -> fail error
             | _ -> fail (NumArgs(2, args))
         /// R-1RK 12.9. The report gives these entries signatures only: Appendix A.2
