@@ -781,3 +781,27 @@ let ``the last form of a compiled sequence is a tail context`` () =
         let shallow = depthAfter 10
         let deep = depthAfter 1000
         Assert.Equal(shallow, deep))
+
+[<Fact>]
+let ``the last form of a let body is a tail context`` () =
+    // `let` used to expand into a lambda application, which gave it a tail context
+    // for free. The primitive (ADR 0007) has to keep it, and as for `sequence` the
+    // trampoline hides a mistake: the answer stays right and the stack flat, so only
+    // the captured continuation's depth shows a retained frame per iteration.
+    withKernel (fun env ->
+        ignore (evalIn env "(define captured (vector 0))")
+        defineCompiledProcedure
+            env
+            "countdown"
+            "(n)"
+            [ "(if (eqv? n 0)
+                   (let ((x 1)) (vector-set! captured 0 (call/cc (lambda (k) k))))
+                   (let ((x 1)) (countdown (- n 1))))" ]
+
+        let depthAfter iterations =
+            ignore (evalIn env (sprintf "(countdown %d)" iterations))
+            match evalIn env "(vector-ref captured 0)" with
+            | Continuation _ as continuation -> continuationDepth continuation
+            | other -> failwithf "expected a captured continuation, got %A" other
+
+        Assert.Equal(depthAfter 10, depthAfter 1000))

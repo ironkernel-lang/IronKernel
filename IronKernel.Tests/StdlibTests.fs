@@ -153,3 +153,48 @@ let ``the report's derivation of $sequence still behaves like the primitive`` ()
         // Unevaluated operands, as for the primitive.
         "((lambda () (derived-sequence (define local 5) local)))", Obj 5
     ]
+
+[<Fact>]
+let ``let follows 5.10.1`` () =
+    // Primitive since ADR 0007, and the behaviour the report specifies is unchanged:
+    // each expression is evaluated in the dynamic environment, then the body runs in
+    // a fresh child with the definiends bound.
+    evalSessionKernel [
+        "(let ((x 2) (y 3)) (* x y))", Obj 6
+        "(let () 42)", Obj 42
+        // Several body forms, evaluated in order, last one returned.
+        "(let ((x 1)) (define y 2) (+ x y))", Obj 3
+        "(let ((v (vector 0))) (vector-set! v 0 7) (vector-ref v 0))", Obj 7
+        // The expressions see the *enclosing* scope, not the bindings being made --
+        // this is what separates let from let*.
+        "(let ((x 1)) (let ((x 2) (y x)) y))", Obj 1
+        "(let* ((x 3) (y x)) (+ x y))", Obj 6
+        // Left to right.
+        """(let ((v (vector 0)))
+              (let ((a (vector-set! v 0 1)) (b (vector-ref v 0))) b))""", Obj 1
+        // A definiend tree destructures, exactly as an operative's formals do.
+        "(let (((a b) (list 1 2))) (+ a b))", Obj 3
+        // The body is a child: a definition inside does not escape.
+        "((lambda () (define z 1) (let ((q 2)) (define z 5)) z))", Obj 1
+        // letrec still works, since it expands through let.
+        "(letrec ((f (lambda (n) (if (zero? n) 0 (f (- n 1)))))) (f 5))", Obj 0
+    ]
+
+[<Fact>]
+let ``the report's derivation of let still behaves like the primitive`` () =
+    // ADR 0007 replaced this with a primitive, so nothing exercises the derivation
+    // now. Transcribed and checked on the cases that distinguish let: scope of the
+    // expressions, several body forms, destructuring, and the empty binding list.
+    evalSessionKernel [
+        """(define derived-let
+              (vau (binds & body) env
+                (eval (cons
+                        (list* lambda (cons (map car binds) body))
+                        (map cadr binds))
+                    env)))""", Inert
+        "(derived-let ((x 2) (y 3)) (* x y))", Obj 6
+        "(derived-let () 42)", Obj 42
+        "(derived-let ((x 1)) (define y 2) (+ x y))", Obj 3
+        "(let ((x 1)) (derived-let ((x 2) (y x)) y))", Obj 1
+        "(derived-let (((a b) (list 1 2))) (+ a b))", Obj 3
+    ]

@@ -97,11 +97,14 @@
 (define cadr (lambda ((_ & (x & _))) x))
 (define cddr (lambda ((_ & (_ & x))) x))	  
 
-(define let (vau (binds & body) env
-    (eval (cons
-            (list* lambda (cons (map car binds) body))
-            (map cadr binds))
-        env)))
+; Primitive since ADR 0007, not derived. The derivation below built
+; ((lambda (formals) . body) . expressions) and evaluated it, so every `let`
+; constructed a fresh operative whose body was then compiled for its single
+; application -- 90,583 of 339,599 body compilations in one run of
+; constant-width-amb. Kept as a test in StdlibTests.
+;
+; (define let (vau (binds & body) env
+;     (eval (cons (list* lambda (cons (map car binds) body)) (map cadr binds)) env)))
 
 (define any?
   (lambda (f xs)

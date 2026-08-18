@@ -1,6 +1,6 @@
 # ADR 0007: Identity for derived combiners
 
-Status: Accepted — sequencing implemented
+Status: Accepted — sequencing and `let` implemented
 
 ## Decision
 
@@ -150,6 +150,50 @@ evidence here -- 398 tests, and every example unchanged.
 
 The `let` question is now open on its own terms, and the profile it should be
 measured against is this one, not the one in this ADR.
+
+## Outcome, `let`
+
+Re-censused against the post-sequencing profile first, as that paragraph asked.
+Total dispatches over the same eight programs fell from 9.0M to 5.69M, `eval` fell
+70% -- confirming sequencing generated most of it -- and derived operatives fell from
+7.2% to 1.8% of a smaller total, with `let` now 89.8% of that slice.
+
+One prediction in this ADR was wrong and is worth recording. It attributed `cons`
+traffic to sequencing along with `eval`; `cons` is 844,535 both before and after,
+unchanged. The `eval` half of the inference held, the `cons` half did not.
+
+`let` at 1.62% of dispatches did not look worth much. The dispatch count was the
+wrong measure, and the reason is specific: the derivation builds
+`((lambda (formals) . body) . expressions)`, so every `let` constructs a fresh
+operative -- and a fresh operative's `compiledBody` is `None`, so ADR 0004 phase 3's
+memo never hits and the body is compiled again for the single application it will
+ever receive. Counting those directly:
+
+| | before | after |
+|---|---:|---:|
+| body compilations, `constant-width-amb` | 339,599 | **47,260 (-86%)** |
+| wall clock, median of 3 | 11.56 s | **4.88 s (-58%)** |
+
+Against master before either change, that example is 16.19 s to 4.88 s, a 70%
+reduction. `ControlFlowBenchmarks` and `CompilerBenchmarks` are unchanged, which is
+expected -- neither exercises `let` in a hot path, so the gain shows up in programs
+rather than microbenchmarks.
+
+`let` binds through `bindArgsStep`, the same code an operative's formals use, so a
+definiend tree destructures identically; the body runs through `sequenceForms`, which
+keeps the tail context it used to inherit from the lambda. Both have tests, and the
+tail-context test was validated against a negative control the same way sequencing's
+was: 23 against 2003.
+
+**The residual is larger than either change.** 47,260 body compilations remain in one
+run, and `let` accounted for only 90,583 of the original 339,599 dispatches' worth.
+The rest come from other operatives built and applied once -- a `lambda` literal
+inside a loop is the obvious case. The general fix is to memoise compilation across
+operatives sharing a body, since the body `LispVal` is the same object every time the
+same source form is evaluated. That is not free: `compileLispValGuarded` takes the
+closure environment, and analysis-time decisions such as CLR-call sugar depend on what
+is bound there, so a cache keyed on body identity alone is unsound. It needs its own
+ADR.
 
 ## Risks
 
