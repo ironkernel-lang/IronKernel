@@ -1370,11 +1370,15 @@
         let perform env cont = function
             | [PromptTag tag; value] ->
                 match findPrompt (Some tag) cont with
-                | Some (continuationRecord, ({ handler = Some handler } as frame)) ->
-                    let captured =
-                        Continuation(continuationRecord, Some frame, Delimited)
+                | Some (_, ({ handler = Some handler } as frame)) ->
+                    // Capture the perform-site continuation as it stands. It
+                    // already carries the whole segment/frame chain out to the
+                    // matching prompt and beyond — including any *intermediate*
+                    // prompt frames. Flattening it through the findPrompt
+                    // record (as before) erased those frames, so after a
+                    // resume the effects they handled had no handler.
                     let record =
-                        { continuation = captured
+                        { continuation = cont
                           consumed = 0 }
                     let resumption = Resumption record
                     // Abort (handler return without resume) must invalidate the
@@ -1384,10 +1388,18 @@
                     let invalidateOnAbort e c result _ =
                         Interlocked.Exchange(&record.consumed, 1) |> ignore
                         bounceContinue e c result
+                    // The payload and resumption are already values. Operating
+                    // on the applicative itself would evaluate them a second
+                    // time — a structured payload such as (list :a 1) would be
+                    // applied as a combination. Unwrap to the underlying
+                    // operative, as shift does for its handler.
+                    let rec unwrap = function
+                        | Applicative inner -> unwrap inner
+                        | other -> other
                     bounceOperate
                         env
                         (makeCPS env frame.parentCont invalidateOnAbort)
-                        handler
+                        (unwrap handler)
                         [value; resumption]
                 | Some _ -> signal cont (Default "matching prompt has no effect handler")
                 | None -> signal cont (Default "perform requires a matching tagged handler")
