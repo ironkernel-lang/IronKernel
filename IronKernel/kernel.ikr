@@ -48,12 +48,18 @@
            (aux args)))))
 
 ;TODO: consider making length a native primitive		   
-(define length
+; 6.3.1: the improper-list length -- "the number of consecutive cdr references
+; that can be followed starting from object". Zero for a non-pair, and positive
+; infinity for a cyclic list, which is why this asks get-list-metrics rather than
+; cdring down: cdring down a cyclic list does not finish.
+; Written with wrap/vau rather than lambda because lambda is defined further down.
+(define $length-from-metrics
   (wrap
-    (vau (x) _
-      (if (null? x)
-        0
-        (+ 1 (length (cdr x)))))))		   
+    (vau (m) _
+      (if (zero? (car (cdr (cdr (cdr m))))) (car m) #e+infinity))))
+
+(define length
+  (wrap (vau (x) _ ($length-from-metrics (get-list-metrics x)))))
 		   
 ; This operative generalizes primitive operative $vau , §4.10.3, so that the con-
 ;structed compound operative will evaluate a sequence of expressions in its local en-
@@ -441,9 +447,12 @@
 
 ; --- R-1RK list features (5.7, 6.3) ------------------------------------------
 ; get-list-metrics is a primitive; the rest are derived from it and from the pair
-; primitives. IronKernel's pairs are immutable and the optional Pair mutation
-; module is unimplemented, so no list can be cyclic: every list here is finite,
-; and the cycle-handling the report describes has nothing to act on.
+; primitives. set-cdr! can build a cycle, so the derivations that ask about a
+; list's *shape* go through get-list-metrics, which measures a cycle rather than
+; walking into one. The derivations that walk a list's elements -- list-tail,
+; filter, reduce and the rest -- still assume the caller passes a finite list, as
+; the report's own derivations of them do; a cyclic argument makes them diverge,
+; which is recorded as a divergence rather than papered over.
 
 ; 5.7.2
 (define list-tail
@@ -553,8 +562,19 @@
     (letrec ((aux (lambda (ys) (if (null? ys) #t (if (ok? (car ys)) (aux (cdr ys)) #f)))))
       (aux xs))))
 
-(define finite-list? (lambda xs ($every? $list-shaped? xs)))
-(define countable-list? (lambda xs ($every? $list-shaped? xs)))
+; 6.3.8 / 6.3.9. A finite list is an acyclic one -- it ends at nil, which the
+; metrics report as n = 1. A countable list is a list at all: finite, or cyclic,
+; which is c > 0. Neither can walk the list itself now that one may be cyclic.
+(define $finite-list-one?
+  (lambda (x) (=? (car (cdr (get-list-metrics x))) 1)))
+
+(define $countable-list-one?
+  (lambda (x)
+    (let ((m (get-list-metrics x)))
+      (if (=? (car (cdr m)) 1) #t (<? 0 (car (cdr (cdr (cdr m)))))))))
+
+(define finite-list? (lambda xs ($every? $finite-list-one? xs)))
+(define countable-list? (lambda xs ($every? $countable-list-one? xs)))
 
 ; 6.3.10: (reduce list binary identity). The report also gives a six-argument form
 ; for cyclic lists; with no cycles to describe, the three-argument form is the whole

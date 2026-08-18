@@ -168,7 +168,17 @@ let private behaviouralChecks () : (string * string list) list = [
     "5.7.1", [ "(equal? (get-list-metrics (list 1 2 3)) (list 3 1 3 0))"
                "(equal? (get-list-metrics ()) (list 0 1 0 0))"
                // A non-pair is the start of an improper list of just itself.
-               "(equal? (get-list-metrics 5) (list 0 0 0 0))" ]
+               "(equal? (get-list-metrics 5) (list 0 0 0 0))"
+               // "if n = c = 0, the improper list is not a list"
+               "(equal? (get-list-metrics (cons 1 2)) (list 1 0 1 0))"
+               // A cycle is measured rather than walked into, and a + c = p.
+               "(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p)"
+               + " (equal? (get-list-metrics p) (list 3 0 0 3)))"
+               "(let ((q (list 1 2 3 4 5)))"
+               + " (set-cdr! (cdr (cdr (cdr (cdr q)))) (cdr (cdr q)))"
+               + " (equal? (get-list-metrics q) (list 5 0 2 3)))"
+               "(let ((r (list 1))) (set-cdr! r r)"
+               + " (equal? (get-list-metrics r) (list 1 0 0 1)))" ]
     "5.7.2", [ "(equal? (list-tail (list 1 2 3 4) 2) (list 3 4))"
                "(equal? (list-tail (list 1 2) 0) (list 1 2))" ]
     "6.2.1", [ "(combiner? car)"; "(combiner? vau)"; "(eqv? (combiner? 1) #f)" ]
@@ -185,8 +195,17 @@ let private behaviouralChecks () : (string * string list) list = [
     "6.3.6", [ "(equal? (assoc 'b (list (list 'a 1) (list 'b 2))) (list 'b 2))"
                "(equal? (assoc 'z (list (list 'a 1))) ())" ]
     "6.3.7", [ "(member? 2 (list 1 2 3))"; "(eqv? (member? 9 (list 1 2)) #f)" ]
-    "6.3.8", [ "(finite-list? (list 1 2))"; "(finite-list? ())"; "(eqv? (finite-list? 5) #f)" ]
-    "6.3.9", [ "(countable-list? (list 1 2))"; "(eqv? (countable-list? 5) #f)" ]
+    "6.3.8", [ "(finite-list? (list 1 2))"; "(finite-list? ())"; "(eqv? (finite-list? 5) #f)"
+               // The acyclic lists: a cyclic one is a list but not a finite one, and
+               // an improper one is not a list at all.
+               "(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p) (eqv? (finite-list? p) #f))"
+               "(eqv? (finite-list? (cons 1 2)) #f)"
+               "(finite-list?)" ]
+    "6.3.9", [ "(countable-list? (list 1 2))"; "(eqv? (countable-list? 5) #f)"
+               // The lists: finite or cyclic, but not improper.
+               "(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p) (countable-list? p))"
+               "(eqv? (countable-list? (cons 1 2)) #f)"
+               "(countable-list?)" ]
     // 6.3.10: (reduce list binary identity) -- the list comes first here.
     "6.3.10", [ "(=? (reduce (list 1 2 3 4) + 0) 10)"; "(=? (reduce () + 0) 0)"
                 "(=? (reduce (list 5) + 0) 5)" ]
@@ -226,7 +245,11 @@ let private behaviouralChecks () : (string * string list) list = [
                "(eqv? ($and? #f (/ 1 0)) #f)" ]
     "6.1.5", [ "($or? #f #t)"; "(eqv? ($or? #f #f) #f)"; "(eqv? ($or?) #f)"
                "($or? #t (/ 1 0))" ]
-    "6.3.1", [ "(eqv? (length (list 1 2 3)) 3)"; "(eqv? (length ()) 0)" ]
+    "6.3.1", [ "(eqv? (length (list 1 2 3)) 3)"; "(eqv? (length ()) 0)"
+               // "If object is not a pair, it returns zero; if object is a cyclic
+               // list, it returns positive infinity."
+               "(eqv? (length 5) 0)"; "(eqv? (length (cons 1 2)) 1)"
+               "(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p) (eqv? (length p) #e+infinity))" ]
     "6.7.2", [ "(environment? (get-current-environment))" ]
     "6.7.4", [ "(eqv? (let* ((x 1) (y (+ x 1))) y) 2)" ]
     "6.7.5", [ "(eqv? (letrec ((f (lambda (n) (if (eqv? n 0) 0 (f (- n 1)))))) (f 3)) 0)" ]
@@ -610,9 +633,16 @@ let private divergences () = [
            + "mutable cons cells. Mutability follows where the structure came from: "
            + "the reader produces immutable pairs, because a program is an algorithm "
            + "rather than data the program made, while `cons` and `list` produce "
-           + "mutable ones. The remaining two, and the cycle-safety their cycles "
-           + "demand of `get-list-metrics` and the derived list library, are phases 4 "
-           + "and 5 of [ADR 0005](adr/0005-mutable-pairs.md)."
+           + "mutable ones. The two remaining entries are phase 5 of "
+           + "[ADR 0005](adr/0005-mutable-pairs.md)."
+    "6.3", "The derived list library divides on whether a derivation asks about a "
+           + "list's *shape* or walks its *elements*. `length`, `finite-list?` and "
+           + "`countable-list?` go through `get-list-metrics`, which measures a cycle "
+           + "rather than walking into one. `list-tail`, `filter`, `reduce`, `append` "
+           + "and the rest walk elements and diverge on a cyclic argument, as the "
+           + "report's own derivations of them do. The report's six-argument `reduce` "
+           + "(6.3.10), which is the entry that would handle a cyclic list, is not "
+           + "implemented: only the three-argument form is."
     "12.10", "Complex numbers are `System.Numerics.Complex`, so components are "
              + "double precision and a result whose imaginary part is zero collapses "
              + "back to a real. The report specifies 12.10 by signature only."

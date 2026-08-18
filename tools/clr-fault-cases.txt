@@ -180,3 +180,7 @@
 (let ((p (list 1 2))) (set-cdr! (cdr p) p) (equal? p p))
 (let ((p (list 1 2))) (set-cdr! (cdr p) p) (null? p))
 (copy-es-immutable (list (list 1) 2))
+(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p) (get-list-metrics p))
+(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p) (length p))
+(let ((p (list 1 2 3))) (set-cdr! (cdr (cdr p)) p) (finite-list? p))
+(let ((p (list 1))) (set-cdr! p p) (countable-list? p))

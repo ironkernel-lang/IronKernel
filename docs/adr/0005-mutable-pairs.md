@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Accepted — phases 0-3 done, phases 4-6 outstanding
+Status: Accepted — phases 0-4 done, phases 5-6 outstanding
 
 ## Decision
 
@@ -279,12 +279,29 @@ What is left for phase 4 is narrower than this plan assumed: `get-list-metrics`
 still answers "acyclic, of this length" unconditionally, and the `kernel.ikr` list
 derivations built on it still carry their no-cycles comments.
 
-**Phase 4 — cycle safety.** Now that `encycle!` is buildable, before it is built:
-`equal?` gets a termination-safe algorithm; `showVal` — already an explicit work
-stack — gets cycle detection; `get-list-metrics` computes the four metrics for
-real. Then the `kernel.ikr` list library derivations that carry "no list can be
-cyclic" comments are revisited one at a time against the report's cyclic cases.
-`equal?` is a required entry, so this phase is not optional.
+**Phase 4 — cycle safety.** *Done*, and narrower than planned, because phase 3
+had already taken the traversals that would otherwise hang.
+
+`get-list-metrics` (5.7.1) now measures rather than assumes. It returns
+`(p n a c)` for real — pairs, nils, acyclic prefix length, cycle length — found
+with Floyd: a second reference at half speed meets the first inside any cycle, one
+lap from the meeting point gives the cycle length, and restarting one reference at
+the beginning and advancing both in step meets at the cycle's first pair. It is
+the primitive the derived library asks about shape, so it is the one place a cycle
+has to be measured.
+
+The three derivations that ask about shape now go through it. `length` (6.3.1)
+returns positive infinity for a cyclic list, which is the report's answer and a
+use for the exact infinities of 12.3.2. `finite-list?` (6.3.8) is `n = 1` and
+`countable-list?` (6.3.9) is `n = 1 or c > 0`; both previously walked the list,
+which a cyclic argument would not have survived.
+
+The derivations that walk *elements* — `list-tail`, `filter`, `reduce`, `append`
+and the rest — still assume a finite argument, exactly as the report's own
+derivations of them do, and diverge on a cyclic one. That is recorded as a 6.3
+divergence rather than left implicit, together with the fact that the report's
+six-argument `reduce` (6.3.10), the entry that would handle a cyclic list, is not
+implemented.
 
 **Phase 5 — the mutating library entries.** `encycle!` (5.8.1) and `append!`
 (6.4.1), which is where a cycle first enters the system from Kernel code.

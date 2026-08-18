@@ -1434,18 +1434,79 @@
         /// IronKernel's pairs are immutable and it does not implement the optional Pair
         /// mutation module, so no cyclic structure can be built and c is always zero
         /// and a always equals p. The shape of the answer is still the report's.
+        /// R-1RK 5.7.1. Returns `(p n a c)`: the number of pairs, the number of nils
+        /// (0 or 1), the acyclic prefix length, and the cycle length of the improper
+        /// list starting at the argument. `a + c = p`, and `n` and `c` are never both
+        /// non-zero.
+        ///
+        /// This used to answer "acyclic, of this length" unconditionally, which was
+        /// true only because no list could be cyclic. `set-cdr!` changed that, and this
+        /// is the primitive the whole derived list library asks about shape, so it is
+        /// the one place a cycle has to be measured rather than merely survived.
+        ///
+        /// Floyd: a second reference advancing at half speed meets the first inside any
+        /// cycle. From that meeting point the cycle length is one lap, and restarting
+        /// one reference at the beginning and advancing both in step meets at the
+        /// cycle's first pair, which is the acyclic prefix length.
         let getListMetrics env cont args =
             match args with
             | [value] ->
-                let pairs, nils =
-                    match value with
-                    | List [] -> 0, 1
-                    | List items -> List.length items, 1
-                    | DottedList(items, tail) ->
-                        List.length items, (match tail with List [] -> 1 | _ -> 0)
-                    | _ -> 0, 0
-                let counted n = Obj(box n)
-                bounceContinue env cont (ofList [counted pairs; counted nils; counted pairs; counted 0])
+                let cdrOf = function
+                    | Pair cell -> Some cell.cdr
+                    | _ -> None
+                let rec advance steps current =
+                    if steps = 0 then current
+                    else
+                        match cdrOf current with
+                        | Some next -> advance (steps - 1) next
+                        | None -> current
+                // Look for a meeting point.
+                let mutable slow = value
+                let mutable fast = value
+                let mutable met = false
+                let mutable ended = false
+                while not met && not ended do
+                    match cdrOf fast with
+                    | None -> ended <- true
+                    | Some once ->
+                        match cdrOf once with
+                        | None -> ended <- true
+                        | Some twice ->
+                            fast <- twice
+                            slow <- advance 1 slow
+                            if obj.ReferenceEquals(slow, fast) then met <- true
+                let pairs, nils, acyclic, cycle =
+                    if not met then
+                        // Acyclic: count pairs to the terminator, which is a nil or not.
+                        let mutable current = value
+                        let mutable count = 0
+                        let mutable walking = true
+                        while walking do
+                            match cdrOf current with
+                            | Some next -> count <- count + 1; current <- next
+                            | None -> walking <- false
+                        let terminatorIsNil = (match current with Nil -> 1 | _ -> 0)
+                        count, terminatorIsNil, count, 0
+                    else
+                        // One lap from the meeting point gives the cycle length.
+                        let mutable cycleLength = 1
+                        let mutable current = advance 1 fast
+                        while not (obj.ReferenceEquals(current, fast)) do
+                            current <- advance 1 current
+                            cycleLength <- cycleLength + 1
+                        // Advancing in step from the start and from the meeting point
+                        // brings both to the cycle's first pair.
+                        let mutable fromStart = value
+                        let mutable fromMeeting = fast
+                        let mutable prefix = 0
+                        while not (obj.ReferenceEquals(fromStart, fromMeeting)) do
+                            fromStart <- advance 1 fromStart
+                            fromMeeting <- advance 1 fromMeeting
+                            prefix <- prefix + 1
+                        prefix + cycleLength, 0, prefix, cycleLength
+                let counted (n: int) = Obj(box n)
+                bounceContinue env cont (
+                    ofList [counted pairs; counted nils; counted acyclic; counted cycle])
             | _ -> fail (NumArgs(1, args))
 
         /// R-1RK 12.10. Like 12.9 the report gives these signatures only, so they take

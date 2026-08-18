@@ -48,7 +48,8 @@ exercised, not that IronKernel matches the report exactly.
 | 12.3.3 | Under strict arithmetic the report signals on numeric overflow and underflow as well as on a result with no primary value. IronKernel signals only the latter: an overflow still yields an infinity and an underflow a zero, which is the report's behaviour for *cleared* strict-arithmetic. Its initial value here is true, which the report leaves open. |
 | 7.2.7 | Signalling an error is not an abnormal pass to `error-continuation`. IronKernel reports errors on a separate channel that unwinds the computation directly, so an exit guard is *not* selected when an error is signalled within the guarded extent -- passing to the continuation explicitly does work, and provides the diagnostic. One consequence is that the report's derivation of `$binds?` from an error exit-guard would not work here. |
 | 7.2.6 | `root-continuation` is not literally at the end of every continuation chain: IronKernel's drivers give each top-level form its own continuation. Its extent is instead defined to contain everything, which is what "the ancestor of all other continuations" means for the selection algorithm, so a clause selecting on it is always selected. Receiving a value ends the session, and the process exit status is 0. |
-| 4.7 | Module Pair mutation is not complete: `encycle!` (5.8.1) and `append!` (6.4.1) are absent. Everything else is implemented, over genuinely mutable cons cells. Mutability follows where the structure came from: the reader produces immutable pairs, because a program is an algorithm rather than data the program made, while `cons` and `list` produce mutable ones. The remaining two, and the cycle-safety their cycles demand of `get-list-metrics` and the derived list library, are phases 4 and 5 of [ADR 0005](adr/0005-mutable-pairs.md). |
+| 4.7 | Module Pair mutation is not complete: `encycle!` (5.8.1) and `append!` (6.4.1) are absent. Everything else is implemented, over genuinely mutable cons cells. Mutability follows where the structure came from: the reader produces immutable pairs, because a program is an algorithm rather than data the program made, while `cons` and `list` produce mutable ones. The two remaining entries are phase 5 of [ADR 0005](adr/0005-mutable-pairs.md). |
+| 6.3 | The derived list library divides on whether a derivation asks about a list's *shape* or walks its *elements*. `length`, `finite-list?` and `countable-list?` go through `get-list-metrics`, which measures a cycle rather than walking into one. `list-tail`, `filter`, `reduce`, `append` and the rest walk elements and diverge on a cyclic argument, as the report's own derivations of them do. The report's six-argument `reduce` (6.3.10), which is the entry that would handle a cyclic list, is not implemented: only the three-argument form is. |
 | 12.10 | Complex numbers are `System.Numerics.Complex`, so components are double precision and a result whose imaginary part is zero collapses back to a real. The report specifies 12.10 by signature only. |
 | 12.8 | Exactness is carried by a value's representation rather than by the exactness tag the report describes, since module Inexact (12.6) is unimplemented: `1/2` is an exact ratio and `0.5` is a double. One consequence is that `numerator` and `denominator` of an inexact real return exact integers -- `(denominator 0.1)` is 2^55 -- rather than inexact ones. |
 
@@ -149,7 +150,7 @@ divergences before taking any row as a claim of conformance.
 | 5.4.1 | `car, cdr` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.5.1 | `apply` | Combiners | `verified` | 1 behavioural check(s) |
 | 5.6.1 | `$cond` | Control | `verified` | 1 behavioural check(s) |
-| 5.7.1 | `get-list-metrics` | Pairs and lists | `verified` | 3 behavioural check(s) |
+| 5.7.1 | `get-list-metrics` | Pairs and lists | `verified` | 7 behavioural check(s) |
 | 5.7.2 | `list-tail` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 5.8.1 | `encycle!` | Pair mutation (optional) | `absent` | optional module |
 | 5.9.1 | `map` | Combiners | `verified` | 1 behavioural check(s) |
@@ -165,15 +166,15 @@ divergences before taking any row as a claim of conformance.
 | 6.1.4 | `$and?` | Booleans | `verified` | 4 behavioural check(s) |
 | 6.1.5 | `$or?` | Booleans | `verified` | 4 behavioural check(s) |
 | 6.2.1 | `combiner?` | Combiners | `verified` | 3 behavioural check(s) |
-| 6.3.1 | `length` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.1 | `length` | Pairs and lists | `verified` | 5 behavioural check(s) |
 | 6.3.2 | `list-ref` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 6.3.3 | `append` | Pairs and lists | `verified` | 4 behavioural check(s) |
 | 6.3.4 | `list-neighbors` | Pairs and lists | `verified` | 3 behavioural check(s) |
 | 6.3.5 | `filter` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 6.3.6 | `assoc` | Pairs and lists | `verified` | 2 behavioural check(s) |
 | 6.3.7 | `member?` | Pairs and lists | `verified` | 2 behavioural check(s) |
-| 6.3.8 | `finite-list?` | Pairs and lists | `verified` | 3 behavioural check(s) |
-| 6.3.9 | `countable-list?` | Pairs and lists | `verified` | 2 behavioural check(s) |
+| 6.3.8 | `finite-list?` | Pairs and lists | `verified` | 6 behavioural check(s) |
+| 6.3.9 | `countable-list?` | Pairs and lists | `verified` | 5 behavioural check(s) |
 | 6.3.10 | `reduce` | Pairs and lists | `verified` | 3 behavioural check(s) |
 | 6.4.1 | `append!` | Pair mutation (optional) | `absent` | optional module |
 | 6.4.2 | `copy-es` | Pair mutation (optional) | `verified` | optional module; 8 behavioural check(s) |
