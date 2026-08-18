@@ -26,23 +26,39 @@ module Eval =
     /// phase 1 this is reserved for the places that have no continuation to signal
     /// from -- where the continuation *argument* is itself malformed, and the internal
     /// error for a metacontinuation in the wrong position. Everywhere else uses
-    /// `signal` below, which will become 7.2.7's abnormal pass.
+    /// `signal` below, which is 7.2.7's abnormal pass.
     let inline fail (e: LispError) : Step = Done (throwError e)
 
-    /// R-1RK 7.2.7 makes signalling an error an abnormal pass to a continuation in the
-    /// extent of error-continuation. This is the seam that will become one: today it
-    /// ignores its continuation and unwinds directly, exactly as `fail` does, so
-    /// nothing changes yet (ADR 0006 phase 1).
+    /// R-1RK 7.2.7: "the signaling action consists of an abnormal pass to some
+    /// continuation in the dynamic extent of error-continuation". Since ADR 0006
+    /// phase 2 this does exactly that, through the 7.2.5 guard machinery, so an exit
+    /// guard selecting on error-continuation is selected when the guarded extent
+    /// signals.
+    ///
+    /// With no guards installed the pass selects nothing and reaches a destination
+    /// that reports the original error, which is what `fail` does directly -- so this
+    /// is invisible to programs that do not use guards.
     ///
     /// The continuation passed is the one the failing operation would have returned to,
     /// which means the *innermost* one in scope -- inside a CPS callback that is the
-    /// callback's own, not the enclosing primitive's. Getting that right is the whole
-    /// point of migrating the call sites before the behaviour changes, because phase 2
-    /// is what makes a wrong one visible.
+    /// callback's own, not the enclosing primitive's. Getting that right was the whole
+    /// point of migrating the call sites in phase 1 before the behaviour changed here.
     ///
-    /// `fail` remains for the paths that genuinely have no continuation: bootstrap, and
-    /// host entry points.
-    let inline signal (_cont: LispVal) (e: LispError) : Step = Done (throwError e)
+    /// The pass itself lives in Runtime, which owns the guard machinery and compiles
+    /// after this module, so it is installed through the hook below -- the same idiom
+    /// as configureSourceServices and configureBodyCompiler. Unconfigured, in a host
+    /// that builds no primitive bindings, signalling unwinds directly as before.
+    ///
+    /// A delegate rather than a curried function, and not inline: all three shapes
+    /// were measured and this one is the fastest (see the ADR).
+    let mutable private errorSignal : System.Func<LispVal, LispError, Step> =
+        System.Func<_, _, _>(fun _ e -> Done (throwError e))
+
+    let configureErrorSignal (handler: LispVal -> LispError -> Step) =
+        errorSignal <- System.Func<_, _, _>(fun cont e -> handler cont e)
+
+    let signal (cont: LispVal) (e: LispError) : Step = errorSignal.Invoke(cont, e)
+
     let inline ofResult (r: ThrowsError<LispVal>) : Step = Done r
 
     let rec runAsync (step: Step) : Task<ThrowsError<LispVal>> =

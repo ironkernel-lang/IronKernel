@@ -37,6 +37,7 @@
     <Compile Include="ContinuationFeatureTests.fs" />
     <Compile Include="PairMutationTests.fs" />
     <Compile Include="PortTests.fs" />
+    <Compile Include="ErrorPassTests.fs" />
     <Compile Include="KernelConformanceTests.fs" />
   </ItemGroup>
   <ItemGroup>
