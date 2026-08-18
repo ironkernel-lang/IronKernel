@@ -64,16 +64,16 @@ module Source =
                 | LQuote quoted ->
                     pending <- Convert quoted :: BuildQuote :: pending
             | BuildList count ->
-                completed <- List (takeCompleted count) :: completed
+                completed <- ofList (takeCompleted count) :: completed
             | BuildDottedList headCount ->
                 match takeCompleted (headCount + 1) |> List.splitAt headCount with
-                | head, [tail] -> completed <- DottedList(head, tail) :: completed
+                | head, [tail] -> completed <- (ofDotted head tail) :: completed
                 | _ -> invalidOp "Located dotted list conversion is incomplete"
             | BuildVector count ->
                 completed <- Vector(Array.ofList (takeCompleted count)) :: completed
             | BuildQuote ->
                 match takeCompleted 1 with
-                | [quoted] -> completed <- List [Atom "quote"; quoted] :: completed
+                | [quoted] -> completed <- ofList [Atom "quote"; quoted] :: completed
                 | _ -> invalidOp "Located quote conversion is incomplete"
 
         match completed with

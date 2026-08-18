@@ -76,13 +76,13 @@ type ClrResolutionBenchmarks() =
 type EqualityBenchmarks() =
     let values () = [1..16] |> List.map (fun value -> Obj (value :> obj))
     let scalarArgs = [Obj (42 :> obj); Obj (42 :> obj)]
-    let flatListArgs = [List (values ()); List (values ())]
+    let flatListArgs = [ofList (values ()); ofList (values ())]
     let nestedListArgs =
-        [ List [List (values ()); List (values ())]
-          List [List (values ()); List (values ())] ]
+        [ ofList [ofList (values ()); ofList (values ())]
+          ofList [ofList (values ()); ofList (values ())] ]
     let dottedListArgs =
-        [ DottedList (values (), Atom "tail")
-          DottedList (values (), Atom "tail") ]
+        [ (ofDotted (values ()) (Atom "tail"))
+          (ofDotted (values ()) (Atom "tail")) ]
 
     [<Benchmark(Baseline = true)>]
     member _.ScalarEqual() =

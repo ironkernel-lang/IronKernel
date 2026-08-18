@@ -11,15 +11,15 @@ open IronKernel.Tests.TestHelpers
 let ``vau receives unevaluated operands`` () =
     [
         "(define quote-one (vau (x) _ x))", Inert
-        "(quote-one (+ 1 2))", List [Atom "+"; Obj 1; Obj 2]
+        "(quote-one (+ 1 2))", ofList [Atom "+"; Obj 1; Obj 2]
     ] |> evalSession
 
 [<Fact>]
 let ``vau rejects operands that do not match formals`` () =
     let cases =
-        [ "((vau (x y) _ 42) 1)", List []
-          "((vau (x y) _ 42) 1 2 3)", List [Obj 3]
-          "((vau ((x y)) _ 42) (1))", List [] ]
+        [ "((vau (x y) _ 42) 1)", ofList []
+          "((vau (x y) _ 42) 1 2 3)", ofList [Obj 3]
+          "((vau ((x y)) _ 42) (1))", ofList [] ]
 
     for expression, badForm in cases do
         for mode in [Interpreted; Compiled] do
@@ -36,7 +36,7 @@ let ``vau rejects operands that do not match formals`` () =
 let ``vau dotted formals collect remaining operands`` () =
     assertParityValueSession
         [ "((vau (x & rest) _ rest) 1 2 3)" ]
-        (List [Obj 2; Obj 3])
+        (ofList [Obj 2; Obj 3])
 
 [<Fact>]
 let ``vau combines nested destructuring with rest formals`` () =
@@ -47,8 +47,8 @@ let ``vau combines nested destructuring with rest formals`` () =
 [<Fact>]
 let ``formal binding handles very long lists`` () =
     let env = freshEnv ()
-    let formals = List(List.replicate 100000 (Atom "value"))
-    let values = List([0..99999] |> List.map (fun value -> Obj(value :> obj)))
+    let formals = ofList(List.replicate 100000 (Atom "value"))
+    let values = ofList([0..99999] |> List.map (fun value -> Obj(value :> obj)))
 
     match bind env (newContinuation env) formals values with
     | Choice1Of2 error -> failwithf "deep formal binding failed: %s" (showError error)
@@ -86,7 +86,7 @@ let ``wrap and unwrap`` () =
         "(define op (vau (x) _ x))", Inert
         "(define ap (wrap op))", Inert
         "(ap (+ 1 2))", Obj 3
-        "((unwrap ap) (+ 1 2))", List [Atom "+"; Obj 1; Obj 2]
+        "((unwrap ap) (+ 1 2))", ofList [Atom "+"; Obj 1; Obj 2]
     ] |> evalSession
 
 [<Fact>]

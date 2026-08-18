@@ -42,7 +42,7 @@ let ``defn and compose`` () =
 let ``apply and list-star`` () =
     evalSessionKernel [
         "(apply + (list 1 2))", Obj 3
-        "(list* 1 2 (list 3))", List [Obj 1; Obj 2; Obj 3]
+        "(list* 1 2 (list 3))", ofList [Obj 1; Obj 2; Obj 3]
     ]
 
 [<Fact>]

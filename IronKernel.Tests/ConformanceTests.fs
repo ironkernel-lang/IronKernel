@@ -140,7 +140,7 @@ let ``operative uses lexical scope and can explicitly evaluate in caller scope``
           "(define caller-value (vau (form) caller (eval form caller)))"
           "(define exercise (wrap (vau (x) _ (list (lexical) (caller-value x)))))"
           "(exercise 2)" ]
-        (List [Obj (1 :> obj); Obj (2 :> obj)])
+        (ofList [Obj (1 :> obj); Obj (2 :> obj)])
 
 [<Fact>]
 let ``environment lookup is depth first in parent order`` () =
@@ -151,7 +151,7 @@ let ``environment lookup is depth first in parent order`` () =
           "(define b (bindings->environment (x 3) (z 4)))"
           "(define c (make-environment a b))"
           "(list (remote-eval x c) (remote-eval y c) (remote-eval z c))" ]
-        (List [Obj (1 :> obj); Obj (2 :> obj); Obj (4 :> obj)])
+        (ofList [Obj (1 :> obj); Obj (2 :> obj); Obj (4 :> obj)])
 
 [<Fact>]
 let ``wrapped combiner evaluates operands while operative receives syntax`` () =
@@ -161,9 +161,9 @@ let ``wrapped combiner evaluates operands while operative receives syntax`` () =
           "(define raw (vau operands _ operands))"
           "(define cooked (wrap raw))"
           "(list (raw (+ 1 2)) (cooked (+ 1 2)))" ]
-        (List
-            [ List [List [Atom "+"; Obj (1 :> obj); Obj (2 :> obj)]]
-              List [Obj (3 :> obj)] ])
+        (ofList
+            [ ofList [ofList [Atom "+"; Obj (1 :> obj); Obj (2 :> obj)]]
+              ofList [Obj (3 :> obj)] ])
 
 [<Fact>]
 let ``applicative operands evaluate from left to right`` () =

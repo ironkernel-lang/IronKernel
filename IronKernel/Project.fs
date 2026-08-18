@@ -570,7 +570,7 @@ module Project =
                     | Choice2Of2 standardEnv ->
                         let env =
                             bindVars standardEnv
-                                [ "args", List(List.map (fun arg -> Obj(arg :> obj)) args) ]
+                                [ "args", ofList(List.map (fun arg -> Obj(arg :> obj)) args) ]
                         match runFiles env (orderedSources project assets) with
                         | Choice1Of2 error ->
                             eprintfn "Project error: %s" (showError error)

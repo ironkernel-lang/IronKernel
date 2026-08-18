@@ -44,11 +44,11 @@ module StaticCompiler =
             values
             |> List.map emitValue
             |> sequenceOptions
-            |> Option.map (fun emitted -> "List [" + String.concat "; " emitted + "]")
+            |> Option.map (fun emitted -> "ofList [" + String.concat "; " emitted + "]")
         | DottedList(head, tail) ->
             match head |> List.map emitValue |> sequenceOptions, emitValue tail with
             | Some emittedHead, Some emittedTail ->
-                Some("DottedList([" + String.concat "; " emittedHead + "], " + emittedTail + ")")
+                Some("ofDotted [" + String.concat "; " emittedHead + "] (" + emittedTail + ")")
             | _ -> None
         | Bool value -> Some(if value then "Bool true" else "Bool false")
         | Inert -> Some "Inert"

@@ -71,7 +71,7 @@ module Repl =
         | Choice2Of2 standardEnv ->
             let env =
                 bindVars standardEnv
-                    [ "args", List (List.map (fun x -> Ast.Obj(x :> obj)) args) ]
+                    [ "args", ofList (List.map (fun x -> Ast.Obj(x :> obj)) args) ]
             match runSourceFile env filename with
             | Choice1Of2 error ->
                 eprintfn "Script error: %s" (showError error)

@@ -61,21 +61,27 @@ module Analyze =
             | IOFunc _
             | Port _
             | Status _ -> result <- Some(CLit current)
-            | List [] -> result <- Some(CLit(List []))
+            // The chain is materialised once and then dispatched on as an ordinary F#
+            // list. Asking through the list pattern per alternative walked and rebuilt
+            // the whole form up to three times for every combination analysed, which is
+            // most of what the analyzer does.
+            | List items ->
+                match items with
+                | [] -> result <- Some(CLit(ofList []))
+                | Atom name :: args ->
+                    // Desugar Clojure-style CLR calls before binding analysis so the
+                    // hybrid compiler sees ordinary `.` / `new` / `.get` combinations.
+                    match tryRewrite name args with
+                    | Some rewritten -> current <- rewritten
+                    | None -> result <- Some(COperate(CVar name, args))
+                | op :: args ->
+                    // Kernel has no syntactically privileged operator names. Preserve
+                    // operand trees exactly and let runtime binding lookup select
+                    // operative semantics. Specialized forms require binding-identity
+                    // guards, which this analyzer intentionally does not yet have.
+                    pendingOperands <- args :: pendingOperands
+                    current <- op
             | DottedList _ as form -> result <- Some(CResidual form)
-            | List (Atom name :: args) ->
-                // Desugar Clojure-style CLR calls before binding analysis so the
-                // hybrid compiler sees ordinary `.` / `new` / `.get` combinations.
-                match tryRewrite name args with
-                | Some rewritten -> current <- rewritten
-                | None -> result <- Some(COperate(CVar name, args))
-            | List (op :: args) ->
-                // Kernel has no syntactically privileged operator names. Preserve operand
-                // trees exactly and let runtime binding lookup select operative semantics.
-                // Specialized forms require binding-identity guards, which this analyzer
-                // intentionally does not yet have.
-                pendingOperands <- args :: pendingOperands
-                current <- op
             | other -> result <- Some(CResidual other)
 
         let mutable analyzed = result.Value
@@ -113,7 +119,10 @@ module Analyze =
                 match form with
                 // Both spellings: `$if` is the report's name (R-1RK 4.5.2), `if` the
                 // dialect's. They denote one combiner, so both deserve the guard.
-                | List (Atom ("if" | "$if" as name) :: [condition; consequent; alternative] as whole) ->
+                // Materialised once, as above.
+                | List items ->
+                  match items with
+                  | (Atom ("if" | "$if" as name) :: [condition; consequent; alternative]) as whole ->
                     let fallback = COperate(CVar name, List.tail whole)
                     match tryCreateBindingGuard env name PrimitiveIf with
                     | Some guard ->
@@ -124,7 +133,7 @@ module Analyze =
                             :: BuildGuardedIf(guard, fallback)
                             :: pending
                     | None -> completed <- fallback :: completed
-                | List (Atom ("define" | "$define!" as definer) :: [Atom name; rhs] as whole) ->
+                  | (Atom ("define" | "$define!" as definer) :: [Atom name; rhs]) as whole ->
                     let fallback = COperate(CVar definer, List.tail whole)
                     match tryCreateBindingGuard env definer PrimitiveDefine with
                     | Some guard ->
@@ -133,7 +142,7 @@ module Analyze =
                             :: BuildGuardedDefine(guard, name, fallback)
                             :: pending
                     | None -> completed <- fallback :: completed
-                | List (Atom name :: operands) ->
+                  | Atom name :: operands ->
                     // Prefer a real binding over CLR call sugar (same rule as Eval).
                     match getVar' env name with
                     | Some _ -> completed <- COperate(CVar name, operands) :: completed
@@ -141,8 +150,9 @@ module Analyze =
                         match tryRewrite name operands with
                         | Some rewritten -> pending <- AnalyzeGuardedForm rewritten :: pending
                         | None -> completed <- COperate(CVar name, operands) :: completed
-                | List (op :: operands) ->
+                  | op :: operands ->
                     pending <- AnalyzeGuardedForm op :: BuildGuardedOperate operands :: pending
+                  | [] -> completed <- analyze form :: completed
                 | other -> completed <- analyze other :: completed
             | BuildGuardedIf (guard, fallback) ->
                 match takeCompleted 3 with
@@ -288,7 +298,7 @@ module Analyze =
                 match current with
                 | CLit value -> completed <- value :: completed
                 | CVar name -> completed <- Atom name :: completed
-                | CQuote value -> completed <- List [Atom "quote"; value] :: completed
+                | CQuote value -> completed <- ofList [Atom "quote"; value] :: completed
                 | CIf(condition, consequent, alternative) ->
                     pending <-
                         Reify condition
@@ -314,9 +324,9 @@ module Analyze =
                 | COperate(operator, operands) ->
                     pending <- Reify operator :: BuildOperate operands :: pending
                 | CIntrinsicOperate(PrimitiveIf, operands) ->
-                    completed <- List (Atom "if" :: operands) :: completed
+                    completed <- ofList (Atom "if" :: operands) :: completed
                 | CIntrinsicOperate(PrimitiveDefine, operands) ->
-                    completed <- List (Atom "define" :: operands) :: completed
+                    completed <- ofList (Atom "define" :: operands) :: completed
                 | CGuarded(_, _, fallback)
                 | CContractFold(_, _, fallback) ->
                     pending <- Reify fallback :: pending
@@ -332,32 +342,32 @@ module Analyze =
             | BuildIf ->
                 match takeCompleted 3 with
                 | [condition; consequent; alternative] ->
-                    completed <- List [Atom "if"; condition; consequent; alternative] :: completed
+                    completed <- ofList [Atom "if"; condition; consequent; alternative] :: completed
                 | _ -> invalidOp "Conditional reification is incomplete"
             | BuildSequence count ->
-                completed <- List (Atom "sequence" :: takeCompleted count) :: completed
+                completed <- ofList (Atom "sequence" :: takeCompleted count) :: completed
             | BuildDefine ->
                 match takeCompleted 2 with
-                | [lhs; rhs] -> completed <- List [Atom "define"; lhs; rhs] :: completed
+                | [lhs; rhs] -> completed <- ofList [Atom "define"; lhs; rhs] :: completed
                 | _ -> invalidOp "Definition reification is incomplete"
             | BuildVau(formals, envarg, bodyCount) ->
                 completed <-
-                    List (Atom "vau" :: formals :: Atom envarg :: takeCompleted bodyCount)
+                    ofList (Atom "vau" :: formals :: Atom envarg :: takeCompleted bodyCount)
                     :: completed
             | BuildApp argumentCount ->
-                completed <- List (takeCompleted (argumentCount + 1)) :: completed
+                completed <- ofList (takeCompleted (argumentCount + 1)) :: completed
             | BuildOperate operands ->
                 match takeCompleted 1 with
-                | [operator] -> completed <- List (operator :: operands) :: completed
+                | [operator] -> completed <- ofList (operator :: operands) :: completed
                 | _ -> invalidOp "Operation reification is incomplete"
             | BuildEval ->
                 match takeCompleted 2 with
                 | [environmentExpression; valueExpression] ->
-                    completed <- List [Atom "eval"; environmentExpression; valueExpression] :: completed
+                    completed <- ofList [Atom "eval"; environmentExpression; valueExpression] :: completed
                 | _ -> invalidOp "Eval reification is incomplete"
             | BuildReset ->
                 match takeCompleted 1 with
-                | [body] -> completed <- List [Atom "reset"; body] :: completed
+                | [body] -> completed <- ofList [Atom "reset"; body] :: completed
                 | _ -> invalidOp "Reset reification is incomplete"
 
         match completed with

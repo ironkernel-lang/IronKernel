@@ -150,7 +150,7 @@ module Compiler =
                 | CReset body ->
                     // Delimited continuations must go through the trampoline interpreter so
                     // shift sees the proper meta-continuation chain (including under begin/applicatives).
-                    let form = List [Atom "reset"; toLispVal body]
+                    let form = ofList [Atom "reset"; toLispVal body]
                     completed <- KernelFunc(fun env cont -> bounceEval env cont form) :: completed
                 | CApp (operator, args) ->
                     let operands = List.map toLispVal args |> List.toArray

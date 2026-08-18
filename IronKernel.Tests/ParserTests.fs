@@ -52,7 +52,7 @@ let rec private generateDatum (random: Random) depth =
         | 1 ->
             let values = [ for _ in 0..random.Next(3) -> generateDatum random (depth - 1) ]
             let source = values |> List.map fst |> String.concat " "
-            $"({source})", List(List.map snd values)
+            $"({source})", ofList(List.map snd values)
         | 2 ->
             let values = [ for _ in 0..random.Next(3) -> generateDatum random (depth - 1) ]
             let source = values |> List.map fst |> String.concat "\n"
@@ -61,10 +61,10 @@ let rec private generateDatum (random: Random) depth =
             let head = [ for _ in 0..random.Next(2) -> generateDatum random (depth - 1) ]
             let tailSource, tail = generateDatum random (depth - 1)
             let headSource = head |> List.map fst |> String.concat " "
-            $"({headSource} & {tailSource})", DottedList(List.map snd head, tail)
+            $"({headSource} & {tailSource})", (ofDotted (List.map snd head) tail)
         | _ ->
             let source, value = generateDatum random (depth - 1)
-            $"'{source}", List [Atom "quote"; value]
+            $"'{source}", ofList [Atom "quote"; value]
 
 [<Fact>]
 let ``generated nested datums preserve structure and source spans`` () =
@@ -184,8 +184,8 @@ let ``parses strings atoms and quote`` () =
 
 [<Fact>]
 let ``parses lists dotted lists and vectors`` () =
-    assertEqv (parseOk "(a 1)") (List [Atom "a"; Obj 1])
-    assertEqv (parseOk "()") (List [])
+    assertEqv (parseOk "(a 1)") (ofList [Atom "a"; Obj 1])
+    assertEqv (parseOk "()") (ofList [])
     match parseOk "(a & b)" with
     | DottedList ([Atom "a"], Atom "b") -> ()
     | v -> failwith (showVal v)
@@ -200,7 +200,7 @@ let ``parses lists dotted lists and vectors`` () =
 let ``parses nested combinations`` () =
     assertEqv
         (parseOk "(+ 1 (* 2 3))")
-        (List [Atom "+"; Obj 1; List [Atom "*"; Obj 2; Obj 3]])
+        (ofList [Atom "+"; Obj 1; ofList [Atom "*"; Obj 2; Obj 3]])
 
 [<Fact>]
 let ``parses deeply nested lists without exponential backtracking`` () =

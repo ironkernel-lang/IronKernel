@@ -1,6 +1,6 @@
 # ADR 0005: Mutable pairs
 
-Status: Accepted — phase 0 done, phases 1-6 outstanding
+Status: Accepted — phases 0 and 1 done, phases 2-6 outstanding
 
 ## Decision
 
@@ -171,13 +171,53 @@ Collapsing the two cases on top of that inconsistency would have buried the bug
 rather than fixed it, so it is fixed first and phase 1 removes the duplicate case
 outright.
 
-**Phase 1 — introduce the cell.** Replace the two union cases with `Pair of
-PairCell` plus `Nil`, keep `List`/`DottedList` as the active patterns described
-above, and edit the construction sites to the renamed helpers. The type checker
-locates every site that needs more than that. No behaviour changes: pairs are still created immutable, and nothing mutates
-them yet. Validated by the existing suite and by `CompilerBenchmarks` against the
-numbers below — this is the phase most likely to cost performance, and it should
-be measured before anything is built on it.
+**Phase 1 — introduce the cell.** *Done.* `LispVal` has `Pair of PairCell` with a
+mutable car, a mutable cdr and an immutability flag, and `Nil` is the only empty
+list. `List` and `DottedList` survive as active patterns, so the match sites
+compiled untouched and only construction moved, to `ofList` / `ofDotted`.
+Everything is still built immutable and nothing mutates a cell, so no behaviour
+changes.
+
+The active-pattern cost was worse than this plan guessed, and the guess about
+*where* was wrong. It is not confined to argument dispatch and arity matching: any
+site that asks a question about **one cell** through a list pattern became linear,
+and the damage was concentrated in a handful of places that are called constantly.
+
+- `car` walked a whole chain to read its first cell. `cdr` and `cons` walked it
+  *and rebuilt it*, so every `(cdr rest)` in a library loop copied the rest of the
+  list and every traversal was quadratic.
+- `bind` destructured and rebuilt both the parameter chain and the argument chain
+  on every iteration, making operative application quadratic in its arity.
+- The evaluator matched `List (Atom name :: args)` and then `List (op :: args)`,
+  materialising the operands twice per combination.
+- The analyzer matched up to seven list patterns against the same form, walking
+  and rebuilding it each time — most of what compiling a form does.
+- `null?`, `pair?`, the `ListShape` contract check and the equivalence walk each
+  walked a chain to answer a question about one cell.
+
+The rule that falls out, and the one to apply in later phases: **anything asking
+about a cell matches `Pair` or `Nil` directly; only code that genuinely wants the
+elements uses the list pattern, and then only once.** Where a function needs the
+elements repeatedly it materialises them once at the top and matches on the F#
+list from there.
+
+Against the baseline below, after those changes:
+
+| Method | before | after | |
+|---|---:|---:|---|
+| ColdCompile | 105.4 ns / 592 B | 145.8 ns / 808 B | +38% |
+| Interpreted | 371.1 ns / 1872 B | 401.0 ns / 2024 B | +8% |
+| CompiledGeneric | 173.6 ns / 808 B | 175.1 ns / 808 B | +1%, allocation identical |
+| CompiledFolded | 51.9 ns / 304 B | 52.6 ns / 304 B | +1%, allocation identical |
+
+The steady-state compiled paths are at parity, which is what this plan named as
+the number to hold. What remains is paid where a cons chain has to be turned into
+an F# list for code that wants the elements: compiling a form, and evaluating one
+interpreted. That is inherent to keeping the list patterns rather than rewriting
+the analyzer and evaluator against cells directly, and it is the obvious place to
+look if the interpreted path ever needs to be faster.
+
+The full suite is 114s against 107s on master, all 342 tests passing.
 
 **Phase 2 — `eq?` becomes identity.** With cells, two `equal?` lists can be
 different objects, which is the distinction 4.2.1 asks for and IronKernel has

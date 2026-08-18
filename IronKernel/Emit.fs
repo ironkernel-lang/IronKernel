@@ -176,7 +176,7 @@ module Emit =
             | Choice2Of2 standardEnv ->
                 let env =
                     bindVars standardEnv
-                        [ "args", List (List.map (fun arg -> Obj(arg :> obj)) args) ]
+                        [ "args", ofList (List.map (fun arg -> Obj(arg :> obj)) args) ]
                 use fs = File.OpenRead path
                 let forms = CorePackage.read env path fs |> List.map compileToFunc
                 runCompiledForms env forms
