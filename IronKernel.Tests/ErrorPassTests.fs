@@ -185,3 +185,35 @@ let ``the report's $binds? derivation works`` () =
         "(eq? (binds? here bound) ($binds? here bound))", Bool true
         "(eq? (binds? here nope) ($binds? here nope))", Bool true
     ] |> evalSessionKernel
+
+[<Fact>]
+let ``a port closes when the body signals`` () =
+    // The port combiners of chapter 15 install a closing guard on the extent, which
+    // before 7.2.7 signalled by abnormal pass was never selected on an error: the
+    // file stayed open. The controls matter here -- deleting a file that is still
+    // open succeeds on Unix, so "the file could be deleted" cannot fail for the right
+    // reason. Rejecting a later write can: an open port accepts one.
+    [
+        trying, Inert
+        "(define top (get-current-environment))", Inert
+        "(define captured ())", Inert
+        // Control one: a port the extent closed normally rejects a later write.
+        "(define f (. System.IO.Path GetTempFileName))", Inert
+        // call-with-output-file returns the combiner's result, not #inert.
+        "(call-with-output-file f (lambda (p) (set! top captured p) (write (quote alpha) p) #t))", Bool true
+        """(equal? (try (lambda () (write (quote beta) captured))) "caught")""", Bool true
+        // Control two: a port that is still open accepts one, so the check above
+        // distinguishes open from closed rather than always failing.
+        "(define g (. System.IO.Path GetTempFileName))", Inert
+        "(define open-port (open-output-file g))", Inert
+        """(not? (equal? (try (lambda () (write (quote beta) open-port))) "caught"))""", Bool true
+        // The report's 15.1.6 spelling, which gives inert; close-output-port is an
+        // IronKernel extension and returns a boolean.
+        "(inert? (close-output-file open-port))", Bool true
+        // The case under test: the body signals inside the extent.
+        "(define h (. System.IO.Path GetTempFileName))", Inert
+        """(equal?
+              (try (lambda () (call-with-output-file h (lambda (p) (set! top captured p) (car 5)))))
+              "caught")""", Bool true
+        """(equal? (try (lambda () (write (quote beta) captured))) "caught")""", Bool true
+    ] |> evalSessionKernel
