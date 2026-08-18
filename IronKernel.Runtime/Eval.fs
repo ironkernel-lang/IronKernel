@@ -414,7 +414,7 @@ module Eval =
                         Nil)
 
             let newEnv = newEnv [closure]
-            match bind newEnv (newContinuation _env) prms (ofList args) with
+            match run (bindArgsStep newEnv (newContinuation _env) prms args) with
             | Choice1Of2 error -> fail error
             | Choice2Of2 _ ->
                 match defineVar newEnv envarg _env with
@@ -428,8 +428,31 @@ module Eval =
         | Inert -> More (fun () -> continueEvalStep _env cont (ofList []))
         | _ -> fail (BadSpecialForm ("Expecting a combiner, got ", func))
 
+    /// Seeds the binding walk from an F# argument list rather than a Kernel one, so
+    /// that applying an operative does not build a chain of cells purely to take it
+    /// apart again one cell later. Formals and arguments are paired off directly; a
+    /// formal that is not a pair -- a rest parameter, or a mismatch -- hands the
+    /// remaining arguments over as a Kernel list, which is the only case that has to
+    /// build one.
+    and bindArgsStep env cont formals (args: LispVal list) : Step =
+        let mutable formal = formals
+        let mutable remaining = args
+        let mutable seeded = []
+        let mutable walking = true
+        while walking do
+            match formal, remaining with
+            | Pair cell, value :: rest ->
+                seeded <- (cell.car, value) :: seeded
+                formal <- cell.cdr
+                remaining <- rest
+            | _ -> walking <- false
+        bindPendingStep env cont ((formal, ofList remaining) :: seeded)
+
     and bindStep env cont lf rf : Step =
-        let mutable pending = [lf, rf]
+        bindPendingStep env cont [lf, rf]
+
+    and private bindPendingStep env cont seeded : Step =
+        let mutable pending = seeded
         let mutable bindingError = None
 
         while bindingError.IsNone && not pending.IsEmpty do

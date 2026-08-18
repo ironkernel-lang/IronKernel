@@ -61,21 +61,27 @@ module Analyze =
             | IOFunc _
             | Port _
             | Status _ -> result <- Some(CLit current)
-            | List [] -> result <- Some(CLit(ofList []))
+            // The chain is materialised once and then dispatched on as an ordinary F#
+            // list. Asking through the list pattern per alternative walked and rebuilt
+            // the whole form up to three times for every combination analysed, which is
+            // most of what the analyzer does.
+            | List items ->
+                match items with
+                | [] -> result <- Some(CLit(ofList []))
+                | Atom name :: args ->
+                    // Desugar Clojure-style CLR calls before binding analysis so the
+                    // hybrid compiler sees ordinary `.` / `new` / `.get` combinations.
+                    match tryRewrite name args with
+                    | Some rewritten -> current <- rewritten
+                    | None -> result <- Some(COperate(CVar name, args))
+                | op :: args ->
+                    // Kernel has no syntactically privileged operator names. Preserve
+                    // operand trees exactly and let runtime binding lookup select
+                    // operative semantics. Specialized forms require binding-identity
+                    // guards, which this analyzer intentionally does not yet have.
+                    pendingOperands <- args :: pendingOperands
+                    current <- op
             | DottedList _ as form -> result <- Some(CResidual form)
-            | List (Atom name :: args) ->
-                // Desugar Clojure-style CLR calls before binding analysis so the
-                // hybrid compiler sees ordinary `.` / `new` / `.get` combinations.
-                match tryRewrite name args with
-                | Some rewritten -> current <- rewritten
-                | None -> result <- Some(COperate(CVar name, args))
-            | List (op :: args) ->
-                // Kernel has no syntactically privileged operator names. Preserve operand
-                // trees exactly and let runtime binding lookup select operative semantics.
-                // Specialized forms require binding-identity guards, which this analyzer
-                // intentionally does not yet have.
-                pendingOperands <- args :: pendingOperands
-                current <- op
             | other -> result <- Some(CResidual other)
 
         let mutable analyzed = result.Value
@@ -113,7 +119,10 @@ module Analyze =
                 match form with
                 // Both spellings: `$if` is the report's name (R-1RK 4.5.2), `if` the
                 // dialect's. They denote one combiner, so both deserve the guard.
-                | List (Atom ("if" | "$if" as name) :: [condition; consequent; alternative] as whole) ->
+                // Materialised once, as above.
+                | List items ->
+                  match items with
+                  | (Atom ("if" | "$if" as name) :: [condition; consequent; alternative]) as whole ->
                     let fallback = COperate(CVar name, List.tail whole)
                     match tryCreateBindingGuard env name PrimitiveIf with
                     | Some guard ->
@@ -124,7 +133,7 @@ module Analyze =
                             :: BuildGuardedIf(guard, fallback)
                             :: pending
                     | None -> completed <- fallback :: completed
-                | List (Atom ("define" | "$define!" as definer) :: [Atom name; rhs] as whole) ->
+                  | (Atom ("define" | "$define!" as definer) :: [Atom name; rhs]) as whole ->
                     let fallback = COperate(CVar definer, List.tail whole)
                     match tryCreateBindingGuard env definer PrimitiveDefine with
                     | Some guard ->
@@ -133,7 +142,7 @@ module Analyze =
                             :: BuildGuardedDefine(guard, name, fallback)
                             :: pending
                     | None -> completed <- fallback :: completed
-                | List (Atom name :: operands) ->
+                  | Atom name :: operands ->
                     // Prefer a real binding over CLR call sugar (same rule as Eval).
                     match getVar' env name with
                     | Some _ -> completed <- COperate(CVar name, operands) :: completed
@@ -141,8 +150,9 @@ module Analyze =
                         match tryRewrite name operands with
                         | Some rewritten -> pending <- AnalyzeGuardedForm rewritten :: pending
                         | None -> completed <- COperate(CVar name, operands) :: completed
-                | List (op :: operands) ->
+                  | op :: operands ->
                     pending <- AnalyzeGuardedForm op :: BuildGuardedOperate operands :: pending
+                  | [] -> completed <- analyze form :: completed
                 | other -> completed <- analyze other :: completed
             | BuildGuardedIf (guard, fallback) ->
                 match takeCompleted 3 with
