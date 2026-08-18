@@ -164,12 +164,12 @@ let ``environment-aware analysis guards primitive forms`` () =
     // not hand them back to the interpreter.
     match analyzeGuarded env (parseOk "(if #t 1 2)") with
     | CGuarded (guard, CIf (CLit (Bool true), CLit _, CLit _), COperate (CVar "if", _)) ->
-        Assert.True(bindingGuardMatches env guard)
+        Assert.True(bindingHasPrimitiveIdentity env guard.name guard.expectedIdentity)
     | other -> failwith (showCore other)
 
     match analyzeGuarded env (parseOk "(define answer 42)") with
     | CGuarded (guard, CDefine (CVar "answer", CLit _), COperate (CVar "define", _)) ->
-        Assert.True(bindingGuardMatches env guard)
+        Assert.True(bindingHasPrimitiveIdentity env guard.name guard.expectedIdentity)
     | other -> failwith (showCore other)
 
 [<Fact>]

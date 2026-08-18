@@ -102,7 +102,7 @@ module Ir =
                     output.Append("(intrinsic ").Append(sprintf "%A" identity).Append(" ...)") |> ignore
                 | CGuarded(guard, specialized, _) ->
                     pending <-
-                        Append(sprintf "(guard %s@%d " guard.name guard.version)
+                        Append(sprintf "(guard %s " guard.name)
                         :: RenderCore specialized
                         :: Append ")"
                         :: pending

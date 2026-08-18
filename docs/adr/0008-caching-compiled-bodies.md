@@ -101,7 +101,13 @@ Make compilation closure-independent, then the key is just the body cell:
 1. Align the compiled `CGuarded` with `runGuard`'s name-and-identity check, removing
    the `cellId`/`version` pinning. This is worth doing on its own terms -- it is the
    same conceptual guard implemented two ways, and the strict version also fails after
-   a rebind-and-restore that the permissive one survives.
+   a rebind-and-restore that the permissive one survives. **Done.** The two paths now
+   apply the same test, `BindingGuard` no longer carries the cell it was made against,
+   and `bindingGuardMatches` is gone. The pinning turned out to be vestigial in a
+   third place as well: the package format never wrote those fields, so a decoded
+   guard was already rebuilt against the decoding environment by name and identity.
+   Benchmarks are unchanged -- the resolution, not the comparison, is what the check
+   costs -- so this buys correctness of reach rather than speed.
 2. Decide the CLR-sugar question at run time rather than at analysis time, or record
    the dependency in the key.
 3. Only then add the cache, keyed on the first body form's `PairCell`, with the

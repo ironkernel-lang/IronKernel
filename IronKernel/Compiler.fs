@@ -234,8 +234,18 @@ module Compiler =
                 match takeCompleted 2 with
                 | [specialized; fallback] ->
                     completed <-
+                        // Name and identity, the same test `RuntimeDispatch.runGuard`
+                        // applies to generated code (ADR 0008 step 1). What the
+                        // specialization needs is that this name still denotes that
+                        // primitive here; the binding cell it happened to denote when
+                        // the form was compiled is not part of that. Pinning the cell
+                        // and version additionally rejected a binding that had been
+                        // rebound and restored, and would reject every environment but
+                        // the compiling one -- which is what a shared compiled body
+                        // would need to survive.
                         KernelFunc(fun env cont ->
-                            if bindingGuardMatches env guard then specialized.Invoke(env, cont)
+                            if bindingHasPrimitiveIdentity env guard.name guard.expectedIdentity
+                            then specialized.Invoke(env, cont)
                             else fallback.Invoke(env, cont))
                         :: completed
                 | _ -> invalidOp "Guarded compilation is incomplete"
