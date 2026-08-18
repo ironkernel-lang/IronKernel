@@ -10,10 +10,10 @@ This tree is a **hybrid CLR runtime**: programs are analyzed to a Core IR and co
 
 [`docs/kernel-conformance.md`](docs/kernel-conformance.md) tracks IronKernel against
 the [Revised-1 Report on the Kernel Programming Language](https://ftp.cs.wpi.edu/pub/techreports/pdf/05-07.pdf)
-(R-1RK), feature by feature. Of the report's 135 feature entries, **128 are verified
-by a behavioural check and 7 are absent**; nothing is merely bound-but-unchecked.
+(R-1RK), feature by feature. Of the report's 135 feature entries, **130 are verified
+by a behavioural check and 5 are absent**; nothing is merely bound-but-unchecked.
 34 entries belong to modules the report marks optional. The matrix also reports
-status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **39 of 44
+status per *module*, which R-1RK 1.3.2 makes the unit of conformance: **40 of 44
 modules are complete**.
 
 **Every entry of chapter 12 now has a passing check** — Numbers (12.5), Inexact
@@ -35,6 +35,13 @@ of walking into one. `(length p)` of a cyclic list is `#e+infinity`. Mutability
 follows provenance: the reader produces immutable pairs, `cons` and `list`
 mutable ones, so a captured algorithm cannot be rewritten under the combiner that
 captured it. See [`ADR 0005`](docs/adr/0005-mutable-pairs.md).
+
+Chapter 15's **ports** are complete too, in all three of the lifetimes its preamble
+describes: implicit and closed on return (`with-output-to-file`), an explicit
+reference closed on return (`call-with-output-file`), and open/close left entirely
+to the programmer. `get-module` evaluates a file into a fresh standard environment
+and hands it back, so a module's definitions reach its caller only through that
+environment.
 
 Chapter 7's continuations are complete, including the entry/exit guards: an
 abnormal pass selects interceptors by walking the source and destination

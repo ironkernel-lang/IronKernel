@@ -594,6 +594,33 @@ let private behaviouralChecks () : (string * string list) list = [
     "15.1.7", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write 'alpha p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v 'alpha))))))" ]
     "15.1.8", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (let ((p (open-output-file f))) (sequence (write '(a b c) p) (close-output-port p))) (let ((p (open-input-file f))) (let ((v (read p))) (sequence (close-input-port p) (. System.IO.File Delete f) (equal? v '(a b c)))))))" ]
     // 15.2.2: load evaluates the file's forms in the calling environment.
+    "6.7.3", [ "(environment? (make-kernel-standard-environment))"
+               // "a child of the ground environment": ground is visible through it.
+               "(eval (list applicative? car) (make-kernel-standard-environment))"
+               // Fresh each call.
+               "(eqv? (eq? (make-kernel-standard-environment)"
+               + " (make-kernel-standard-environment)) #f)" ]
+    "15.2.3", [ // Written to a temp file the way 15.2.2's check does, so that the
+                // check carries its own module rather than depending on a fixture.
+                "(let ((f (. System.IO.Path GetTempFileName)))"
+                + " (sequence (. System.IO.File WriteAllText f \"(define a 42)\")"
+                + " (let ((m (get-module f)))"
+                + " (sequence (. System.IO.File Delete f)"
+                + " (and? (environment? m) (=? (eval (quote a) m) 42))))))"
+                // Each call gets its own environment, and a module's definitions are
+                // reached through it rather than dumped into the caller.
+                "(let ((f (. System.IO.Path GetTempFileName)))"
+                + " (sequence (. System.IO.File WriteAllText f \"(define a 42)\")"
+                + " (let ((m (get-module f)) (n (get-module f)))"
+                + " (sequence (. System.IO.File Delete f) (eqv? (eq? m n) #f)))))"
+                // The second argument is bound as module-parameters, before the file
+                // is evaluated -- so the module can read it as it runs.
+                "(let ((f (. System.IO.Path GetTempFileName)) (p (make-environment)))"
+                + " (sequence (. System.IO.File WriteAllText f"
+                + " \"(define seen (eval (quote s) module-parameters))\")"
+                + " (eval (list define (quote s) 5) p)"
+                + " (let ((m (get-module f p)))"
+                + " (sequence (. System.IO.File Delete f) (=? (eval (quote seen) m) 5)))))" ]
     "15.2.2", [ "(let ((f (. System.IO.Path GetTempFileName))) (sequence (. System.IO.File WriteAllText f \"(define loaded-marker 7)\") (load f) (. System.IO.File Delete f) (=? loaded-marker 7)))" ]
     "12.10.3", [ "(<? (abs (- (magnitude (make-rectangular 3 4)) 5)) 0.000001)"
                  "(<? (abs (- (angle (make-rectangular 0 1)) 1.5707963267948966)) 0.000001)"

@@ -25,10 +25,10 @@ rather than hidden behind a pass.
 
 | | Entries | Share |
 |---|---:|---:|
-| `verified` | 128 | 95% |
+| `verified` | 130 | 96% |
 | `bound` | 0 | 0% |
 | `partial` | 0 | 0% |
-| `absent` | 7 | 5% |
+| `absent` | 5 | 4% |
 | **total** | **135** | |
 
 34 of 135 entries belong to modules the report marks optional; an
@@ -94,7 +94,7 @@ divergences before taking any row as a claim of conformance.
 | 6.4 Core library features (II) — Pair mutation (optional) | optional | 4 | 4 | yes |
 | 6.5 Core library features (II) — Equivalence under mutation (optional) | optional | 1 | 1 | yes |
 | 6.6 Core library features (II) — Equivalence up to mutation | **required** | 1 | 1 | yes |
-| 6.7 Core library features (II) — Environments | **required** | 10 | 7 | no |
+| 6.7 Core library features (II) — Environments | **required** | 10 | 8 | no |
 | 6.8 Core library features (II) — Environment mutation (optional) | optional | 3 | 3 | yes |
 | 6.9 Core library features (II) — Control | **required** | 1 | 1 | yes |
 | 7.2 Continuations — Primitive features | **required** | 7 | 7 | yes |
@@ -111,7 +111,7 @@ divergences before taking any row as a claim of conformance.
 | 12.10 Numbers — Complex features | optional | 3 | 3 | yes |
 | 13.1 Strings — Primitive features | **required** | 1 | 0 | no |
 | 15.1 Ports — Primitive features | **required** | 8 | 8 | yes |
-| 15.2 Ports — Library features | **required** | 3 | 2 | no |
+| 15.2 Ports — Library features | **required** | 3 | 3 | yes |
 
 ## 4 Core types and primitive features
 
@@ -185,7 +185,7 @@ divergences before taking any row as a claim of conformance.
 | 6.6.1 | `equal?` | Equivalence up to mutation | `verified` | 7 behavioural check(s) |
 | 6.7.1 | `$binds?` | Environments | `absent` |  |
 | 6.7.2 | `get-current-environment` | Environments | `verified` | 1 behavioural check(s) |
-| 6.7.3 | `make-kernel-standard-environment` | Environments | `absent` |  |
+| 6.7.3 | `make-kernel-standard-environment` | Environments | `verified` | 3 behavioural check(s) |
 | 6.7.4 | `$let*` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.5 | `$letrec` | Environments | `verified` | 1 behavioural check(s) |
 | 6.7.6 | `$letrec*` | Environments | `verified` | 1 behavioural check(s) |
@@ -301,5 +301,5 @@ divergences before taking any row as a claim of conformance.
 | 15.1.8 | `write` | Primitive features | `verified` | 1 behavioural check(s) |
 | 15.2.1 | `call-with-input-file, call-with-output-file` | Library features | `verified` | 1 behavioural check(s) |
 | 15.2.2 | `load` | Library features | `verified` | 1 behavioural check(s) |
-| 15.2.3 | `get-module` | Library features | `absent` |  |
+| 15.2.3 | `get-module` | Library features | `verified` | 3 behavioural check(s) |
 

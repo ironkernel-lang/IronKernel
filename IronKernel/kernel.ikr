@@ -663,3 +663,36 @@
 (define $remote-eval remote-eval)
 (define $bindings->environment bindings->environment)
 
+
+; --- R-1RK environment and module features -----------------------------------
+
+; 6.7.3: "a child of the ground environment with no local bindings". This is the
+; report's own derivation, and it works for the reason the report gives: library
+; derivations are evaluated in the ground environment, so a lambda defined here
+; closes over ground, and calling it makes a fresh child with only its parameters
+; bound -- of which there are none.
+;
+; Capabilities come along for free, and correctly: the ground environment of a
+; session is built with that session's profile, so a restricted program gets a
+; restricted standard environment rather than an escape from its own profile.
+(define make-kernel-standard-environment (lambda () (get-current-environment)))
+
+; 15.2.3: (get-module string) creates a fresh standard environment, evaluates the
+; file's expressions in it consecutively, and returns it. The two-argument form
+; binds module-parameters to the second argument first, "prior to evaluating read
+; expressions".
+;
+; load (15.2.2) evaluates in its *dynamic* environment, so evaluating the call to
+; it inside the new environment is what puts the module's definitions there. That
+; is also what makes the capability check land on the new environment rather than
+; on get-module's caller.
+(define get-module
+  (lambda (path & parameters)
+    (let ((module-environment (make-kernel-standard-environment)))
+      (sequence
+        (if (null? parameters)
+          #inert
+          (eval (list define (quote module-parameters) (car parameters))
+                module-environment))
+        (eval (list load path) module-environment)
+        module-environment))))

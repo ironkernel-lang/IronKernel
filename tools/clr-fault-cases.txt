@@ -198,3 +198,7 @@
 (with-output-to-file 5 (lambda () 1))
 (call-with-input-file "does-not-exist-ironkernel.txt" (lambda (p) (read p)))
 (get-current-input-port 1)
+(get-module "does-not-exist-module.ikr")
+(get-module 5)
+(make-kernel-standard-environment 1)
+(get-module "does-not-exist-module.ikr" (make-environment))
