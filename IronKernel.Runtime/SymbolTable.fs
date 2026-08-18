@@ -7,10 +7,15 @@ module SymbolTable =
     open Ast
     open Errors
 
+    /// What a guarded specialization needs is that `name` still denotes a primitive
+    /// with `expectedIdentity` in the environment the code is *running* in. The
+    /// binding cell it denoted when the form was compiled is deliberately not part of
+    /// that (ADR 0008): pinning it rejected a binding that had been rebound and
+    /// restored, and rejected every environment except the compiling one -- and the
+    /// package format never carried it anyway, since a decoded guard is rebuilt
+    /// against the decoding environment.
     type BindingGuard = {
         name : string
-        cellId : int64
-        version : int64
         expectedIdentity : PrimitiveIdentity
     }
 
@@ -231,23 +236,12 @@ module SymbolTable =
         | Some cell ->
             let state = cell.state
             if primitiveIdentity state.value = Some expectedIdentity then
-                Some
-                    { name = name
-                      cellId = cell.id
-                      version = state.version
-                      expectedIdentity = expectedIdentity }
+                Some { name = name; expectedIdentity = expectedIdentity }
             else None
         | _ -> None
 
-    let bindingGuardMatches env guard =
-        match tryResolveBindingCell env guard.name with
-        | ValueSome cell ->
-            let state = cell.state
-            cell.id = guard.cellId
-            && state.version = guard.version
-            && primitiveIdentity state.value = Some guard.expectedIdentity
-        | ValueNone -> false
-
+    /// The live guard test: does `name` denote a primitive with this identity in the
+    /// environment we are running in? Both compiled paths use this.
     let bindingHasPrimitiveIdentity env name expectedIdentity =
         match tryResolveBindingCell env name with
         | ValueSome cell -> primitiveIdentity cell.state.value = Some expectedIdentity

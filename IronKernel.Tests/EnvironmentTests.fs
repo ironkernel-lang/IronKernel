@@ -59,19 +59,44 @@ let ``eval with explicit environment`` () =
         "(eval 'x e)", Obj 99
     ]
 
+let private matches env (guard: BindingGuard) =
+    bindingHasPrimitiveIdentity env guard.name guard.expectedIdentity
+
 [<Fact>]
-let ``binding guards track identity and version`` () =
+let ``binding guards track identity`` () =
     let env = freshEnv ()
     let guard =
         tryCreateBindingGuard env "if" PrimitiveIf
         |> Option.defaultWith (fun () -> failwith "missing primitive if guard")
 
-    Assert.True(bindingGuardMatches env guard)
+    Assert.True(matches env guard)
     ignore (defineVar env "unrelated" (Obj (1 :> obj)))
-    Assert.True(bindingGuardMatches env guard)
+    Assert.True(matches env guard)
 
     ignore (evalIn env "(define if (vau operands caller operands))")
-    Assert.False(bindingGuardMatches env guard)
+    Assert.False(matches env guard)
+
+[<Fact>]
+let ``a binding guard survives a rebind and restore`` () =
+    // The behaviour ADR 0008 step 1 changes. The guard asks whether the name denotes
+    // the primitive *now*, so a binding that was replaced and then set back to the
+    // primitive is specialized again. Pinning the cell version rejected it forever
+    // after, because assigning the cell bumps the version even when the value
+    // returns to what it was.
+    let env = freshEnv ()
+    let original =
+        match getVar' env "if" with
+        | Some value -> value
+        | None -> failwith "missing if binding"
+    let guard =
+        tryCreateBindingGuard env "if" PrimitiveIf
+        |> Option.defaultWith (fun () -> failwith "missing primitive if guard")
+
+    Assert.True(matches env guard)
+    ignore (evalIn env "(define if (vau operands caller operands))")
+    Assert.False(matches env guard)
+    ignore (defineVar env "if" original)
+    Assert.True(matches env guard)
 
 [<Fact>]
 let ``binding guards reject applicative-wrapped primitives`` () =
@@ -92,7 +117,7 @@ let ``binding guards reject applicative-wrapped primitives`` () =
         match resolveBindingCell env2 "if" with
         | Some cell ->
             cell.state <- { cell.state with value = Applicative bare }
-            Assert.False(bindingGuardMatches env2 guard)
+            Assert.False(matches env2 guard)
         | None -> failwith "missing if binding"
     | None -> failwith "missing if binding"
 
