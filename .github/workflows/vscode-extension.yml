@@ -26,7 +26,7 @@ jobs:
           cache-dependency-path: editors/vscode/package-lock.json
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "10.0.4xx"
       - run: dotnet build IronKernel.sln -c Release
       - run: npm ci
         working-directory: editors/vscode
