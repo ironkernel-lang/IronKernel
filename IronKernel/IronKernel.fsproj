@@ -23,6 +23,11 @@
     <IsRidAgnostic>true</IsRidAgnostic>
     <AllowSelfContainedWithoutRuntimeIdentifier>true</AllowSelfContainedWithoutRuntimeIdentifier>
     <AllowPublishSingleFileWithoutRuntimeIdentifier>true</AllowPublishSingleFileWithoutRuntimeIdentifier>
+    <!-- SDK 10.0.4xx additionally defaults PublishRuntimeIdentifier to the
+         HOST RID for an Exe when publish properties leak in without a RID,
+         which re-creates the per-host-RID evaluation the properties above
+         opt out of. -->
+    <UseDefaultPublishRuntimeIdentifier>false</UseDefaultPublishRuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Source.fs" />
