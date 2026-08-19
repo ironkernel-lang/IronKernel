@@ -10,6 +10,19 @@
     <ToolCommandName>ik</ToolCommandName>
     <PackageId>IronKernel.Tool</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- This exe doubles as a library (hosts reference it for the parser,
+         compiler, and kernel.ikr). Without this, a referencing app's
+         self-contained publish flows RuntimeIdentifier/SelfContained in here
+         and builds it once per RID — which breaks cross-compiles
+         (NETSDK1047/NETSDK1152). Publishing ik itself with -r is unaffected:
+         this only rejects RID/SelfContained arriving via ProjectReference.
+         The Allow… pair covers publish-walk calls that leak
+         SelfContained/PublishSingleFile globals without a RID (with inference
+         declined those would assert NETSDK1191); on a build that is not
+         itself publishing they are no-ops. -->
+    <IsRidAgnostic>true</IsRidAgnostic>
+    <AllowSelfContainedWithoutRuntimeIdentifier>true</AllowSelfContainedWithoutRuntimeIdentifier>
+    <AllowPublishSingleFileWithoutRuntimeIdentifier>true</AllowPublishSingleFileWithoutRuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Source.fs" />
