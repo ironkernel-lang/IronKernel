@@ -1,6 +1,6 @@
 # ADR 0009: Editor tooling grows from the runtime outward
 
-Status: Accepted — phases 1 and 2 implemented
+Status: Accepted — phases 1 through 3 implemented
 
 ## Decision
 
@@ -122,13 +122,35 @@ The predicted payoff landed: REPL tab-completion now works through
 computation (`Repl.completionCandidates`) split from the editor callback so
 it is testable without a TTY.
 
-**Phase 3 — the language server.** F#, referencing IronKernel in-process.
-Semantic tokens from actual binding resolution and `contract-of` — retiring
-both hand-maintained name lists — hover and signature help from contracts,
-completion from phase 2, diagnostics from phase 1's pipeline. Ships with
-marketplace publishing, which CI has already reduced to a decision
-(`vsce package` runs on every push; the `.vsix` is an artifact nobody
-publishes).
+**Phase 3 — the language server.** *Done, with three corrections to what was
+planned.* It shipped as `ik lsp` — a subcommand of the existing binary, not a
+separate server — so it distributes with the tool and the extension's runtime
+discovery needed no new path. The protocol layer is a hand-rolled subset
+(framing, JSON-RPC dispatch, and exactly the requests the features use) kept
+dependency-free and exercised against in-memory streams; the client side uses
+`vscode-languageclient`, the extension's first runtime dependency.
+
+Features as planned: diagnostics on every change through the same
+parse-and-analyze pipeline as `check`; completion merging the bootstrapped
+environment (phase 2's machinery) with buffer-level `define`s; hover from
+`contract-of`; and semantic tokens that classify every symbol by *resolving*
+it — a `(define twice (vau …))` colors `twice` as an operative at every use
+site, which is the capability no lexical grammar has.
+
+The corrections. First, "retiring both hand-maintained name lists" was
+overstated: semantic tokens override the TextMate list inside VS Code, but
+that list stays as the fallback (untrusted workspaces, no runtime on PATH)
+and the website's copy has no language server to lean on — so both lists
+survive, demoted rather than retired. Second, signature help did not ship;
+the contract already renders in hover and in completion detail, and a third
+surface for the same six fields was not worth its handler until someone
+misses it. Third, phase 4's absence was felt immediately and concretely: a
+buffer being typed into does not parse, which is precisely when completion is
+wanted, so the server keeps each document's defines from its last successful
+parse — a cache that parser recovery will later make unnecessary.
+
+Marketplace publishing remains a human decision: it needs a publisher
+account, and CI already builds the `.vsix` on every push.
 
 **Phase 4 — parser error recovery.** A first failure with no partial tree is
 acceptable for check-on-save and fatal for as-you-type diagnostics and

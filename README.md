@@ -371,9 +371,11 @@ See [`Examples/contracts.ikr`](Examples/contracts.ikr).
 ## VS Code extension and playground
 
 The extension in [`editors/vscode/`](editors/vscode/) provides IronKernel syntax
-highlighting, snippets, run/compile commands, check-on-save diagnostics fed by
-`ik check --json`, and a playground backed by the real CLI. Build a local VSIX
-with:
+highlighting, snippets, run/compile commands, and a playground backed by the
+real CLI. A language server (`ik lsp`, in-process with the runtime) adds live
+diagnostics, completion, contract hover, and semantic operative/applicative
+highlighting; `ik check --json` diagnostics on save are the fallback. Build a
+local VSIX with:
 
 ```bash
 cd editors/vscode

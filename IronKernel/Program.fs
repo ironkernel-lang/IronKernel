@@ -15,6 +15,7 @@ let private usage =
   ironkernel [--profile <profile>] <file.ikr> [args...]    Run a source script
   ironkernel [--profile <profile>] run <file> [args...]    Run a .ikr script or .ikc package
   ironkernel [--profile <profile>] check [--json] [<file.ikr> | project.ikproj]
+  ironkernel [--profile <profile>] lsp                     Start the language server (stdio)
     ironkernel [--profile <profile>] compile <file.ikr> [-o <file.ikc>]
     ironkernel [--profile <profile>] compile <file.ikr> --managed [-o <directory>]
     ironkernel --profile <minimal|safe> compile <file.ikr> --native <rid> [-o <directory>]
@@ -160,6 +161,7 @@ let private dispatch (profileOverride: CapabilityProfile option) args =
     | "run" :: scriptArgs ->
         // Non-source tokens (including flags) are project program args, not scripts.
         withProject profileOverride None (fun project -> ProjectTool.run project scriptArgs)
+    | ["lsp"] -> IronKernel.LanguageServer.run profile
     | "check" :: rest ->
         let json = List.contains "--json" rest
         let arguments = rest |> List.filter (fun argument -> argument <> "--json")
