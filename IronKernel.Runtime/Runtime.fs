@@ -2683,23 +2683,27 @@
                               invoke = func })
                 let contract =
                     match name with
-                    // `+` also accepts DateTime + TimeSpan and `-` DateTime - DateTime.
-                    // Results stay AnyShape: a non-any result wraps every dynamic call
-                    // in a validation continuation, which these hot paths avoid.
+                    // `+` also accepts DateTime + TimeSpan (either order) and
+                    // TimeSpan + TimeSpan; `-` accepts DateTime - DateTime,
+                    // DateTime - TimeSpan, and TimeSpan - TimeSpan. The shapes
+                    // over-approximate -- opAdd/opMinus reject the combinations the
+                    // CLR does not define. Results stay AnyShape: a non-any result
+                    // wraps every dynamic call in a validation continuation, which
+                    // these hot paths avoid.
                     | "+" ->
                         Some(
                             certifiedVariadicApplicative
                                 name
-                                [ OneOfShape [NumberShape; DateTimeShape]
-                                  OneOfShape [NumberShape; TimeSpanShape] ]
+                                [ OneOfShape [NumberShape; DateTimeShape; TimeSpanShape]
+                                  OneOfShape [NumberShape; TimeSpanShape; DateTimeShape] ]
                                 0
                                 AnyShape)
                     | "-" ->
                         Some(
                             certifiedVariadicApplicative
                                 name
-                                [ OneOfShape [NumberShape; DateTimeShape]
-                                  OneOfShape [NumberShape; DateTimeShape] ]
+                                [ OneOfShape [NumberShape; DateTimeShape; TimeSpanShape]
+                                  OneOfShape [NumberShape; DateTimeShape; TimeSpanShape] ]
                                 2
                                 AnyShape)
                     | "*" ->

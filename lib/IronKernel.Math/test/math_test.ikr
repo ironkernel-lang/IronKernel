@@ -1,0 +1,116 @@
+; Tests for IronKernel.Math, written with IronKernel.Test. IronKernel.Collections
+; arrives as a runtime dependency of the package itself.
+
+(suite "constants"
+  (check "pi is the double nearest pi" (=? pi 3.141592653589793))
+  (check "tau is two pi" (=? tau (* 2.0 pi)))
+  (check "euler" (=? euler 2.718281828459045))
+  (check "the golden ratio satisfies its identity approximately"
+    (let ((residual (- (* golden-ratio golden-ratio) (+ golden-ratio 1.0))))
+      ($and? (<? residual 1e-12) (>? residual -1e-12)))))
+
+(suite "basics"
+  (check-equal "sign of a negative" -1 (sign -3))
+  (check-equal "sign of zero" 0 (sign 0))
+  (check-equal "sign of a positive inexact is exact" 1 (sign 2.5))
+  (check-equal "clamp below" 0 (clamp -5 0 3))
+  (check-equal "clamp inside" 2 (clamp 2 0 3))
+  (check-equal "clamp above" 3 (clamp 5 0 3))
+  (check-error "clamp with crossed bounds signals" (clamp 1 3 0))
+  (check-equal "lerp at zero" 0 (lerp 0 10 0))
+  (check-equal "lerp at one" 10 (lerp 0 10 1))
+  (check-equal "lerp keeps exactness" (/ 5 2) (lerp 0 10 (/ 1 4))))
+
+(suite "isqrt"
+  (check-equal "perfect square" 12 (isqrt 144))
+  (check-equal "rounds down" 9 (isqrt 99))
+  (check-equal "zero" 0 (isqrt 0))
+  (check-equal "one" 1 (isqrt 1))
+  (check "exact where sqrt's double rounds"
+    (=? (isqrt (expt 10 100)) (expt 10 50)))
+  (check "floor property at a hard boundary"
+    (let ((n (- (expt 10 50) 1)))
+      (let ((r (isqrt (* n n))))
+        ($and? (=? r n) (>? (* (+ r 1) (+ r 1)) (* n n))))))
+  (check-error "a negative signals" (isqrt -1))
+  (check-error "an inexact signals" (isqrt 2.0)))
+
+(suite "statistics"
+  (check-equal "sum" 6 (sum (list 1 2 3)))
+  (check-equal "sum of nothing" 0 (sum ()))
+  (check-equal "product" 24 (product (list 2 3 4)))
+  (check-equal "product of nothing" 1 (product ()))
+  (check-equal "mean is exact" (/ 3 2) (mean (list 1 2)))
+  (check-error "mean of nothing signals" (mean ()))
+  (check-equal "median of odd count" 2 (median (list 3 1 2)))
+  (check-equal "median of even count is the middle mean" (/ 5 2) (median (list 4 1 3 2)))
+  (check-equal "median does not require sorted input" 7 (median (list 9 7 1)))
+  (check-equal "population variance, exactly" 4 (variance (list 2 4 4 4 5 5 7 9)))
+  (check-equal "sample variance uses n-1" (/ 32 7) (sample-variance (list 2 4 4 4 5 5 7 9)))
+  (check-error "sample variance of one element signals" (sample-variance (list 1)))
+  (check "stdev is the root of the variance" (=? 2.0 (stdev (list 2 4 4 4 5 5 7 9))))
+  (check "stdev of identical values is zero" (=? 0.0 (stdev (list 5 5 5)))))
+
+(suite "combinatorics"
+  (check-equal "0! is 1" 1 (factorial 0))
+  (check-equal "5!" 120 (factorial 5))
+  (check-equal "20! fits exactly" 2432902008176640000 (factorial 20))
+  (check "30! promotes past 64 bits"
+    (=? (factorial 30) (* 30 (factorial 29))))
+  (check-error "factorial of a negative signals" (factorial -1))
+  (check-equal "binomial" 2598960 (binomial 52 5))
+  (check-equal "binomial edge: choose 0" 1 (binomial 7 0))
+  (check-equal "binomial edge: choose all" 1 (binomial 7 7))
+  (check-equal "binomial out of range is 0" 0 (binomial 5 7))
+  (check-equal "binomial of negative k is 0" 0 (binomial 5 -1))
+  (check "binomial agrees with the factorial identity at scale"
+    (=? (binomial 100 50)
+        (div (factorial 100) (* (factorial 50) (factorial 50)))))
+  (check "Pascal's rule holds"
+    (=? (binomial 30 12) (+ (binomial 29 11) (binomial 29 12))))
+  (check-equal "permutations" 60 (permutations 5 3))
+  (check-equal "permutations of all is the factorial" 120 (permutations 5 5))
+  (check-equal "permutations out of range is 0" 0 (permutations 3 5)))
+
+(suite "primes"
+  (check "2 is prime" (prime? 2))
+  (check "1 is not" (not? (prime? 1)))
+  (check "0 is not" (not? (prime? 0)))
+  (check "negatives are not" (not? (prime? -7)))
+  (check "97 is prime" (prime? 97))
+  (check "91 is 7 times 13" (not? (prime? 91)))
+  (check "a square of a prime is not prime" (not? (prime? 49)))
+  (check "a larger prime" (prime? 104729))
+  (check-error "prime? of an inexact signals" (prime? 7.0))
+  (check-equal "next-prime from below 2" 2 (next-prime 0))
+  (check-equal "next-prime is strictly greater" 3 (next-prime 2))
+  (check-equal "next-prime skips evens" 101 (next-prime 100))
+  (check-equal "next-prime after a prime" 104729 (next-prime 104723))
+  (check-equal "primes-upto"
+    (list 2 3 5 7 11 13 17 19 23 29) (primes-upto 30))
+  (check-equal "primes-upto includes its bound" (list 2 3 5 7) (primes-upto 7))
+  (check-equal "primes-upto below 2 is empty" () (primes-upto 1))
+  (check "the sieve and trial division agree"
+    (equal? (primes-upto 200) (filter prime? (range 2 201)))))
+
+(suite "factorization"
+  (check-equal "prime-factors with multiplicity, ascending"
+    (list 2 2 2 3 3 5) (prime-factors 360))
+  (check-equal "prime-factors of a prime" (list 97) (prime-factors 97))
+  (check-equal "prime-factors of 1 is empty" () (prime-factors 1))
+  (check "prime-factors multiply back"
+    (=? 987654 (product (prime-factors 987654))))
+  (check-error "prime-factors of 0 signals" (prime-factors 0))
+  (check-equal "divisors, ascending"
+    (list 1 2 3 4 6 9 12 18 36) (divisors 36))
+  (check-equal "divisors of a prime" (list 1 97) (divisors 97))
+  (check-equal "divisors of 1" (list 1) (divisors 1))
+  (check-equal "totient of a prime is p-1" 96 (totient 97))
+  (check-equal "totient of 36" 12 (totient 36))
+  (check-equal "totient of 1" 1 (totient 1))
+  (check "totient counts the coprimes"
+    (=? (totient 30) (count (lambda (k) (coprime? k 30)) (range 1 31))))
+  (check "coprime?" (coprime? 35 64))
+  (check "coprime? can miss" (not? (coprime? 6 9))))
+
+(report-checks)

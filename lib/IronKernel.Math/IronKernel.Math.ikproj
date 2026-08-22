@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PackageId>IronKernel.Math</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>IronKernel</Authors>
+    <Description>Statistics, combinatorics, and number theory for IronKernel, exact wherever the mathematics allows: means as ratios, isqrt and factorial on integers of any size, primes, factorizations, totients. Pure Kernel; no host I/O.</Description>
+    <PackageTags>ironkernel</PackageTags>
+    <IronKernelMain>src/math.ikr</IronKernelMain>
+    <IronKernelProfile>unrestricted</IronKernelProfile>
+  </PropertyGroup>
+  <ItemGroup>
+    <IronKernelSource Include="src/**/*.ikr" />
+    <IronKernelTest Include="test/**/*.ikr" />
+    <PackageReference Include="IronKernel.Collections" Version="0.1.0" IronKernelKind="IronKernel" />
+    <PackageReference Include="IronKernel.Test" Version="0.1.0" IronKernelKind="IronKernel" IronKernelScope="test" />
+  </ItemGroup>
+</Project>
