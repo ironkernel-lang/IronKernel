@@ -1,0 +1,222 @@
+; IronKernel.Time -- dates, durations, and formatting
+; ===================================================
+;
+; Calendar time over System.DateTime and System.TimeSpan, with one discipline
+; applied throughout: instants are UTC. Constructors build UTC instants, `now`
+; is UTC, parsing assumes and adjusts to UTC, and crossing into local time
+; only happens through the two conversions that say so by name.
+;
+;   (date 2024 3 15)                     ; midnight UTC
+;   (+ (now) (hours 2))                  ; the tower already adds durations
+;   (- deadline (now))                   ; ... and subtracts to a duration
+;   (date->string (date 2024 3 15))      ; "2024-03-15T00:00:00.0000000Z"
+;   (date->unix (date 2024 3 15))        ; 1710460800
+;
+; The runtime's arithmetic accepts these values directly: date + duration and
+; duration + duration are additions, date - date and date - duration are
+; subtractions. This package supplies what the tower does not -- construction,
+; accessors, ordering, calendar arithmetic (months and years do not have a
+; fixed length, so they are not durations), conversion, and invariant-culture
+; formatting and parsing, following IronKernel.Strings' discipline: parsers
+; return #f on malformed input rather than signalling.
+;
+; Nothing here performs host I/O beyond reading the clock and, in the two
+; local-time conversions, the machine's time zone.
+
+(provide! (now today date date-time date? date-utc?
+           date-year date-month date-day
+           date-hour date-minute date-second date-millisecond
+           date-day-of-week date-day-of-year date-only
+           date<? date<=? date>? date>=? date=?
+           add-years add-months
+           leap-year? days-in-month
+           days hours minutes seconds milliseconds duration?
+           duration-negate
+           duration-days duration-hours duration-minutes
+           duration-seconds duration-milliseconds
+           duration-total-days duration-total-hours duration-total-minutes
+           duration-total-seconds duration-total-milliseconds
+           duration<? duration<=? duration>? duration>=? duration=?
+           date->local date->utc
+           date->unix unix->date
+           date->string string->date
+           duration->string string->duration)
+
+  ; --- private --------------------------------------------------------------
+
+  (define invariant (.get System.Globalization.CultureInfo InvariantCulture))
+  (define utc-kind (.get System.DateTimeKind Utc))
+  ; AdjustToUniversal (16) | AssumeUniversal (64): a zoned string converts to
+  ; UTC, an unzoned one is taken as already UTC -- never as machine-local.
+  (define utc-styles
+    (. System.Enum ToObject (clr-type System.Globalization.DateTimeStyles) 80))
+  (define clr-datetime (clr-type System.DateTime))
+  (define clr-timespan (clr-type System.TimeSpan))
+
+  (define try-thunk
+    (lambda (thunk)
+      (call/cc (lambda (escape)
+        (guard-dynamic-extent
+          ()
+          (lambda () (list #t (thunk)))
+          (list (list error-continuation
+                      (lambda (obj divert) (escape (list #f obj))))))))))
+
+  ; #f instead of a signal, for the parsers.
+  (define try-or-false
+    (lambda (thunk)
+      (let ((outcome (try-thunk thunk)))
+        (if (car outcome) (cadr outcome) #f))))
+
+  (define clr-instance?
+    (lambda (t)
+      (lambda (x)
+        (let ((outcome (try-thunk (lambda () (eq? (. x GetType) t)))))
+          (if (car outcome) (cadr outcome) #f)))))
+
+  ; CompareTo gives a sign; the five predicates read it.
+  (define compare-with
+    (lambda (test) (lambda (a b) (test (. a CompareTo b) 0))))
+
+  ; --- construction ---------------------------------------------------------
+
+  (define now (lambda () (.get System.DateTime UtcNow)))
+
+  ; Today's date at midnight UTC.
+  (define today (lambda () (.get (now) Date)))
+
+  ; Midnight UTC on the given calendar day.
+  (define date
+    (lambda (year month day)
+      (new System.DateTime year month day 0 0 0 utc-kind)))
+
+  ; A UTC instant; milliseconds are optional.
+  (define date-time
+    (lambda (year month day hour minute second & opt)
+      (if (null? opt)
+        (new System.DateTime year month day hour minute second utc-kind)
+        (new System.DateTime year month day hour minute second (car opt) utc-kind))))
+
+  (define date? (clr-instance? clr-datetime))
+  (define duration? (clr-instance? clr-timespan))
+
+  (define date-utc?
+    (lambda (t) (equal? (.get t Kind) utc-kind)))
+
+  ; --- accessors ------------------------------------------------------------
+
+  (define date-year (lambda (t) (.get t Year)))
+  (define date-month (lambda (t) (.get t Month)))
+  (define date-day (lambda (t) (.get t Day)))
+  (define date-hour (lambda (t) (.get t Hour)))
+  (define date-minute (lambda (t) (.get t Minute)))
+  (define date-second (lambda (t) (.get t Second)))
+  (define date-millisecond (lambda (t) (.get t Millisecond)))
+  (define date-day-of-year (lambda (t) (.get t DayOfYear)))
+
+  ; The weekday as a lowercase symbol: monday, tuesday, ...
+  (define date-day-of-week
+    (lambda (t)
+      (string->symbol (. (. (.get t DayOfWeek) ToString) ToLowerInvariant))))
+
+  ; The instant's calendar day at midnight, kind preserved.
+  (define date-only (lambda (t) (.get t Date)))
+
+  ; --- ordering -------------------------------------------------------------
+
+  (define date<? (compare-with <?))
+  (define date<=? (compare-with <=?))
+  (define date>? (compare-with >?))
+  (define date>=? (compare-with >=?))
+  (define date=? (compare-with =?))
+
+  (define duration<? (compare-with <?))
+  (define duration<=? (compare-with <=?))
+  (define duration>? (compare-with >?))
+  (define duration>=? (compare-with >=?))
+  (define duration=? (compare-with =?))
+
+  ; --- calendar arithmetic ----------------------------------------------------
+  ;
+  ; Months and years have no fixed length, so these are calendar operations,
+  ; not durations: the day clamps when the target month is shorter, as
+  ; AddMonths defines.
+
+  (define add-years (lambda (t n) (. t AddYears n)))
+  (define add-months (lambda (t n) (. t AddMonths n)))
+
+  (define leap-year? (lambda (year) (. System.DateTime IsLeapYear year)))
+  (define days-in-month (lambda (year month) (. System.DateTime DaysInMonth year month)))
+
+  ; --- durations --------------------------------------------------------------
+
+  (define days (lambda (n) (. System.TimeSpan FromDays (real->inexact n))))
+  (define hours (lambda (n) (. System.TimeSpan FromHours (real->inexact n))))
+  (define minutes (lambda (n) (. System.TimeSpan FromMinutes (real->inexact n))))
+  (define seconds (lambda (n) (. System.TimeSpan FromSeconds (real->inexact n))))
+  (define milliseconds (lambda (n) (. System.TimeSpan FromMilliseconds (real->inexact n))))
+
+  (define duration-negate (lambda (d) (. d Negate)))
+
+  ; Components, as the clock would show them: (duration-hours (hours 26)) is 2.
+  (define duration-days (lambda (d) (.get d Days)))
+  (define duration-hours (lambda (d) (.get d Hours)))
+  (define duration-minutes (lambda (d) (.get d Minutes)))
+  (define duration-seconds (lambda (d) (.get d Seconds)))
+  (define duration-milliseconds (lambda (d) (.get d Milliseconds)))
+
+  ; Totals, as one inexact number: (duration-total-hours (hours 26)) is 26.0.
+  (define duration-total-days (lambda (d) (.get d TotalDays)))
+  (define duration-total-hours (lambda (d) (.get d TotalHours)))
+  (define duration-total-minutes (lambda (d) (.get d TotalMinutes)))
+  (define duration-total-seconds (lambda (d) (.get d TotalSeconds)))
+  (define duration-total-milliseconds (lambda (d) (.get d TotalMilliseconds)))
+
+  ; --- conversions ------------------------------------------------------------
+
+  (define date->local (lambda (t) (. t ToLocalTime)))
+  (define date->utc (lambda (t) (. t ToUniversalTime)))
+
+  (define epoch (date 1970 1 1))
+
+  ; Whole seconds since 1970-01-01T00:00:00Z, floored, as an exact integer --
+  ; narrowed to the language's native 32-bit width when it fits, like the
+  ; reader narrows literals.
+  (define date->unix
+    (lambda (t)
+      (let ((n (div (.get (- (date->utc t) epoch) Ticks) 10000000)))
+        (if ($and? (<=? -2147483648 n) (<=? n 2147483647))
+          (. System.Convert ToInt32 n)
+          n))))
+
+  (define unix->date
+    (lambda (n) (+ epoch (seconds n))))
+
+  ; --- formatting and parsing --------------------------------------------------
+  ;
+  ; Always the invariant culture. With no format, date->string writes ISO 8601
+  ; round-trip form ("o"); string->date reads any ISO-ish form, assuming and
+  ; adjusting to UTC. With a .NET format spec, both use it exactly. Parsers
+  ; return #f on malformed input.
+
+  (define date->string
+    (lambda (t & fmt)
+      (if (null? fmt)
+        (. t ToString "o" invariant)
+        (. t ToString (car fmt) invariant))))
+
+  (define string->date
+    (lambda (s & fmt)
+      (if (null? fmt)
+        (try-or-false (lambda () (. System.DateTime Parse s invariant utc-styles)))
+        (try-or-false (lambda () (. System.DateTime ParseExact s (car fmt) invariant utc-styles))))))
+
+  (define duration->string
+    (lambda (d & fmt)
+      (if (null? fmt)
+        (. d ToString)
+        (. d ToString (car fmt) invariant))))
+
+  (define string->duration
+    (lambda (s)
+      (try-or-false (lambda () (. System.TimeSpan Parse s invariant))))))

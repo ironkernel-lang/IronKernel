@@ -39,6 +39,7 @@ jobs:
           # Seed the local folder feeds siblings restore from (lib/NuGet.config).
           "$bin" pack lib/IronKernel.Test/IronKernel.Test.ikproj
           "$bin" pack lib/IronKernel.Strings/IronKernel.Strings.ikproj
+          "$bin" pack lib/IronKernel.Collections/IronKernel.Collections.ikproj
           for project in lib/*/*.ikproj; do
             echo "=== ik test $project"
             "$bin" test "$project"

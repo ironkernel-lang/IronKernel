@@ -1,0 +1,271 @@
+; IronKernel.Math -- statistics, combinatorics, number theory
+; ===========================================================
+;
+; The runtime's numeric tower is already strong: integers promote to big
+; integers, division of exacts gives exact ratios in least terms, expt of
+; exacts stays exact. This package adds what the tower does not: the
+; procedures that combine numbers.
+;
+;   (mean (list 1 2))          ; => 3/2, exactly
+;   (isqrt (expt 10 100))      ; => 10^50, exactly -- sqrt would round
+;   (binomial 52 5)            ; => 2598960
+;   (prime-factors 360)        ; => (2 2 2 3 3 5)
+;
+; Exactness is preserved wherever the mathematics allows: sums, products,
+; means, medians, variances, and everything in the combinatorics and number
+; theory sections are exact on exact inputs. Only stdev is inherently
+; inexact -- it takes a square root -- and says so by returning one.
+;
+; Everything here works on integers of any size; factorial, binomial, and
+; isqrt are routine on hundreds of digits. The primality test is trial
+; division (6k±1) -- honest and exact at any size, but quadratic in the
+; number of digits, so it is a fit for 64-bit-scale numbers, not
+; cryptographic ones.
+;
+; Pure Kernel: no CLR interop, no host I/O. List procedures (folds, sort)
+; come from IronKernel.Collections, a runtime dependency.
+
+(provide! (pi tau euler golden-ratio
+           sign clamp lerp isqrt
+           sum product mean median
+           variance stdev sample-variance sample-stdev
+           factorial binomial permutations
+           prime? next-prime primes-upto prime-factors divisors totient
+           coprime?)
+
+  ; --- constants ------------------------------------------------------------
+  ;
+  ; Written as literals so the package stays pure Kernel; each is the double
+  ; nearest the mathematical value.
+
+  (define pi 3.141592653589793)
+  (define tau 6.283185307179586)
+  (define euler 2.718281828459045)
+  (define golden-ratio 1.618033988749895)
+
+  ; --- private --------------------------------------------------------------
+
+  (define ensure
+    (lambda (ok message)
+      (if ok #inert (error message))))
+
+  (define exact-integer?
+    (lambda (n) ($and? (integer? n) (exact? n))))
+
+  ; --- basics ---------------------------------------------------------------
+
+  ; -1, 0, or 1, always exact, for any real.
+  (define sign
+    (lambda (x)
+      (cond ((positive? x) 1)
+            ((negative? x) -1)
+            (#t 0))))
+
+  (define clamp
+    (lambda (x lo hi)
+      (ensure (<=? lo hi) "clamp: lower bound exceeds upper bound")
+      (cond ((<? x lo) lo)
+            ((>? x hi) hi)
+            (#t x))))
+
+  ; Linear interpolation: a at t=0, b at t=1. Exact on exact inputs.
+  (define lerp
+    (lambda (a b t)
+      (+ a (* (- b a) t))))
+
+  ; The largest integer whose square does not exceed n. Newton's method on
+  ; exact integers, so it is correct at sizes where sqrt's double rounds.
+  (define isqrt
+    (lambda (n)
+      (ensure (exact-integer? n) "isqrt: wants an exact integer")
+      (ensure (not? (negative? n)) "isqrt: wants a non-negative integer")
+      (if (<? n 2)
+        n
+        (letrec ((improve (lambda (guess)
+                            (let ((better (div (+ guess (div n guess)) 2)))
+                              (if (<? better guess) (improve better) guess)))))
+          (improve n)))))
+
+  ; --- statistics -----------------------------------------------------------
+  ;
+  ; All take a non-empty list of reals and preserve exactness; on exact
+  ; inputs a mean is an exact ratio, not a rounded double.
+
+  (define sum (lambda (xs) (fold-left + 0 xs)))
+  (define product (lambda (xs) (fold-left * 1 xs)))
+
+  (define mean
+    (lambda (xs)
+      (ensure (not? (null? xs)) "mean: wants a non-empty list")
+      (/ (sum xs) (length xs))))
+
+  ; The middle element; for an even count, the mean of the two middles.
+  (define median
+    (lambda (xs)
+      (ensure (not? (null? xs)) "median: wants a non-empty list")
+      (let ((ordered (sort xs <?))
+            (n (length xs)))
+        (let ((middle (list-ref ordered (div n 2))))
+          (if (odd? n)
+            middle
+            (/ (+ (list-ref ordered (- (div n 2) 1)) middle) 2))))))
+
+  (define squared-deviations
+    (lambda (xs)
+      (let ((m (mean xs)))
+        (sum (map (lambda (x) (let ((d (- x m))) (* d d))) xs)))))
+
+  ; Population variance: mean squared deviation from the mean.
+  (define variance
+    (lambda (xs)
+      (ensure (not? (null? xs)) "variance: wants a non-empty list")
+      (/ (squared-deviations xs) (length xs))))
+
+  ; Sample variance, with Bessel's n-1 correction.
+  (define sample-variance
+    (lambda (xs)
+      (ensure (<? 1 (length xs)) "sample-variance: wants at least two elements")
+      (/ (squared-deviations xs) (- (length xs) 1))))
+
+  (define stdev
+    (lambda (xs) (sqrt (real->inexact (variance xs)))))
+
+  (define sample-stdev
+    (lambda (xs) (sqrt (real->inexact (sample-variance xs)))))
+
+  ; --- combinatorics --------------------------------------------------------
+
+  (define factorial
+    (lambda (n)
+      (ensure (exact-integer? n) "factorial: wants an exact integer")
+      (ensure (not? (negative? n)) "factorial: wants a non-negative integer")
+      (letrec ((go (lambda (i acc)
+                     (if (<=? i 1) acc (go (- i 1) (* acc i))))))
+        (go n 1))))
+
+  ; n choose k, by the rising product -- k multiplications and divisions,
+  ; never a full factorial. Out-of-range k gives 0, as the identity wants.
+  (define binomial
+    (lambda (n k)
+      (ensure (exact-integer? n) "binomial: wants exact integers")
+      (ensure (exact-integer? k) "binomial: wants exact integers")
+      (cond ((negative? k) 0)
+            ((>? k n) 0)
+            (#t (let ((k (min k (- n k))))
+                  (letrec ((go (lambda (i acc)
+                                 (if (>? i k)
+                                   acc
+                                   (go (+ i 1) (div (* acc (- n (- i 1))) i))))))
+                    (go 1 1)))))))
+
+  ; Ordered selections of k from n: the falling factorial n (n-1) ... (n-k+1).
+  (define permutations
+    (lambda (n k)
+      (ensure (exact-integer? n) "permutations: wants exact integers")
+      (ensure (exact-integer? k) "permutations: wants exact integers")
+      (cond ((negative? k) 0)
+            ((>? k n) 0)
+            (#t (letrec ((go (lambda (i acc)
+                               (if (=? i k)
+                                 acc
+                                 (go (+ i 1) (* acc (- n i)))))))
+                  (go 0 1))))))
+
+  ; --- number theory --------------------------------------------------------
+
+  ; Trial division stepping 6k±1 up to the square root: exact at any size,
+  ; suited to 64-bit-scale numbers.
+  (define prime?
+    (lambda (n)
+      (ensure (exact-integer? n) "prime?: wants an exact integer")
+      (cond ((<? n 2) #f)
+            ((<? n 4) #t)
+            ((zero? (mod n 2)) #f)
+            ((zero? (mod n 3)) #f)
+            (#t (letrec ((probe (lambda (i)
+                                  (cond ((>? (* i i) n) #t)
+                                        ((zero? (mod n i)) #f)
+                                        ((zero? (mod n (+ i 2))) #f)
+                                        (#t (probe (+ i 6)))))))
+                  (probe 5))))))
+
+  ; The smallest prime strictly greater than n.
+  (define next-prime
+    (lambda (n)
+      (ensure (exact-integer? n) "next-prime: wants an exact integer")
+      (if (<? n 2)
+        2
+        (letrec ((from (lambda (candidate)
+                         (if (prime? candidate) candidate (from (+ candidate 2))))))
+          (if (=? n 2) 3 (from (if (odd? n) (+ n 2) (+ n 1))))))))
+
+  ; Every prime up to and including n, by the sieve of Eratosthenes.
+  (define primes-upto
+    (lambda (n)
+      (ensure (exact-integer? n) "primes-upto: wants an exact integer")
+      (if (<? n 2)
+        ()
+        (let ((composite (make-vector (+ n 1) #f)))
+          (letrec
+            ((strike (lambda (multiple step)
+                       (if (<=? multiple n)
+                         (begin (vector-set! composite multiple #t)
+                                (strike (+ multiple step) step))
+                         #inert)))
+             (mark (lambda (p)
+                     (if (<=? (* p p) n)
+                       (begin
+                         (if (vector-ref composite p) #inert (strike (* p p) p))
+                         (mark (+ p 1)))
+                       #inert)))
+             (collect (lambda (p)
+                        (cond ((>? p n) ())
+                              ((vector-ref composite p) (collect (+ p 1)))
+                              (#t (cons p (collect (+ p 1))))))))
+            (mark 2)
+            (collect 2))))))
+
+  ; The prime factorization with multiplicity, ascending:
+  ; (prime-factors 360) => (2 2 2 3 3 5). 1 has the empty factorization.
+  (define prime-factors
+    (lambda (n)
+      (ensure (exact-integer? n) "prime-factors: wants an exact integer")
+      (ensure (positive? n) "prime-factors: wants a positive integer")
+      (letrec
+        ((pull (lambda (n d)
+                 (if (zero? (mod n d))
+                   (cons d (pull (div n d) d))
+                   (rest n (if (=? d 2) 3 (+ d 2))))))
+         (rest (lambda (n d)
+                 (cond ((>? (* d d) n) (if (=? n 1) () (list n)))
+                       (#t (pull n d))))))
+        (rest n 2))))
+
+  ; Every positive divisor, ascending. Collected as d and n/d pairs up to
+  ; the square root, so the work is O(sqrt n).
+  (define divisors
+    (lambda (n)
+      (ensure (exact-integer? n) "divisors: wants an exact integer")
+      (ensure (positive? n) "divisors: wants a positive integer")
+      (letrec ((walk (lambda (d low high)
+                       (cond ((>? (* d d) n) (append (reverse low) high))
+                             ((zero? (mod n d))
+                              (let ((partner (div n d)))
+                                (walk (+ d 1)
+                                      (cons d low)
+                                      (if (=? d partner) high (cons partner high)))))
+                             (#t (walk (+ d 1) low high))))))
+        (walk 1 () ()))))
+
+  ; Euler's totient: how many of 1..n are coprime to n. Computed from the
+  ; distinct prime factors, exactly.
+  (define totient
+    (lambda (n)
+      (ensure (exact-integer? n) "totient: wants an exact integer")
+      (ensure (positive? n) "totient: wants a positive integer")
+      (fold-left (lambda (t p) (* (div t p) (- p 1)))
+                 n
+                 (distinct (prime-factors n)))))
+
+  (define coprime?
+    (lambda (a b) (=? (gcd a b) 1))))

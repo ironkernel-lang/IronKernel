@@ -1,0 +1,4 @@
+bin/
+obj/
+*.ikc
+packages.lock.json

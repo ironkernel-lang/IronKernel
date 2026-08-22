@@ -91,8 +91,8 @@ let ``wrap preserves applicative contract metadata without nesting`` () =
             (ofList
                 [ Atom "applicative"
                   ofList
-                      [ ofList [Atom "number"; Atom "datetime"]
-                        ofList [Atom "number"; Atom "timespan"] ]
+                      [ ofList [Atom "number"; Atom "datetime"; Atom "timespan"]
+                        ofList [Atom "number"; Atom "timespan"; Atom "datetime"] ]
                   Atom "any"
                   Atom "pure"
                   Bool true
