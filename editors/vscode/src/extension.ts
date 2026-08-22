@@ -13,6 +13,7 @@ import {
   type CheckLocation
 } from "./diagnostics.js";
 import { EnvironmentViewProvider, type EnvironmentReport } from "./environmentView.js";
+import { SessionClient, type SessionEvalResult } from "./session.js";
 import { PlaygroundPanel } from "./playgroundPanel.js";
 import { ProfileStatus } from "./profileStatus.js";
 import { findIkprojWalkingUp, isIkprojPath, rankIkProjects } from "./projects.js";
@@ -70,6 +71,49 @@ export function activate(context: vscode.ExtensionContext): void {
           .update("profile", picked, vscode.ConfigurationTarget.Workspace);
       }
     }),
+    vscode.commands.registerCommand("ironkernel.evalSelection", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "ironkernel") {
+        void vscode.window.showInformationMessage("Open an IronKernel source file first.");
+        return;
+      }
+      if (!(await requireTrustedWorkspace())) {
+        return;
+      }
+      const selection = editor.selection;
+      const code = selection.isEmpty
+        ? editor.document.lineAt(selection.active.line).text
+        : editor.document.getText(selection);
+      if (code.trim() === "") {
+        return;
+      }
+      const client = await obtainSession(editor.document.uri, output);
+      if (!client) {
+        return;
+      }
+      output.show(true);
+      output.appendLine(`session> ${code.trim()}`);
+      try {
+        const result: SessionEvalResult = await client.eval(code);
+        if (result.output) {
+          output.append(result.output.endsWith("\n") ? result.output : result.output + "\n");
+        }
+        if (result.error) {
+          output.appendLine(result.error.rendered);
+        } else if (!result.inert && result.value !== undefined) {
+          output.appendLine(result.value);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        output.appendLine(`[session] ${message}`);
+        void vscode.window.showWarningMessage(message);
+      }
+    }),
+    vscode.commands.registerCommand("ironkernel.restartSession", () => {
+      sessionClient?.kill();
+      sessionClient = undefined;
+      output.appendLine("[session] restarted; definitions were discarded");
+    }),
     vscode.window.onDidChangeActiveTextEditor(() => {
       void profileStatus.update();
       void refreshEnvironment();
@@ -77,9 +121,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("ironkernel.profile")) {
         void profileStatus.update();
-        // The server was launched with the old --profile; restart it so the
-        // session environment carries the authority the status bar shows.
+        // Both servers were launched with the old --profile; restart them so
+        // the authority shown is the authority actually carried.
         void restartLanguageServer(output).then(afterServerChange);
+        sessionClient?.kill();
+        sessionClient = undefined;
       }
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
@@ -292,6 +338,26 @@ async function saveIronKernelDocumentsNear(projectPath: string): Promise<void> {
 }
 
 let languageClient: LanguageClient | undefined;
+
+let sessionClient: SessionClient | undefined;
+
+async function obtainSession(
+  scopeUri: vscode.Uri,
+  output: vscode.OutputChannel
+): Promise<SessionClient | undefined> {
+  if (sessionClient) {
+    return sessionClient;
+  }
+  const resolved = await resolveConfiguredRuntime(scopeUri, output);
+  if (!resolved) {
+    return undefined;
+  }
+  const timeout = vscode.workspace
+    .getConfiguration("ironkernel", scopeUri)
+    .get<number>("session.timeoutMs", 10000);
+  sessionClient = new SessionClient(resolved.runtime, timeout);
+  return sessionClient;
+}
 
 async function restartLanguageServer(output: vscode.OutputChannel): Promise<void> {
   const client = languageClient;
@@ -564,6 +630,8 @@ function publishDiagnostics(
 
 export function deactivate(): Thenable<void> | undefined {
   // Other resources registered in ExtensionContext are disposed by VS Code.
+  sessionClient?.dispose();
+  sessionClient = undefined;
   const client = languageClient;
   languageClient = undefined;
   return client?.stop();

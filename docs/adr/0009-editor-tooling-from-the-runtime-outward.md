@@ -1,7 +1,7 @@
 # ADR 0009: Editor tooling grows from the runtime outward
 
-Status: Accepted — phases 1 through 5 implemented (phase 5's third item
-deferred behind phase 6)
+Status: Accepted — phases 1 through 5 implemented, and phase 6's session
+protocol; the debug adapter itself is proposed, deliberately not built yet
 
 ## Decision
 
@@ -212,10 +212,40 @@ phase 6's session protocol. Deferred with that dependency named, so the
 "nearly free" framing does not get re-derived from the `CLocated` line
 above.
 
-**Phase 6 — debug adapter.** Requires a persistent session protocol that does
-not exist — the REPL cannot even separate errors from values today — so the
-protocol is the prerequisite, and it should serve the inspector and
-remote-eval too, not just the DAP.
+**Phase 6 — the session protocol; the debug adapter stays proposed.** *The
+protocol is done; the adapter is deliberately not built yet, in the sense of
+ADR 0008.*
+
+`ik session` is a persistent evaluation session over the same framed
+JSON-RPC transport as `ik lsp` — the framing layer is now a shared
+`Jsonrpc` module rather than a second copy. `eval` returns what the human
+REPL never separated: the value (with an inert flag), everything the
+program printed (captured so it travels in the response instead of
+corrupting the channel), or a structured error — message, rendered
+diagnostic, and spans in the same 1-based shape as `ik check --json`.
+Definitions persist across evals; `reset` re-bootstraps; the capability
+profile is honored (`--profile minimal` has no `print` to deny). The
+interrupt story is owned by the client: a hung evaluation cannot be
+cancelled, so the timeout kills the process and the next eval starts
+fresh — honest, and sufficient until the trampoline learns cancellation.
+One known leak: raw standard-output ports write past the `Console`
+capture; the adapter's stdio discipline will have to close that.
+
+In the editor: **Eval Selection in Session** (persistent state, results
+and captured output in the output channel, structured errors rendered
+with their carets) and **Restart Session**; changing the profile restarts
+both servers so displayed authority stays actual authority.
+
+Two scope notes. The inspector's "eval in this env" still has no
+per-frame form — the session evaluates in its own ground environment, and
+addressing an arbitrary frame needs an environment-handle op on the
+protocol, which is the protocol's natural next verb. And the debug
+adapter remains unbuilt because the protocol was never its hard part:
+stepping requires cancellation and suspension points in the CPS
+trampoline, breakpoints need the `CLocated` span map wired to those
+points, and the coverage view phase 5 deferred wants the same runtime
+instrumentation. Those are one design, and it should be taken whole
+rather than bolted on verb by verb.
 
 ## Alternatives
 
