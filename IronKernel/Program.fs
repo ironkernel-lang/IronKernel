@@ -26,7 +26,7 @@ Project commands:
   ik restore [--locked] [project.ikproj]
   ik run [project.ikproj] [args...]
   ik build|test|tree|pack [project.ikproj]
-  ik add <package> <version> [--clr]
+  ik add <package> <version> [--clr] [--test]
   ik remove <package>
   ik publish <source> [api-key]
   ik doctor"""
@@ -136,10 +136,11 @@ let private dispatch (profileOverride: CapabilityProfile option) args =
             | "tree" -> ProjectTool.tree
             | _ -> ProjectTool.pack
         withProject profileOverride (Some projectPath) action
-    | ["add"; id; version] ->
-        withProject profileOverride None (fun project -> ProjectTool.addPackage project.path id version "IronKernel")
-    | ["add"; id; version; "--clr"] ->
-        withProject profileOverride None (fun project -> ProjectTool.addPackage project.path id version "Clr")
+    | "add" :: id :: version :: flags when
+        flags |> List.forall (fun flag -> flag = "--clr" || flag = "--test") ->
+        let kind = if List.contains "--clr" flags then "Clr" else "IronKernel"
+        let scope = if List.contains "--test" flags then "test" else "runtime"
+        withProject profileOverride None (fun project -> ProjectTool.addPackage project.path id version kind scope)
     | ["remove"; id] ->
         withProject profileOverride None (fun project -> ProjectTool.removePackage project.path id)
     | ["publish"; source] ->

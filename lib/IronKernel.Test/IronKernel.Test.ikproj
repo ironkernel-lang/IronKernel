@@ -2,17 +2,17 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <PackageId>IronKernel.Amb</PackageId>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <PackageId>IronKernel.Test</PackageId>
     <Version>0.1.0</Version>
     <Authors>IronKernel</Authors>
-    <Description>Nondeterministic search for IronKernel: amb, require, and pluggable search strategies built on multi-shot delimited continuations.</Description>
+    <Description>A small testing DSL for IronKernel: checks as operatives that report the failing source form, error-signalling assertions, suites, and a tally that fails `ik test` when a check does.</Description>
     <PackageTags>ironkernel</PackageTags>
-    <IronKernelMain>src/amb.ikr</IronKernelMain>
+    <IronKernelMain>src/test.ikr</IronKernelMain>
     <IronKernelProfile>unrestricted</IronKernelProfile>
   </PropertyGroup>
   <ItemGroup>
     <IronKernelSource Include="src/**/*.ikr" />
     <IronKernelTest Include="test/**/*.ikr" />
-    <PackageReference Include="IronKernel.Test" Version="0.1.0" IronKernelKind="IronKernel" IronKernelScope="test" />
   </ItemGroup>
 </Project>

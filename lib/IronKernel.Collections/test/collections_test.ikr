@@ -1,0 +1,105 @@
+; Tests for IronKernel.Collections, written with IronKernel.Test.
+
+(suite "folds"
+  (check-equal "reverse" (list 3 2 1) (reverse (list 1 2 3)))
+  (check-equal "reverse of empty" () (reverse ()))
+  (check-equal "fold-left runs left to right"
+    (list 3 2 1) (fold-left (lambda (acc x) (cons x acc)) () (list 1 2 3)))
+  (check-equal "fold-left over empty is init" 7 (fold-left + 7 ()))
+  (check-equal "fold-right keeps order"
+    (list 1 2 3) (fold-right cons () (list 1 2 3)))
+  (check-equal "fold-right associates rightward"
+    9 (fold-right - 0 (list 10 4 3))))  ; 10 - (4 - (3 - 0))
+
+(suite "slicing"
+  (check-equal "take" (list 1 2) (take (list 1 2 3 4) 2))
+  (check-equal "take past the end" (list 1 2) (take (list 1 2) 5))
+  (check-equal "take zero" () (take (list 1 2) 0))
+  (check-equal "drop" (list 3 4) (drop (list 1 2 3 4) 2))
+  (check-equal "drop past the end" () (drop (list 1 2) 5))
+  (check-equal "drop zero" (list 1 2) (drop (list 1 2) 0))
+  (check-equal "take-while" (list 1 2) (take-while (lambda (x) (<? x 3)) (list 1 2 3 1)))
+  (check-equal "drop-while" (list 3 1) (drop-while (lambda (x) (<? x 3)) (list 1 2 3 1)))
+  (check-equal "drop-while of nothing matching" (list 5) (drop-while (lambda (x) (<? x 3)) (list 5))))
+
+(suite "mapping and searching"
+  (check-equal "append-map" (list 1 1 2 2) (append-map (lambda (x) (list x x)) (list 1 2)))
+  (check-equal "flatten goes deep"
+    (list 1 2 3 4) (flatten (list 1 (list 2 (list 3)) 4)))
+  (check-equal "flatten drops empties" (list 1 2) (flatten (list () 1 (list () 2))))
+  (check-equal "partition splits and keeps order"
+    (list (list 1 3) (list 2 4)) (partition odd? (list 1 2 3 4)))
+  (check-equal "remove is filter's complement" (list 2 4) (remove odd? (list 1 2 3 4)))
+  (check-equal "find returns the first hit" 3 (find (lambda (x) (>? x 2)) (list 1 3 5)))
+  (check "find misses with #f" (eq? #f (find (lambda (x) (>? x 9)) (list 1 3 5))))
+  (check-equal "count" 2 (count odd? (list 1 2 3 4)))
+  (check "every? on all matching" (every? odd? (list 1 3 5)))
+  (check "every? finds a miss" (not? (every? odd? (list 1 2 3))))
+  (check "every? on empty" (every? odd? ())))
+
+(suite "generation"
+  (check-equal "iota" (list 0 1 2) (iota 3))
+  (check-equal "iota with a start" (list 5 6 7) (iota 3 5))
+  (check-equal "iota with a step" (list 0 2 4) (iota 3 0 2))
+  (check-equal "iota of zero" () (iota 0))
+  (check-equal "range is half-open" (list 2 3 4) (range 2 5))
+  (check-equal "range can be empty" () (range 5 5))
+  (check-equal "zip-with" (list 5 7 9) (zip-with + (list 1 2 3) (list 4 5 6)))
+  (check-equal "zip-with stops at the shorter" (list 5) (zip-with + (list 1 2) (list 4))))
+
+(suite "sorting"
+  (check-equal "sort" (list 1 2 3 4) (sort (list 3 1 4 2) <?))
+  (check-equal "sort of empty" () (sort () <?))
+  (check-equal "sort of one" (list 1) (sort (list 1) <?))
+  (check-equal "sort of a reversed run" (list 1 2 3 4 5) (sort (list 5 4 3 2 1) <?))
+  (check-equal "sort is stable"
+    (list (list 1 "a") (list 1 "b") (list 2 "c"))
+    (sort (list (list 1 "a") (list 2 "c") (list 1 "b"))
+          (lambda (a b) (<? (car a) (car b)))))
+  (check-equal "sort-by" (list (list 1) (list 1 2) (list 1 2 3))
+    (sort-by length <? (list (list 1 2 3) (list 1) (list 1 2)))))
+
+(suite "sets"
+  (check-equal "distinct keeps first occurrences" (list 1 2 3) (distinct (list 1 2 1 3 2)))
+  (check-equal "distinct compares structurally"
+    (list (list 1)) (distinct (list (list 1) (list 1))))
+  (check-equal "union" (list 1 2 3) (union (list 1 2) (list 2 3)))
+  (check-equal "intersection" (list 2) (intersection (list 1 2) (list 2 3)))
+  (check-equal "difference" (list 1) (difference (list 1 2) (list 2 3))))
+
+(suite "association lists"
+  (check-equal "assoc-set replaces in place"
+    (list (cons "a" 9) (cons "b" 2))
+    (assoc-set (list (cons "a" 1) (cons "b" 2)) "a" 9))
+  (check-equal "assoc-set appends a new key"
+    (list (cons "a" 1) (cons "b" 2))
+    (assoc-set (list (cons "a" 1)) "b" 2))
+  (check-equal "assoc-remove"
+    (list (cons "b" 2)) (assoc-remove (list (cons "a" 1) (cons "b" 2)) "a"))
+  (check-equal "assoc-keys" (list "a" "b") (assoc-keys (list (cons "a" 1) (cons "b" 2))))
+  (check-equal "assoc-values" (list 1 2) (assoc-values (list (cons "a" 1) (cons "b" 2))))
+  (check-equal "group-by groups in first-appearance order"
+    (list (cons #t (list 1 3 5)) (cons #f (list 2 4)))
+    (group-by odd? (list 1 2 3 4 5))))
+
+(suite "vectors"
+  (check-equal "vector->list" (list 1 2 3) (vector->list (vector 1 2 3)))
+  (check-equal "list->vector round-trips" (list 1 2) (vector->list (list->vector (list 1 2))))
+  (check-equal "list->vector of empty" () (vector->list (list->vector ())))
+  (check-equal "vector-map is fresh"
+    (list 2 4) (vector->list (vector-map (lambda (x) (* 2 x)) (vector 1 2))))
+  (check "vector-map leaves the original alone"
+    (let ((v (vector 1 2)))
+      (vector-map (lambda (x) (* 2 x)) v)
+      (equal? (vector->list v) (list 1 2))))
+  (check-equal "vector-for-each visits in order"
+    (list 1 2 3)
+    (let ((acc (make-vector 1 ())))
+      (vector-for-each
+        (lambda (x) (vector-set! acc 0 (cons x (vector-ref acc 0))))
+        (vector 1 2 3))
+      (reverse (vector-ref acc 0))))
+  (check-equal "vector-fill!"
+    (list 9 9) (let ((v (vector 1 2))) (vector-fill! v 9) (vector->list v))))
+
+(report-checks)

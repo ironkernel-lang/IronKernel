@@ -31,3 +31,32 @@ let ``vector-length reports element count`` () =
         "(vector-length (vector))", Obj 0
         "(vector-length (vector 1 2 3))", Obj 3
     ] |> evalSession
+
+[<Fact>]
+let ``equal? compares vectors element by element`` () =
+    // Structural equality descends into vectors as it does into pairs; eq?
+    // stays identity. The nested case is what a JSON array inside an object
+    // exercises.
+    [
+        "(equal? (vector 1 2) (vector 1 2))", Bool true
+        "(equal? (vector 1 2) (vector 1 3))", Bool false
+        "(equal? (vector 1 2) (vector 1 2 3))", Bool false
+        "(equal? (vector) (vector))", Bool true
+        "(equal? (cons (vector 1) \"x\") (cons (vector 1) \"x\"))", Bool true
+        "(equal? (vector (cons 1 2)) (vector (cons 1 2)))", Bool true
+        "(eq? (vector 1) (vector 1))", Bool false
+        "(define v (vector 1))", Inert
+        "(eq? v v)", Bool true
+    ] |> evalSession
+
+[<Fact>]
+let ``equal? terminates on a self-containing vector`` () =
+    [
+        "(define a (vector 1 2))", Inert
+        "(define b (vector 1 2))", Inert
+        "(vector-set! a 0 a)", Inert
+        "(vector-set! b 0 b)", Inert
+        "(equal? a b)", Bool true
+        "(vector-set! b 1 3)", Inert
+        "(equal? a b)", Bool false
+    ] |> evalSession

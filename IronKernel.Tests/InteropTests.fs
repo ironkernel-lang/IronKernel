@@ -216,3 +216,15 @@ let ``CLR sugar still resolves when the name is unbound`` () =
         """(=? (len "hello") 5)""", Bool true
         """(=? (len "worlds") 6)""", Bool true
     ]
+
+[<Fact>]
+let ``CLR boolean results are Kernel booleans`` () =
+    // toObjects converts Bool to CLR bool on the argument path; the result path
+    // must convert back, or no CLR predicate is usable by `if`. Each case exercises
+    // a different boundary: instance method, static method, property get.
+    evalSessionKernel [
+        """(if (. "hello" StartsWith "he") 1 2)""", Obj 1
+        """(. System.Char IsDigit (. "5" get_Chars 0))""", Bool true
+        """(. System.Char IsDigit (. "x" get_Chars 0))""", Bool false
+        """(.get System.Environment Is64BitProcess)""", Bool System.Environment.Is64BitProcess
+    ]

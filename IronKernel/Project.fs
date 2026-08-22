@@ -21,6 +21,10 @@ module Project =
         id : string
         version : string
         kind : string
+        /// "runtime" (the default) or "test". A test-scoped reference restores and
+        /// loads for `ik test` only: `ik run`/`ik build` ignore it, and `ik pack`
+        /// leaves it out of the published package's dependencies.
+        scope : string
     }
 
     type IkProject = {
@@ -39,6 +43,10 @@ module Project =
     type ResolvedAssets = {
         sources : string list
         assemblies : string list
+        /// Sources and assemblies reachable only through test-scoped references,
+        /// in the same topological order. Loaded by `ik test`, never by run/build.
+        testSources : string list
+        testAssemblies : string list
     }
 
     type ProjectDiscovery =
@@ -123,11 +131,16 @@ module Project =
                                || obj.ReferenceEquals(versionAttribute, null) then None
                             else
                                 let kindAttribute = element.Attribute(XName.Get "IronKernelKind")
+                                let scopeAttribute = element.Attribute(XName.Get "IronKernelScope")
                                 Some
                                     { id = includeAttribute.Value
                                       version = versionAttribute.Value
-                                      kind = if obj.ReferenceEquals(kindAttribute, null) then "IronKernel" else kindAttribute.Value })
+                                      kind = if obj.ReferenceEquals(kindAttribute, null) then "IronKernel" else kindAttribute.Value
+                                      scope = if obj.ReferenceEquals(scopeAttribute, null) then "runtime" else scopeAttribute.Value })
                         |> Seq.toList
+                    let invalidScopes =
+                        packages
+                        |> List.filter (fun package -> package.scope <> "runtime" && package.scope <> "test")
                     let name = property "PackageId" (Path.GetFileNameWithoutExtension fullPath) document
                     let mainRelative = property "IronKernelMain" "src/main.ikr" document
                     let mainPath = Path.GetFullPath(Path.Combine(directory, mainRelative))
@@ -140,7 +153,14 @@ module Project =
                     let sources =
                         if sources |> List.exists (pathsEqual main) then sources else sources @ [main]
                     let profileName = property "IronKernelProfile" "unrestricted" document
-                    if not (File.Exists main) then
+                    if invalidScopes <> [] then
+                        Choice1Of2(
+                            Default(
+                                sprintf
+                                    "Unknown IronKernelScope '%s' on package '%s'; expected runtime or test"
+                                    invalidScopes.Head.scope
+                                    invalidScopes.Head.id))
+                    elif not (File.Exists main) then
                         Choice1Of2 (Default("Project main source does not exist: " + main))
                     else
                         match parseProfile profileName with
@@ -345,7 +365,7 @@ module Project =
     let resolveAssets project : ThrowsError<ResolvedAssets> =
         let path = assetsPath project
         if not (File.Exists path) then
-            Choice2Of2 { sources = []; assemblies = [] }
+            Choice2Of2 { sources = []; assemblies = []; testSources = []; testAssemblies = [] }
         else
             try
                 use document = JsonDocument.Parse(File.ReadAllText path)
@@ -371,7 +391,7 @@ module Project =
                         assetsError
                             "Invalid project.assets.json: missing or empty packageFolders. Run 'ik restore'."
                     else
-                        Choice2Of2 { sources = []; assemblies = [] }
+                        Choice2Of2 { sources = []; assemblies = []; testSources = []; testAssemblies = [] }
                 else
                     match root.TryGetProperty("libraries") with
                     | false, _ -> assetsError "Invalid project.assets.json: missing libraries."
@@ -443,15 +463,53 @@ module Project =
                             topologicalLibraryOrder
                                 (selectedTarget |> Option.map _.Value)
                                 libraryNames
-                        let sources, assemblies =
+                        // Partition into runtime and test-only libraries. A library is
+                        // runtime when it is reachable from a runtime-scoped project
+                        // reference through the dependency graph; anything else came in
+                        // only through test-scoped references. Projects with no
+                        // test-scoped reference keep everything runtime, whatever the
+                        // graph says, so existing projects cannot change behaviour.
+                        let runtimeReachable =
+                            if project.packages |> List.forall (fun p -> p.scope <> "test") then
+                                order |> List.map packageIdFromLibraryName |> Set.ofList
+                            else
+                                let dependenciesById =
+                                    match selectedTarget with
+                                    | None -> Map.empty
+                                    | Some framework ->
+                                        framework.Value.EnumerateObject()
+                                        |> Seq.fold (fun acc library ->
+                                            let id = packageIdFromLibraryName library.Name
+                                            let existing = Map.tryFind id acc |> Option.defaultValue []
+                                            Map.add id (existing @ dependencyIds library.Value) acc) Map.empty
+                                let roots =
+                                    project.packages
+                                    |> List.filter (fun p -> p.scope <> "test")
+                                    |> List.map (fun p -> p.id.ToLowerInvariant())
+                                let rec closure visited = function
+                                    | [] -> visited
+                                    | id :: rest when Set.contains id visited -> closure visited rest
+                                    | id :: rest ->
+                                        let deps = Map.tryFind id dependenciesById |> Option.defaultValue []
+                                        closure (Set.add id visited) (deps @ rest)
+                                closure Set.empty roots
+                        let runtimeOrder, testOrder =
                             order
+                            |> List.partition (fun name ->
+                                Set.contains (packageIdFromLibraryName name) runtimeReachable)
+                        let collect names =
+                            names
                             |> List.fold (fun (sourceAcc, assemblyAcc) name ->
                                 let sources = Map.tryFind name sourceMap |> Option.defaultValue []
                                 let assemblies = Map.tryFind name assemblyMap |> Option.defaultValue []
                                 sourceAcc @ sources, assemblyAcc @ assemblies) ([], [])
+                        let sources, assemblies = collect runtimeOrder
+                        let testSources, testAssemblies = collect testOrder
                         Choice2Of2
                             { sources = sources
-                              assemblies = List.distinct assemblies }
+                              assemblies = List.distinct assemblies
+                              testSources = testSources
+                              testAssemblies = List.distinct testAssemblies }
             with
             | :? JsonException as ex ->
                 assetsError ("Invalid project.assets.json: " + ex.Message)
@@ -549,6 +607,13 @@ module Project =
             project.sources |> List.filter (fun path -> not (pathsEqual path project.main))
         assets.sources @ projectSources @ [project.main]
 
+    /// The same, with test-scoped dependency sources after the runtime ones --
+    /// a test dependency may use a runtime dependency, never the other way round.
+    let orderedTestSources (project: IkProject) (assets: ResolvedAssets) =
+        let projectSources =
+            project.sources |> List.filter (fun path -> not (pathsEqual path project.main))
+        assets.sources @ assets.testSources @ projectSources @ [project.main]
+
     let private withResolvedAssets project action =
         match resolveAssets project with
         | Choice1Of2 error ->
@@ -582,7 +647,7 @@ module Project =
         | exitCode when exitCode <> 0 -> exitCode
         | _ ->
             withResolvedAssets project (fun assets ->
-                if not (loadAssemblies assets.assemblies) then 1
+                if not (loadAssemblies (assets.assemblies @ assets.testAssemblies)) then 1
                 else
                     project.tests
                     |> List.fold (fun failures testFile ->
@@ -591,7 +656,7 @@ module Project =
                             eprintfn "Test startup error: %s" (showError error)
                             failures + 1
                         | Choice2Of2 env ->
-                            match runFiles env (orderedSources project assets @ [testFile]) with
+                            match runFiles env (orderedTestSources project assets @ [testFile]) with
                             | Choice1Of2 error ->
                                 eprintfn "FAIL %s\n%s" testFile (showError error)
                                 failures + 1
@@ -678,7 +743,7 @@ module Project =
                 System.Xml.XmlWriterSettings(Indent = true))
         document.Save writer
 
-    let addPackage (projectPath: string) id version kind =
+    let addPackage (projectPath: string) id version kind scope =
         let document = XDocument.Load projectPath
         let existing =
             descendants "PackageReference" document
@@ -698,14 +763,17 @@ module Project =
                     let value = XElement(XName.Get "ItemGroup")
                     document.Root.Add value
                     value)
-            group.Add(
+            let reference =
                 XElement(
                     XName.Get "PackageReference",
                     XAttribute(XName.Get "Include", id),
                     XAttribute(XName.Get "Version", version),
-                    XAttribute(XName.Get "IronKernelKind", kind)))
+                    XAttribute(XName.Get "IronKernelKind", kind))
+            if scope = "test" then
+                reference.Add(XAttribute(XName.Get "IronKernelScope", "test"))
+            group.Add reference
             saveDocument projectPath document
-            printfn "Added %s %s" id version
+            printfn "Added %s %s%s" id version (if scope = "test" then " (test)" else "")
             0
 
     let removePackage (projectPath: string) id =
@@ -790,6 +858,9 @@ module Project =
             |> String.concat Environment.NewLine
         let references =
             project.packages
+            // Test-scoped references are a build-time concern; a consumer of the
+            // published package must not inherit them.
+            |> List.filter (fun package -> package.scope <> "test")
             |> List.map (fun package ->
                 sprintf "    <PackageReference Include=\"%s\" Version=\"%s\" />" package.id package.version)
             |> String.concat Environment.NewLine

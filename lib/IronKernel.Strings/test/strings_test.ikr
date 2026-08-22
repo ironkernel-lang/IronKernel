@@ -1,0 +1,118 @@
+; Tests for IronKernel.Strings, written with IronKernel.Test (a test-scoped
+; package reference -- `ik test` loads it, run/build/pack never see it).
+
+(suite "classification"
+  (check "string? accepts a string" (string? "x"))
+  (check "string? rejects a number" (not? (string? 5)))
+  (check "string? rejects a pair" (not? (string? (list 1))))
+  (check "string? rejects a symbol" (not? (string? (string->symbol "s"))))
+  (check "char? accepts a character" (char? (string-ref "a" 0)))
+  (check "char? rejects a one-character string" (not? (char? "a"))))
+
+(suite "basics"
+  (check-equal "string-length counts UTF-16 units" 5 (string-length "hello"))
+  (check "string-empty? on the empty string" (string-empty? ""))
+  (check "string-empty? on a non-empty string" (not? (string-empty? "x")))
+  (check-equal "string-ref indexes from zero" (string-ref "abc" 1) (string-ref "b" 0))
+  (check-equal "substring takes a half-open interval" "ell" (substring "hello" 1 4))
+  (check-equal "substring of the whole string" "hello" (substring "hello" 0 5))
+  (check-equal "substring can be empty" "" (substring "hello" 2 2))
+  (check-equal "string-append concatenates" "abc" (string-append "a" "b" "c"))
+  (check-equal "string-append of nothing" "" (string-append))
+  (check-equal "list->string inverts string->list" "hi" (list->string (string->list "hi")))
+  (check-equal "string->list of empty" () (string->list "")))
+
+(suite "search"
+  (check-equal "string-index-of finds the first hit" 2 (string-index-of "hello" "ll"))
+  (check "string-index-of misses with #f" (eq? #f (string-index-of "hello" "zz")))
+  (check "string-contains? finds a substring" (string-contains? "hello" "ell"))
+  (check "string-contains? can miss" (not? (string-contains? "hello" "zz")))
+  (check "string-starts-with?" (string-starts-with? "hello" "he"))
+  (check "string-starts-with? can miss" (not? (string-starts-with? "hello" "lo")))
+  (check "string-ends-with?" (string-ends-with? "hello" "lo"))
+  (check "string-ends-with? can miss" (not? (string-ends-with? "hello" "he"))))
+
+(suite "split and join"
+  (check-equal "split on a comma" (list "a" "b" "c") (string-split "a,b,c" ","))
+  (check-equal "split keeps empty fields" (list "a" "" "b") (string-split "a,,b" ","))
+  (check-equal "split with no separator present" (list "abc") (string-split "abc" ","))
+  (check-equal "split of empty string" (list "") (string-split "" ","))
+  (check-equal "split on a multi-character separator" (list "a" "b") (string-split "a--b" "--"))
+  (check-error "split on an empty separator signals" (string-split "abc" ""))
+  (check-equal "join with a separator" "a-b-c" (string-join (list "a" "b" "c") "-"))
+  (check-equal "join of one" "a" (string-join (list "a") "-"))
+  (check-equal "join of none" "" (string-join () "-"))
+  (check-equal "join inverts split" "a,b,c" (string-join (string-split "a,b,c" ",") ","))
+  (check-equal "string-lines splits on both endings"
+    (list "a" "b" "c") (string-lines "a\nb\r\nc"))
+  (check-equal "string-lines drops one trailing newline"
+    (list "a" "b") (string-lines "a\nb\n"))
+  (check-equal "string-lines keeps interior empties"
+    (list "a" "" "b") (string-lines "a\n\nb")))
+
+(suite "case, trim, edit"
+  (check-equal "upcase is invariant" "HELLO" (string-upcase "hello"))
+  (check-equal "downcase is invariant" "hello" (string-downcase "HELLO"))
+  (check-equal "trim strips both ends" "x" (string-trim "  x  "))
+  (check-equal "trim-start strips the left" "x  " (string-trim-start "  x  "))
+  (check-equal "trim-end strips the right" "  x" (string-trim-end "  x  "))
+  (check-equal "replace hits every occurrence" "aXcX" (string-replace "abcb" "b" "X"))
+  (check-equal "repeat" "ababab" (string-repeat "ab" 3))
+  (check-equal "repeat zero times" "" (string-repeat "ab" 0))
+  (check-equal "reverse" "cba" (string-reverse "abc"))
+  (check-equal "pad-left with spaces" "  7" (string-pad-left "7" 3))
+  (check-equal "pad-left with a character" "007" (string-pad-left "7" 3 "0"))
+  (check-equal "pad-right" "7--" (string-pad-right "7" 3 "-"))
+  (check-equal "pad shorter than the string is a no-op" "hello" (string-pad-left "hello" 3)))
+
+(suite "numbers"
+  (check-equal "string->number reads an integer" 42 (string->number "42"))
+  (check-equal "string->number reads a negative" -7 (string->number "-7"))
+  (check "string->number reads a float" (=? 3.5 (string->number "3.5")))
+  (check "string->number reads an exponent" (=? -350.0 (string->number "-3.5e2")))
+  (check-equal "string->number keeps 64-bit magnitudes"
+    9000000000 (string->number "9000000000"))
+  (check "string->number rejects words" (eq? #f (string->number "nope")))
+  (check "string->number rejects the empty string" (eq? #f (string->number "")))
+  (check "string->number rejects group separators" (eq? #f (string->number "1,234")))
+  (check-equal "number->string is invariant" "3.5" (number->string 3.5))
+  (check-equal "number->string takes a spec" "FF" (number->string 255 "X"))
+  (check-equal "number->string round-trips an integer" 123 (string->number (number->string 123))))
+
+(suite "ordering"
+  (check-equal "compare below" -1 (string-compare "a" "b"))
+  (check-equal "compare equal" 0 (string-compare "a" "a"))
+  (check-equal "compare above" 1 (string-compare "b" "a"))
+  (check "string<? is ordinal" (string<? "Z" "a"))
+  (check "string=?" (string=? "abc" "abc"))
+  (check "string<=? on equals" (string<=? "a" "a"))
+  (check "string>=?" (string>=? "b" "a"))
+  (check "string>?" (string>? "b" "a")))
+
+(suite "characters"
+  (check-equal "char->integer" 104 (char->integer (string-ref "h" 0)))
+  (check-equal "integer->char inverts" (string-ref "h" 0) (integer->char 104))
+  (check "char-digit?" (char-digit? (string-ref "5" 0)))
+  (check "char-digit? can miss" (not? (char-digit? (string-ref "x" 0))))
+  (check "char-letter?" (char-letter? (string-ref "x" 0)))
+  (check "char-whitespace?" (char-whitespace? (string-ref " " 0)))
+  (check "char-upper?" (char-upper? (string-ref "X" 0)))
+  (check "char-lower?" (char-lower? (string-ref "x" 0)))
+  (check-equal "char-upcase" (string-ref "X" 0) (char-upcase (string-ref "x" 0)))
+  (check-equal "char-downcase" (string-ref "x" 0) (char-downcase (string-ref "X" 0))))
+
+(suite "format"
+  (check-equal "plain text passes through" "no holes" (format "no holes"))
+  (check-equal "one hole" "x=1" (format "x={0}" 1))
+  (check-equal "holes by index, reusable and out of order"
+    "b a b" (format "{1} {0} {1}" "a" "b"))
+  (check-equal "more than three arguments" "1+2+3+4+5" (format "{0}+{1}+{2}+{3}+{4}" 1 2 3 4 5))
+  (check-equal "a spec formats invariantly" "3.14" (format "{0:F2}" 3.14159))
+  (check-equal "escaped braces" "{0}" (format "{{0}}"))
+  (check-equal "escaped braces next to a hole" "{1}" (format "{{{0}}}" 1))
+  (check-error "a hole past the arguments signals" (format "{1}" "only"))
+  (check-error "a hole without an index signals" (format "{}" 1))
+  (check-error "an unterminated hole signals" (format "{0" 1))
+  (check-error "an unmatched close brace signals" (format "}" 1)))
+
+(report-checks)

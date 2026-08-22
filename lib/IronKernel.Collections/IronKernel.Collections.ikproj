@@ -2,12 +2,12 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <PackageId>IronKernel.Amb</PackageId>
+    <PackageId>IronKernel.Collections</PackageId>
     <Version>0.1.0</Version>
     <Authors>IronKernel</Authors>
-    <Description>Nondeterministic search for IronKernel: amb, require, and pluggable search strategies built on multi-shot delimited continuations.</Description>
+    <Description>List, alist, set, and vector utilities for IronKernel: folds, slicing, stable sort, association-list editing, sets over equal?, and the vector/list bridge. Pure Kernel; no host I/O.</Description>
     <PackageTags>ironkernel</PackageTags>
-    <IronKernelMain>src/amb.ikr</IronKernelMain>
+    <IronKernelMain>src/collections.ikr</IronKernelMain>
     <IronKernelProfile>unrestricted</IronKernelProfile>
   </PropertyGroup>
   <ItemGroup>

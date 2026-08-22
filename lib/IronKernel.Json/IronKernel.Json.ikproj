@@ -2,17 +2,18 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <PackageId>IronKernel.Amb</PackageId>
+    <PackageId>IronKernel.Json</PackageId>
     <Version>0.1.0</Version>
     <Authors>IronKernel</Authors>
-    <Description>Nondeterministic search for IronKernel: amb, require, and pluggable search strategies built on multi-shot delimited continuations.</Description>
+    <Description>JSON for IronKernel: a grammar-enforcing recursive-descent reader with offsets in its errors, a writer that refuses what JSON cannot carry, pretty-printing, and path traversal. Objects are alists, arrays are vectors, null is json-null.</Description>
     <PackageTags>ironkernel</PackageTags>
-    <IronKernelMain>src/amb.ikr</IronKernelMain>
+    <IronKernelMain>src/json.ikr</IronKernelMain>
     <IronKernelProfile>unrestricted</IronKernelProfile>
   </PropertyGroup>
   <ItemGroup>
     <IronKernelSource Include="src/**/*.ikr" />
     <IronKernelTest Include="test/**/*.ikr" />
+    <PackageReference Include="IronKernel.Strings" Version="0.1.0" IronKernelKind="IronKernel" />
     <PackageReference Include="IronKernel.Test" Version="0.1.0" IronKernelKind="IronKernel" IronKernelScope="test" />
   </ItemGroup>
 </Project>

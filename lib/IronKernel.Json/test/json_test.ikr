@@ -1,0 +1,105 @@
+; Tests for IronKernel.Json, written with IronKernel.Test. IronKernel.Strings
+; arrives as a runtime dependency of the package itself.
+
+(suite "scalars"
+  (check-equal "an integer" 42 (json-parse "42"))
+  (check-equal "a negative integer" -7 (json-parse "-7"))
+  (check-equal "zero" 0 (json-parse "0"))
+  (check "a fraction is inexact" (=? 1.5 (json-parse "1.5")))
+  (check "an exponent is inexact" (=? 200.0 (json-parse "2e2")))
+  (check "a signed exponent" (=? 0.02 (json-parse "2e-2")))
+  (check "true" (eq? #t (json-parse "true")))
+  (check "false" (eq? #f (json-parse "false")))
+  (check "null is json-null" (json-null? (json-parse "null")))
+  (check "json-null is nothing else" (not? (json-null? ())))
+  (check-equal "a string" "hi" (json-parse "\"hi\""))
+  (check-equal "surrounding whitespace is fine" 1 (json-parse "  1  ")))
+
+(suite "strings and escapes"
+  (check-equal "escaped quote and backslash" "a\"b\\c" (json-parse "\"a\\\"b\\\\c\""))
+  (check-equal "newline and tab" "a\nb\tc" (json-parse "\"a\\nb\\tc\""))
+  (check-equal "solidus" "a/b" (json-parse "\"a\\/b\""))
+  (check-equal "a \\u escape" "A" (json-parse "\"\\u0041\""))
+  (check-error "an unknown escape signals" (json-parse "\"\\q\""))
+  (check-error "a malformed \\u signals" (json-parse "\"\\u00zz\""))
+  (check-error "an unterminated string signals" (json-parse "\"abc"))
+  (check-error "a raw control character signals" (json-parse "\"a\nb\"")))
+
+(suite "arrays"
+  (check-equal "an array is a vector" (vector 1 2 3) (json-parse "[1, 2, 3]"))
+  (check-equal "an empty array" (vector) (json-parse "[]"))
+  (check-equal "nested arrays" (vector (vector 1) (vector)) (json-parse "[[1],[]]"))
+  (check-error "a trailing comma signals" (json-parse "[1,]"))
+  (check-error "a missing comma signals" (json-parse "[1 2]"))
+  (check-error "an unterminated array signals" (json-parse "[1")))
+
+(suite "objects"
+  (check-equal "an object is an alist"
+    (list (cons "a" 1) (cons "b" 2)) (json-parse "{\"a\": 1, \"b\": 2}"))
+  (check-equal "an empty object is ()" () (json-parse "{}"))
+  (check-equal "member order is kept"
+    (list "b" "a") (map car (json-parse "{\"b\":1,\"a\":2}")))
+  (check-equal "objects nest"
+    (list (cons "a" (list (cons "b" 1)))) (json-parse "{\"a\":{\"b\":1}}"))
+  (check-error "a bare key signals" (json-parse "{a: 1}"))
+  (check-error "a missing colon signals" (json-parse "{\"a\" 1}"))
+  (check-error "a trailing comma signals" (json-parse "{\"a\":1,}")))
+
+(suite "grammar is enforced"
+  (check-error "empty input signals" (json-parse ""))
+  (check-error "trailing characters signal" (json-parse "1 2"))
+  (check-error "a leading zero signals" (json-parse "01"))
+  (check-error "a bare plus signals" (json-parse "+1"))
+  (check-error "a lone minus signals" (json-parse "-"))
+  (check-error "a dot without digits signals" (json-parse "1."))
+  (check-error "a truncated literal signals" (json-parse "tru"))
+  (check-error "a wild character signals" (json-parse "?")))
+
+(suite "writing"
+  (check-equal "scalars" "[1,1.5,\"x\",true,false,null]"
+    (json->string (vector 1 1.5 "x" #t #f json-null)))
+  (check-equal "an object" "{\"a\":1}" (json->string (list (cons "a" 1))))
+  (check-equal "the empty object" "{}" (json->string ()))
+  (check-equal "the empty array" "[]" (json->string (vector)))
+  (check-equal "escaping on the way out" "\"a\\\"b\\\\c\\n\""
+    (json->string "a\"b\\c\n"))
+  (check-equal "a control character escapes as \\u" "\"\\u0001\""
+    (json->string (list->string (list (integer->char 1)))))
+  (check-error "NaN has no representation" (json->string (.get System.Double NaN)))
+  (check-error "infinity has no representation"
+    (json->string (.get System.Double PositiveInfinity)))
+  (check-error "a symbol has no representation" (json->string (string->symbol "s")))
+  (check-error "a non-string key has no representation"
+    (json->string (list (cons 1 2)))))
+
+(suite "round trips"
+  (check-equal "parse inverts write"
+    (list (cons "xs" (vector 1 2 (list (cons "y" json-null)))))
+    (json-parse (json->string
+      (list (cons "xs" (vector 1 2 (list (cons "y" json-null))))))))
+  (check-equal "write inverts parse"
+    "{\"a\":[1,{\"b\":null}],\"c\":\"z\"}"
+    (json->string (json-parse "{\"a\": [1, {\"b\": null}], \"c\": \"z\"}"))))
+
+(suite "pretty printing"
+  (check-equal "pretty output nests with two spaces"
+    "{\n  \"a\": [\n    1,\n    2\n  ]\n}"
+    (json->string (list (cons "a" (vector 1 2))) #t))
+  (check-equal "pretty empties stay compact"
+    "{\n  \"e\": {},\n  \"v\": []\n}"
+    (json->string (list (cons "e" ()) (cons "v" (vector))) #t))
+  (check-equal "pretty parses back"
+    (list (cons "a" (vector 1 2)))
+    (json-parse (json->string (list (cons "a" (vector 1 2))) #t))))
+
+(suite "traversal"
+  (check-equal "json-get follows strings and integers"
+    "ada"
+    (json-get (json-parse "{\"users\": [{\"name\": \"ada\"}]}") "users" 0 "name"))
+  (check-equal "json-get with no path is the value" 5 (json-get 5))
+  (check-error "json-get signals on a missing key"
+    (json-get (json-parse "{\"a\":1}") "b"))
+  (check-error "json-get signals on a wrong step"
+    (json-get (json-parse "[1]") "a")))
+
+(report-checks)

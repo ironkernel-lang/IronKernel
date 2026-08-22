@@ -1,0 +1,167 @@
+; IronKernel.Test -- a small testing DSL
+; ======================================
+;
+; Checks as forms, not calls. Each `check` is an operative, so the DSL holds
+; the unevaluated expression and can print the *source form* when it fails --
+; and because every check runs inside an error guard, a check that signals an
+; error is recorded as a failure and the run continues to the next check:
+;
+;   (suite "arithmetic"
+;     (check "addition commutes" (=? (+ 1 2) (+ 2 1)))
+;     (check-equal "cons builds a pair" (cons 1 2) (cons 1 (+ 1 1)))
+;     (check-error "car of a number signals" (car 5)))
+;   (report-checks)
+;
+; Output follows the house style:
+;
+;   arithmetic
+;     ok    addition commutes
+;     ok    cons builds a pair
+;     ok    car of a number signals
+;
+;   3 check(s), 0 failure(s)
+;
+; `report-checks` prints the tally and signals an error when any check failed,
+; which is exactly what `ik test` treats as a failing test file. A file that
+; forgets `report-checks` cannot fail silently for the wrong reason: failures
+; print as they happen, and the final tally names each failed check.
+;
+; Notes
+; -----
+; * A check passes only on #t. A non-boolean result is its own kind of
+;   failure, reported with the value -- the same discipline `filter` applies
+;   to its predicate.
+; * Errors are intercepted with an exit guard on error-continuation
+;   (R-1RK 7.2.5), so `check-error` asserts that an expression signals.
+; * `checks-summary` and `reset-checks!` expose the tally so tools -- and this
+;   package's own self-test -- can inspect the machinery.
+; * Nothing here performs host I/O beyond writing to the current output port.
+
+(provide! (check check-equal check-error suite
+           report-checks checks-summary reset-checks!)
+
+  ; --- private ------------------------------------------------------------
+
+  (define list-reverse
+    (lambda (xs)
+      (letrec ((loop (lambda (l acc)
+                       (if (null? l) acc (loop (cdr l) (cons (car l) acc))))))
+        (loop xs ()))))
+
+  (define passes (make-vector 1 0))
+  (define failed (make-vector 1 ()))   ; names, most recent first
+
+  ; Run thunk; return (#t value) normally, (#f error-object) if it signals.
+  (define try-thunk
+    (lambda (thunk)
+      (call/cc (lambda (escape)
+        (guard-dynamic-extent
+          ()
+          (lambda () (list #t (thunk)))
+          (list (list error-continuation
+                      (lambda (obj divert) (escape (list #f obj))))))))))
+
+  (define pass!
+    (lambda (name)
+      (vector-set! passes 0 (+ (vector-ref passes 0) 1))
+      (printf "  ok    {0}\n" name)))
+
+  ; detail is a thunk that prints the explanatory lines, or () for none.
+  (define fail!
+    (lambda (name detail)
+      (vector-set! failed 0 (cons name (vector-ref failed 0)))
+      (printf "  FAIL  {0}\n" name)
+      (if (null? detail) #inert (detail))))
+
+  (define show-line
+    (lambda (label value)
+      (printf "        {0} " label)
+      (show value)
+      (printf "\n")))
+
+  ; --- checks -------------------------------------------------------------
+
+  ; Pass only when expr evaluates to #t. #f, a non-boolean, and a signalled
+  ; error are three distinct failures, each reported with the source form.
+  (define check
+    (vau (name expr) env
+      (let ((who (eval name env))
+            (outcome (try-thunk (lambda () (eval expr env)))))
+        (if (car outcome)
+          (let ((value (car (cdr outcome))))
+            (cond ((eq? value #t) (pass! who))
+                  ((eq? value #f)
+                   (fail! who (lambda () (show-line "expression:" expr))))
+                  (#t
+                   (fail! who (lambda ()
+                                (show-line "expression:" expr)
+                                (show-line "non-boolean:" value))))))
+          (fail! who (lambda ()
+                       (show-line "expression:" expr)
+                       (show-line "error:" (car (cdr outcome))))))
+        #inert)))
+
+  ; Pass when expected and actual are equal? -- structural equality, so it
+  ; compares lists, vectors, and strings by content.
+  (define check-equal
+    (vau (name expected actual) env
+      (let ((who (eval name env))
+            (outcome (try-thunk (lambda ()
+                                  (list (eval expected env)
+                                        (eval actual env))))))
+        (if (car outcome)
+          (let ((values (car (cdr outcome))))
+            (if (equal? (car values) (car (cdr values)))
+              (pass! who)
+              (fail! who (lambda ()
+                           (show-line "expected:" (car values))
+                           (show-line "actual:  " (car (cdr values)))))))
+          (fail! who (lambda ()
+                       (show-line "expression:" actual)
+                       (show-line "error:" (car (cdr outcome))))))
+        #inert)))
+
+  ; Pass when expr signals an error; a normal return is the failure.
+  (define check-error
+    (vau (name expr) env
+      (let ((who (eval name env))
+            (outcome (try-thunk (lambda () (eval expr env)))))
+        (if (car outcome)
+          (fail! who (lambda ()
+                       (show-line "expression:" expr)
+                       (show-line "expected an error, got:" (car (cdr outcome)))))
+          (pass! who))
+        #inert)))
+
+  ; --- grouping and reporting ---------------------------------------------
+
+  ; Print a heading, then run the body checks.
+  (define suite
+    (vau (name & body) env
+      (printf "{0}\n" (eval name env))
+      (eval (cons sequence body) env)
+      #inert))
+
+  ; (passes (failed-name ...)) in the order the failures happened.
+  (define checks-summary
+    (lambda ()
+      (list (vector-ref passes 0) (list-reverse (vector-ref failed 0)))))
+
+  (define reset-checks!
+    (lambda ()
+      (vector-set! passes 0 0)
+      (vector-set! failed 0 ())
+      #inert))
+
+  ; Print the tally; signal an error when any check failed, so a test file
+  ; ending in (report-checks) fails `ik test` exactly when it should.
+  (define report-checks
+    (lambda ()
+      (let ((p (vector-ref passes 0))
+            (f (list-reverse (vector-ref failed 0))))
+        (printf "\n{0} check(s), {1} failure(s)\n" (+ p (length f)) (length f))
+        (if (null? f)
+          #inert
+          (begin
+            (for-each (lambda (name) (printf "  failed: {0}\n" name)) f)
+            (error "checks failed")))))))

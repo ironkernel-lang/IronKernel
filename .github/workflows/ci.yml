@@ -32,3 +32,14 @@ jobs:
 
       - name: Test
         run: dotnet test IronKernel.sln -c Release --no-build --verbosity normal
+
+      - name: Test first-party packages (lib/)
+        run: |
+          bin="$PWD/IronKernel/bin/Release/net10.0/IronKernel"
+          # Seed the local folder feeds siblings restore from (lib/NuGet.config).
+          "$bin" pack lib/IronKernel.Test/IronKernel.Test.ikproj
+          "$bin" pack lib/IronKernel.Strings/IronKernel.Strings.ikproj
+          for project in lib/*/*.ikproj; do
+            echo "=== ik test $project"
+            "$bin" test "$project"
+          done

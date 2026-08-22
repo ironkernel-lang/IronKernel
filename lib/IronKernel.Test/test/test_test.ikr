@@ -1,0 +1,57 @@
+; Self-test for IronKernel.Test.
+;
+; Part 1 exercises the failure paths on purpose and inspects the tally through
+; checks-summary, then clears it with reset-checks!. The FAIL lines it prints
+; are the machinery under test, not real failures. Part 2 then uses the DSL
+; normally; (report-checks) at the end is what makes `ik test` trust this file.
+
+; --- part 1: the failure machinery, observed via checks-summary --------------
+
+(printf "(the next four FAIL lines are deliberate)\n")
+
+(check "a false check fails" (eq? 1 2))
+(check "a non-boolean check fails" (+ 1 2))
+(check "an error inside a check fails without aborting" (car 5))
+(check-equal "unequal values fail" 1 2)
+
+(define observed (checks-summary))
+
+(if (equal? observed (list 0 (list "a false check fails"
+                                   "a non-boolean check fails"
+                                   "an error inside a check fails without aborting"
+                                   "unequal values fail")))
+  #inert
+  (error "failure machinery did not record what it should"))
+
+(reset-checks!)
+
+(if (equal? (checks-summary) (list 0 ()))
+  #inert
+  (error "reset-checks! did not clear the tally"))
+
+; --- part 2: the DSL used normally ------------------------------------------
+
+(printf "\n")
+
+(suite "check"
+  (check "passes on #t" (eq? 1 1))
+  (check "sees the caller's environment"
+    (let ((x 5)) (eq? x 5))))
+
+(suite "check-equal"
+  (check-equal "compares structurally" (list 1 (list 2 3)) (list 1 (list 2 3)))
+  (check-equal "compares fresh structure by content" (list "a" "b") (cons "a" (cons "b" ())))
+  (check-equal "evaluates both sides in the caller's environment"
+    (let ((x 2)) (* x 3))
+    6))
+
+(suite "check-error"
+  (check-error "detects a type error" (car 5))
+  (check-error "detects a signalled error" (error "boom")))
+
+(suite "tally"
+  (check "summary counts the passes so far"
+    (let (((p f) (checks-summary)))
+      ($and? (eq? p 7) (null? f)))))
+
+(report-checks)
