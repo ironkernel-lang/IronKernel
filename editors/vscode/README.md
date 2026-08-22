@@ -9,10 +9,17 @@ The extension never implements a second evaluator in JavaScript.
 - Distinct colors for **operatives** (unevaluated operands) vs **applicatives** (args evaluated first), matching the website token sets
 - `.ikproj` files open as XML (MSBuild project syntax highlighting)
 - Bracket matching, comments, indentation, and IronKernel snippets
+- **Language server** (`ik lsp`, in-process with the real runtime): live
+  diagnostics as you type, completion over everything in scope plus your
+  buffer's defines, hover with contracts, and semantic highlighting that
+  classifies operatives/applicatives by *resolution* — your own `vau`
+  definitions get the operative color (disable with
+  `ironkernel.languageServer.enabled`)
 - **Run Current File** and **Compile Current File to IKC** commands
 - **Run Project** and **Build Project** for `.ikproj` (nearest project, picker, or explorer context menu)
 - Check on save: `ik check --json` runs on saved `.ikr` files and publishes
-  span-accurate diagnostics (disable with `ironkernel.checkOnSave`)
+  span-accurate diagnostics — the fallback when the language server is
+  disabled or unavailable (disable with `ironkernel.checkOnSave`)
 - Source-range diagnostics in VS Code's Problems view
 - A playground with runnable examples, validation, cancellation, output limits, and timeouts
 

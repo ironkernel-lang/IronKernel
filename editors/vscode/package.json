@@ -219,7 +219,12 @@
         "ironkernel.checkOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Run 'ik check' on saved IronKernel files and show its diagnostics inline. Requires a trusted workspace."
+          "description": "Run 'ik check' on saved IronKernel files and show its diagnostics inline. Used as a fallback when the language server is disabled or unavailable. Requires a trusted workspace."
+        },
+        "ironkernel.languageServer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the IronKernel language server ('ik lsp') for live diagnostics, completion, hover, and semantic operative/applicative highlighting. Requires a trusted workspace."
         },
         "ironkernel.playground.timeoutMs": {
           "type": "number",
@@ -237,6 +242,28 @@
         }
       }
     },
+    "semanticTokenTypes": [
+      {
+        "id": "operative",
+        "description": "A combiner that receives its operands unevaluated"
+      },
+      {
+        "id": "applicative",
+        "description": "A combiner whose arguments are evaluated first"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "scopes": {
+          "operative": [
+            "keyword.control.operative.ironkernel"
+          ],
+          "applicative": [
+            "support.function.applicative.ironkernel"
+          ]
+        }
+      }
+    ],
     "problemPatterns": [
       {
         "name": "ironkernel",
@@ -275,5 +302,8 @@
     "vitest": "^4.1.10",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.3.2"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.0"
   }
 }

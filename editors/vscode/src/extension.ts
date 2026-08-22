@@ -2,6 +2,11 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { resolveRuntime, runProcess, type RuntimeCommand } from "./cli.js";
 import {
+  LanguageClient,
+  type LanguageClientOptions,
+  type ServerOptions
+} from "vscode-languageclient/node";
+import {
   parseCheckReport,
   parseDiagnostics,
   type CheckDiagnostic,
@@ -16,6 +21,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("IronKernel");
   const diagnostics = vscode.languages.createDiagnosticCollection("ironkernel");
   context.subscriptions.push(output, diagnostics);
+
+  void startLanguageServer(output);
+  context.subscriptions.push(
+    vscode.workspace.onDidGrantWorkspaceTrust(() => void startLanguageServer(output))
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("ironkernel.showOutput", () => output.show()),
@@ -32,6 +42,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (
         document.languageId === "ironkernel" &&
         vscode.workspace.isTrusted &&
+        // The language server already diagnoses every change; check-on-save
+        // is the fallback when it is disabled or failed to start.
+        languageClient === undefined &&
         vscode.workspace
           .getConfiguration("ironkernel", document.uri)
           .get<boolean>("checkOnSave", true)
@@ -213,9 +226,52 @@ async function saveIronKernelDocumentsNear(projectPath: string): Promise<void> {
   }
 }
 
+let languageClient: LanguageClient | undefined;
+
+async function startLanguageServer(output: vscode.OutputChannel): Promise<void> {
+  if (languageClient !== undefined || !vscode.workspace.isTrusted) {
+    return;
+  }
+  const scopeUri =
+    vscode.window.activeTextEditor?.document.uri ??
+    vscode.workspace.workspaceFolders?.[0]?.uri ??
+    vscode.Uri.file(process.cwd());
+  const configuration = vscode.workspace.getConfiguration("ironkernel", scopeUri);
+  if (!configuration.get<boolean>("languageServer.enabled", true)) {
+    return;
+  }
+  const resolved = await resolveConfiguredRuntime(scopeUri, output, { quiet: true });
+  if (!resolved) {
+    return;
+  }
+  const serverOptions: ServerOptions = {
+    command: resolved.runtime.command,
+    args: [...resolved.runtime.prefixArgs, "lsp"],
+    options: { cwd: resolved.runtime.cwd }
+  };
+  const clientOptions: LanguageClientOptions = {
+    documentSelector: [{ language: "ironkernel" }]
+  };
+  const client = new LanguageClient(
+    "ironkernel",
+    "IronKernel Language Server",
+    serverOptions,
+    clientOptions
+  );
+  try {
+    await client.start();
+    languageClient = client;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.appendLine(`[language server unavailable] ${message}`);
+    output.appendLine("Falling back to check-on-save diagnostics.");
+  }
+}
+
 async function resolveConfiguredRuntime(
   scopeUri: vscode.Uri,
-  output: vscode.OutputChannel
+  output: vscode.OutputChannel,
+  options?: { quiet?: boolean }
 ): Promise<{ runtime: RuntimeCommand; maxOutputBytes: number } | undefined> {
   const folder = vscode.workspace.getWorkspaceFolder(scopeUri);
   const configuration = vscode.workspace.getConfiguration("ironkernel", scopeUri);
@@ -229,7 +285,9 @@ async function resolveConfiguredRuntime(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     output.appendLine(`[launch failed] ${message}`);
-    void vscode.window.showErrorMessage(`Unable to resolve IronKernel: ${message}`);
+    if (!options?.quiet) {
+      void vscode.window.showErrorMessage(`Unable to resolve IronKernel: ${message}`);
+    }
     return undefined;
   }
   const profile = configuration.get<string>("profile", "unrestricted");
@@ -426,6 +484,9 @@ function publishDiagnostics(
   }
 }
 
-export function deactivate(): void {
-  // Resources registered in ExtensionContext are disposed by VS Code.
+export function deactivate(): Thenable<void> | undefined {
+  // Other resources registered in ExtensionContext are disposed by VS Code.
+  const client = languageClient;
+  languageClient = undefined;
+  return client?.stop();
 }

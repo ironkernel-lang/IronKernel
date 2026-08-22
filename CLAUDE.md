@@ -69,7 +69,8 @@ row as a conformance claim.
 package format · 0004 compiling procedure bodies · 0005 mutable pairs · 0006 errors
 as abnormal passes · 0007 identity for derived combiners · 0008 caching compiled
 bodies (proposed, deliberately not built) · 0009 editor tooling from the runtime
-outward (`ik check --json` is its phase 1).
+outward (`ik check --json`, environment enumeration, and the `ik lsp` language
+server are its phases 1–3).
 
 They record measurements and rejected options, not just decisions. When a prediction
 in one turns out wrong, correct it in place rather than leaving it — several carry
