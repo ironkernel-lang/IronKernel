@@ -189,6 +189,7 @@ for the local-feed workflow and the roadmap.
 | [`IronKernel.Strings`](lib/IronKernel.Strings/) | Search, split/join, case, trimming, padding, characters, invariant number conversion, and a variadic `format` — ordinal semantics throughout |
 | [`IronKernel.Json`](lib/IronKernel.Json/) | Grammar-enforcing JSON reader with offsets in its errors, a writer that refuses what JSON cannot carry, pretty-printing, and path traversal |
 | [`IronKernel.Math`](lib/IronKernel.Math/) | Statistics, combinatorics, and number theory — exact wherever the mathematics allows: means as ratios, `isqrt` and `factorial` at any size, primes, factorizations, totients |
+| [`IronKernel.Time`](lib/IronKernel.Time/) | Dates and durations over `System.DateTime`/`System.TimeSpan` — UTC-disciplined instants the arithmetic tower adds and subtracts, calendar operations, unix time, and invariant ISO 8601 formatting and parsing |
 | [`IronKernel.Amb`](lib/IronKernel.Amb/) | Nondeterministic search: `amb`, `require`, bracketed choice, and pluggable search strategies over multi-shot delimited continuations |
 
 Packages test against `IronKernel.Test` through a test-scoped reference
