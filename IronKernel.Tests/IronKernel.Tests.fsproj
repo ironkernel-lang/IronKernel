@@ -28,6 +28,7 @@
     <Compile Include="CliTests.fs" />
     <Compile Include="CheckTests.fs" />
     <Compile Include="LspTests.fs" />
+    <Compile Include="SessionTests.fs" />
     <Compile Include="ProjectTests.fs" />
     <Compile Include="ContinuationTests.fs" />
     <Compile Include="EffectTests.fs" />

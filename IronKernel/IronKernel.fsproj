@@ -44,6 +44,8 @@
     <Compile Include="Repl.fs" />
     <Compile Include="Project.fs" />
     <Compile Include="Check.fs" />
+    <Compile Include="Jsonrpc.fs" />
+    <Compile Include="Session.fs" />
     <Compile Include="LanguageServer.fs" />
     <Compile Include="Program.fs" />
     <!-- Pack=false: keep stdlib in the tool output (tools/net*/any) only, not as package contentFiles. -->

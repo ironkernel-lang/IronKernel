@@ -39,7 +39,9 @@
     "onCommand:ironkernel.openPlayground",
     "onCommand:ironkernel.refreshEnvironment",
     "onCommand:ironkernel.selectProfile",
-    "onView:ironkernelEnvironment"
+    "onView:ironkernelEnvironment",
+    "onCommand:ironkernel.evalSelection",
+    "onCommand:ironkernel.restartSession"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -136,6 +138,16 @@
         "command": "ironkernel.selectProfile",
         "title": "IronKernel: Select Capability Profile",
         "category": "IronKernel"
+      },
+      {
+        "command": "ironkernel.evalSelection",
+        "title": "IronKernel: Eval Selection in Session",
+        "category": "IronKernel"
+      },
+      {
+        "command": "ironkernel.restartSession",
+        "title": "IronKernel: Restart Session",
+        "category": "IronKernel"
       }
     ],
     "menus": {
@@ -168,6 +180,11 @@
           "command": "ironkernel.buildProject",
           "when": "resourceExtname == .ikproj && isWorkspaceTrusted",
           "group": "ironkernel@2"
+        },
+        {
+          "command": "ironkernel.evalSelection",
+          "when": "editorLangId == ironkernel && isWorkspaceTrusted",
+          "group": "ironkernel@3"
         }
       ],
       "view/title": [
@@ -260,6 +277,13 @@
           "minimum": 4096,
           "maximum": 16777216,
           "description": "Maximum stdout or stderr retained for one execution."
+        },
+        "ironkernel.session.timeoutMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1000,
+          "maximum": 600000,
+          "description": "Maximum time one session evaluation may take. A hung evaluation kills the session process (its definitions are lost) and the next eval starts fresh."
         }
       }
     },
