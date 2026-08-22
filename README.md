@@ -157,6 +157,7 @@ ik new app hello
 cd hello
 ik run
 ik test
+ik check
 ik restore
 ik add Acme.IronKernel.Http 1.2.0
 ik add Npgsql 9.0.0 --clr
@@ -187,6 +188,7 @@ for the local-feed workflow and the roadmap.
 | [`IronKernel.Collections`](lib/IronKernel.Collections/) | Folds, slicing, stable sort, sets over `equal?`, alist editing, and the vector/list bridge — pure Kernel |
 | [`IronKernel.Strings`](lib/IronKernel.Strings/) | Search, split/join, case, trimming, padding, characters, invariant number conversion, and a variadic `format` — ordinal semantics throughout |
 | [`IronKernel.Json`](lib/IronKernel.Json/) | Grammar-enforcing JSON reader with offsets in its errors, a writer that refuses what JSON cannot carry, pretty-printing, and path traversal |
+| [`IronKernel.Math`](lib/IronKernel.Math/) | Statistics, combinatorics, and number theory — exact wherever the mathematics allows: means as ratios, `isqrt` and `factorial` at any size, primes, factorizations, totients |
 | [`IronKernel.Amb`](lib/IronKernel.Amb/) | Nondeterministic search: `amb`, `require`, bracketed choice, and pluggable search strategies over multi-shot delimited continuations |
 
 Packages test against `IronKernel.Test` through a test-scoped reference
@@ -368,8 +370,9 @@ See [`Examples/contracts.ikr`](Examples/contracts.ikr).
 ## VS Code extension and playground
 
 The extension in [`editors/vscode/`](editors/vscode/) provides IronKernel syntax
-highlighting, snippets, run/compile commands, Problems diagnostics, and a
-playground backed by the real CLI. Build a local VSIX with:
+highlighting, snippets, run/compile commands, check-on-save diagnostics fed by
+`ik check --json`, and a playground backed by the real CLI. Build a local VSIX
+with:
 
 ```bash
 cd editors/vscode

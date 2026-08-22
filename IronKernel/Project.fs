@@ -630,7 +630,7 @@ module Project =
                 else
                     match bootstrapEnvForProfile project.profile with
                     | Choice1Of2 error ->
-                        eprintfn "Project startup error: %s" (showError error)
+                        eprintfn "Startup error: %s" (showError error)
                         1
                     | Choice2Of2 standardEnv ->
                         let env =

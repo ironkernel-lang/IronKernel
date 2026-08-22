@@ -68,7 +68,8 @@ row as a conformance claim.
 0001 source/project/package conventions · 0002 AOT artifacts · 0003 portable core
 package format · 0004 compiling procedure bodies · 0005 mutable pairs · 0006 errors
 as abnormal passes · 0007 identity for derived combiners · 0008 caching compiled
-bodies (proposed, deliberately not built).
+bodies (proposed, deliberately not built) · 0009 editor tooling from the runtime
+outward (`ik check --json` is its phase 1).
 
 They record measurements and rejected options, not just decisions. When a prediction
 in one turns out wrong, correct it in place rather than leaving it — several carry

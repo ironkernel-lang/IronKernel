@@ -11,6 +11,8 @@ The extension never implements a second evaluator in JavaScript.
 - Bracket matching, comments, indentation, and IronKernel snippets
 - **Run Current File** and **Compile Current File to IKC** commands
 - **Run Project** and **Build Project** for `.ikproj` (nearest project, picker, or explorer context menu)
+- Check on save: `ik check --json` runs on saved `.ikr` files and publishes
+  span-accurate diagnostics (disable with `ironkernel.checkOnSave`)
 - Source-range diagnostics in VS Code's Problems view
 - A playground with runnable examples, validation, cancellation, output limits, and timeouts
 
@@ -54,6 +56,7 @@ host authority available to editor commands and playground runs.
 ## Commands
 
 - `IronKernel: Run Current File`
+- `IronKernel: Check Current File` — `check <file.ikr> --json`, also run on save
 - `IronKernel: Compile Current File to IKC`
 - `IronKernel: Run Project` — `run <project.ikproj>` (plus `ironkernel.runArgs`)
 - `IronKernel: Build Project` — `build <project.ikproj>` → `bin/*.ikc`

@@ -165,6 +165,16 @@ module Emit =
                 | Choice1Of2 e -> throwError e
                 | Choice2Of2 expressions -> writeIkcPackage outputPath expressions
 
+    /// Everything `compile` checks -- read, parse, analyze -- with nothing written.
+    let checkSourceFileForProfile profile (inputPath: string) : ThrowsError<unit> =
+        match readSource inputPath with
+        | Choice1Of2 e -> throwError e
+        | Choice2Of2 source ->
+            let env = makePrimitiveBindingsForProfile profile
+            match analyzePackage env inputPath source with
+            | Choice1Of2 e -> throwError e
+            | Choice2Of2 _ -> returnM ()
+
     [<Obsolete("Use compileFileToPackage; IKC files are packages, not CLR assemblies.")>]
     let compileFileToAssembly inputPath outputPath =
         compileFileToPackage inputPath outputPath

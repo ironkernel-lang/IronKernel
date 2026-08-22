@@ -629,3 +629,23 @@ let ``runtime diagnostics keep the enclosing span for errors after an if conditi
             let diagnostic = showError error
             Assert.Contains("if-condition.ikr:1:1", diagnostic)
             Assert.Contains("^^^^^^^^^^", diagnostic)
+
+[<Fact>]
+let ``check emits JSON diagnostics and distinguishes exit codes`` () =
+    let script = tempPath ".ikr"
+    try
+        File.WriteAllText(script, "(define broken\n")
+        let exitCode, stdout, _ = runCli [ "check"; script; "--json" ]
+        Assert.Equal(1, exitCode)
+        use report = System.Text.Json.JsonDocument.Parse stdout
+        let diagnostics = report.RootElement.GetProperty("diagnostics")
+        Assert.Equal(1, diagnostics.GetArrayLength())
+        Assert.Equal(script, diagnostics.[0].GetProperty("file").GetString())
+
+        File.WriteAllText(script, "(define whole 1)\n")
+        let exitCode, stdout, _ = runCli [ "check"; script; "--json" ]
+        Assert.Equal(0, exitCode)
+        use report = System.Text.Json.JsonDocument.Parse stdout
+        Assert.Equal(0, report.RootElement.GetProperty("diagnostics").GetArrayLength())
+    finally
+        File.Delete script

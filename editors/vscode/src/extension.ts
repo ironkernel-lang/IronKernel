@@ -1,7 +1,12 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { resolveRuntime, runProcess, type RuntimeCommand } from "./cli.js";
-import { parseDiagnostics } from "./diagnostics.js";
+import {
+  parseCheckReport,
+  parseDiagnostics,
+  type CheckDiagnostic,
+  type CheckLocation
+} from "./diagnostics.js";
 import { PlaygroundPanel } from "./playgroundPanel.js";
 import { findIkprojWalkingUp, isIkprojPath, rankIkProjects } from "./projects.js";
 
@@ -16,6 +21,23 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("ironkernel.showOutput", () => output.show()),
     vscode.commands.registerCommand("ironkernel.openPlayground", () => {
       PlaygroundPanel.createOrShow(context, output);
+    }),
+    vscode.commands.registerCommand("ironkernel.checkFile", async () => {
+      const document = await activeIronKernelDocument();
+      if (document) {
+        await runCheck(document, output, diagnostics);
+      }
+    }),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (
+        document.languageId === "ironkernel" &&
+        vscode.workspace.isTrusted &&
+        vscode.workspace
+          .getConfiguration("ironkernel", document.uri)
+          .get<boolean>("checkOnSave", true)
+      ) {
+        void runCheck(document, output, diagnostics);
+      }
     }),
     vscode.commands.registerCommand("ironkernel.runFile", async () => {
       const document = await activeIronKernelDocument();
@@ -191,13 +213,10 @@ async function saveIronKernelDocumentsNear(projectPath: string): Promise<void> {
   }
 }
 
-async function executeCli(
+async function resolveConfiguredRuntime(
   scopeUri: vscode.Uri,
-  args: string[],
-  title: string,
-  output: vscode.OutputChannel,
-  collection: vscode.DiagnosticCollection
-): Promise<void> {
+  output: vscode.OutputChannel
+): Promise<{ runtime: RuntimeCommand; maxOutputBytes: number } | undefined> {
   const folder = vscode.workspace.getWorkspaceFolder(scopeUri);
   const configuration = vscode.workspace.getConfiguration("ironkernel", scopeUri);
   let runtime: RuntimeCommand;
@@ -211,14 +230,127 @@ async function executeCli(
     const message = error instanceof Error ? error.message : String(error);
     output.appendLine(`[launch failed] ${message}`);
     void vscode.window.showErrorMessage(`Unable to resolve IronKernel: ${message}`);
-    return;
+    return undefined;
   }
   const profile = configuration.get<string>("profile", "unrestricted");
-  runtime = {
-    ...runtime,
-    prefixArgs: [...runtime.prefixArgs, "--profile", profile]
+  return {
+    runtime: {
+      ...runtime,
+      prefixArgs: [...runtime.prefixArgs, "--profile", profile]
+    },
+    maxOutputBytes: configuration.get<number>("maxOutputBytes", 1024 * 1024)
   };
-  const maxOutputBytes = configuration.get<number>("maxOutputBytes", 1024 * 1024);
+}
+
+const checksInFlight = new Map<string, AbortController>();
+
+async function runCheck(
+  document: vscode.TextDocument,
+  output: vscode.OutputChannel,
+  collection: vscode.DiagnosticCollection
+): Promise<void> {
+  const resolved = await resolveConfiguredRuntime(document.uri, output);
+  if (!resolved) {
+    return;
+  }
+  const key = document.uri.toString();
+  checksInFlight.get(key)?.abort();
+  const controller = new AbortController();
+  checksInFlight.set(key, controller);
+  try {
+    const result = await runProcess(
+      resolved.runtime,
+      ["check", document.uri.fsPath, "--json"],
+      {
+        timeoutMs,
+        maxOutputBytes: resolved.maxOutputBytes,
+        signal: controller.signal
+      }
+    );
+    if (result.cancelled) {
+      return;
+    }
+    const report = parseCheckReport(result.stdout);
+    if (report === undefined) {
+      output.appendLine(`[check produced no report; exit ${result.exitCode ?? "unknown"}]`);
+      if (result.stderr) {
+        output.append(result.stderr);
+      }
+      return;
+    }
+    publishCheckDiagnostics(document.uri, report, collection);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.appendLine(`[check failed] ${message}`);
+  } finally {
+    if (checksInFlight.get(key) === controller) {
+      checksInFlight.delete(key);
+    }
+  }
+}
+
+function toRange(location: CheckLocation): vscode.Range {
+  if (!location.range) {
+    return new vscode.Range(0, 0, 0, 1);
+  }
+  const startLine = location.range.start.line - 1;
+  const startColumn = location.range.start.column - 1;
+  let endLine = location.range.end.line - 1;
+  let endColumn = location.range.end.column - 1;
+  if (endLine < startLine || (endLine === startLine && endColumn <= startColumn)) {
+    endLine = startLine;
+    endColumn = startColumn + 1;
+  }
+  return new vscode.Range(startLine, startColumn, endLine, endColumn);
+}
+
+function publishCheckDiagnostics(
+  checkedUri: vscode.Uri,
+  report: CheckDiagnostic[],
+  collection: vscode.DiagnosticCollection
+): void {
+  const byDocument = new Map<string, vscode.Diagnostic[]>();
+  // A clean report must still overwrite the checked file's stale entries.
+  byDocument.set(checkedUri.toString(), []);
+  for (const entry of report) {
+    const uri = vscode.Uri.file(entry.file);
+    const diagnostic = new vscode.Diagnostic(
+      toRange(entry),
+      entry.message,
+      vscode.DiagnosticSeverity.Error
+    );
+    diagnostic.source = "IronKernel";
+    if (entry.related && entry.related.length > 0) {
+      diagnostic.relatedInformation = entry.related.map(
+        (location) =>
+          new vscode.DiagnosticRelatedInformation(
+            new vscode.Location(vscode.Uri.file(location.file), toRange(location)),
+            "in this enclosing form"
+          )
+      );
+    }
+    const key = uri.toString();
+    const values = byDocument.get(key) ?? [];
+    values.push(diagnostic);
+    byDocument.set(key, values);
+  }
+  for (const [key, values] of byDocument) {
+    collection.set(vscode.Uri.parse(key), values);
+  }
+}
+
+async function executeCli(
+  scopeUri: vscode.Uri,
+  args: string[],
+  title: string,
+  output: vscode.OutputChannel,
+  collection: vscode.DiagnosticCollection
+): Promise<void> {
+  const resolved = await resolveConfiguredRuntime(scopeUri, output);
+  if (!resolved) {
+    return;
+  }
+  const { runtime, maxOutputBytes } = resolved;
   collection.clear();
   output.show(true);
   output.appendLine(`> ${runtime.command} ${[...runtime.prefixArgs, ...args].join(" ")}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDiagnostics } from "../src/diagnostics.js";
+import { parseCheckReport, parseDiagnostics } from "../src/diagnostics.js";
 
 describe("parseDiagnostics", () => {
   it("parses a ranged Unix diagnostic", () => {
@@ -41,5 +41,79 @@ describe("parseDiagnostics", () => {
 
   it("ignores unrelated output", () => {
     expect(parseDiagnostics("Hello,world!\n")).toEqual([]);
+  });
+});
+
+describe("parseCheckReport", () => {
+  it("parses a version-1 report with ranges and related locations", () => {
+    const report = parseCheckReport(
+      JSON.stringify({
+        version: 1,
+        diagnostics: [
+          {
+            severity: "error",
+            message: "Parse error: Expecting ')'",
+            file: "/work/demo.ikr",
+            range: { start: { line: 4, column: 1 }, end: { line: 4, column: 1 } },
+            related: [
+              {
+                file: "/work/demo.ikr",
+                range: { start: { line: 1, column: 1 }, end: { line: 4, column: 1 } }
+              }
+            ]
+          }
+        ]
+      })
+    );
+
+    expect(report).toEqual([
+      {
+        severity: "error",
+        message: "Parse error: Expecting ')'",
+        file: "/work/demo.ikr",
+        range: { start: { line: 4, column: 1 }, end: { line: 4, column: 1 } },
+        related: [
+          {
+            file: "/work/demo.ikr",
+            range: { start: { line: 1, column: 1 }, end: { line: 4, column: 1 } }
+          }
+        ]
+      }
+    ]);
+  });
+
+  it("keeps a rangeless diagnostic and distinguishes a clean report from garbage", () => {
+    const clean = parseCheckReport('{"version":1,"diagnostics":[]}');
+    expect(clean).toEqual([]);
+
+    const rangeless = parseCheckReport(
+      '{"version":1,"diagnostics":[{"severity":"error","message":"Failed to read","file":"/gone.ikr"}]}'
+    );
+    expect(rangeless).toEqual([
+      { severity: "error", message: "Failed to read", file: "/gone.ikr", related: undefined }
+    ]);
+
+    expect(parseCheckReport("")).toBeUndefined();
+    expect(parseCheckReport("Wrote demo.ikc\n")).toBeUndefined();
+    expect(parseCheckReport('{"version":2,"diagnostics":[]}')).toBeUndefined();
+  });
+
+  it("drops malformed entries instead of failing the report", () => {
+    const report = parseCheckReport(
+      JSON.stringify({
+        version: 1,
+        diagnostics: [
+          { severity: "error", message: "no file here" },
+          {
+            severity: "error",
+            message: "bad range",
+            file: "/work/demo.ikr",
+            range: { start: { line: 0, column: 1 }, end: { line: 1, column: 1 } }
+          },
+          { severity: "error", message: "kept", file: "/work/demo.ikr" }
+        ]
+      })
+    );
+    expect(report?.map((entry) => entry.message)).toEqual(["kept"]);
   });
 });

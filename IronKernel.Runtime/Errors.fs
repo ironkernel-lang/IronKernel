@@ -13,20 +13,18 @@ module Errors =
         |Choice1Of2(error) -> f error
         |Choice2Of2(result) -> action
 
-    let showError error =
-        let mutable current = error
-        let mutable locations = []
-        let mutable collecting = true
-
-        while collecting do
+    /// The location wrappers around an error, outermost first, and the unwrapped core.
+    let errorLocations error =
+        let rec strip acc current =
             match current with
-            | LocatedError(span, sourceLine, inner) ->
-                locations <- (span, sourceLine) :: locations
-                current <- inner
-            | _ -> collecting <- false
+            | LocatedError(span, sourceLine, inner) -> strip ((span, sourceLine) :: acc) inner
+            | core -> List.rev acc, core
+        strip [] error
 
+    /// The diagnostic text of a core error, without location prefixes or caret art.
+    let errorMessage core =
         let message =
-            match current with
+            match core with
             | UnboundVar(msg,varname) -> msg + ": '" + varname + "' "
             | BadSpecialForm(msg,form) -> msg + ": " + showVal form
             | NotFunction(msg,func) -> msg + ": " + func
@@ -43,9 +41,14 @@ module Errors =
             // a diagnostic says what it is.
             | SessionExit value -> "session exited with " + showVal value
             | LocatedError _ -> invalidOp "Located error traversal is incomplete"
+        message
+
+    let showError error =
+        let locations, core = errorLocations error
+        let message = errorMessage core
 
         let output = Text.StringBuilder()
-        for span, _ in List.rev locations do
+        for span, _ in locations do
             let source =
                 if String.IsNullOrWhiteSpace span.sourceName then "<input>"
                 else span.sourceName
@@ -53,7 +56,8 @@ module Errors =
             output.AppendFormat("{0}:{1}:{2}: ", source, position.line, position.column) |> ignore
 
         output.Append(message) |> ignore
-        for span, sourceLine in locations do
+        // Prefixes read outermost first; caret blocks print innermost first.
+        for span, sourceLine in List.rev locations do
             let position = span.startPosition
             match sourceLine with
             | None -> ()
