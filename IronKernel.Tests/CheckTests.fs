@@ -98,3 +98,10 @@ let ``project check walks sources main and tests`` () =
         Assert.Equal(2, List.length findings)
         Assert.Contains(findings, fun finding -> finding.path = brokenSource)
         Assert.Contains(findings, fun finding -> finding.path = brokenTest))
+
+[<Fact>]
+let ``check reports every broken region in one file`` () =
+    withSource ")\n(ok 1)\n)\n(ok2 2)\n" (fun path ->
+        let findings = checkFile Unrestricted path
+        Assert.Equal(2, List.length findings)
+        Assert.Equal(2, List.length (parseReport (toJson findings))))

@@ -20,9 +20,8 @@ module Check =
     }
 
     let checkFile profile (path: string) : Finding list =
-        match Emit.checkSourceFileForProfile profile path with
-        | Choice1Of2 error -> [ { path = path; error = error } ]
-        | Choice2Of2 () -> []
+        Emit.checkFileDiagnostics profile path
+        |> List.map (fun error -> { path = path; error = error })
 
     /// The files the project's author edits: sources, main, tests. Dependency
     /// sources are published artifacts and are not this project's to fix.

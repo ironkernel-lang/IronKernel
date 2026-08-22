@@ -317,3 +317,90 @@ let ``integer literals are exact at any width`` () =
     Assert.IsType<System.Numerics.BigInteger>(parsed "123456789012345678901234567890") |> ignore
     // The L suffix still forces at least 64-bit.
     Assert.IsType<int64>(parsed "42L") |> ignore
+
+// ---- Recovering reader (ADR 0009 phase 4) ----
+
+let private recoveringErrorLines errors =
+    errors
+    |> List.map (fun error ->
+        match error with
+        | LocatedError(span, _, Parser _) -> span.startPosition.line
+        | other -> failwithf "unexpected error shape: %A" other)
+
+[<Fact>]
+let ``recovering reader matches the strict reader on clean input`` () =
+    let input = "(define a 1)\n(define b (lambda (x) x))\n"
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Empty errors
+    match readLocatedExprList "recover.ikr" input with
+    | Choice2Of2 strict -> Assert.Equal(List.length strict, List.length forms)
+    | Choice1Of2 error -> failwithf "strict reader failed: %A" error
+
+[<Fact>]
+let ``recovery resumes at the next top-level form`` () =
+    // The unclosed first form is lost; the good form after it is not, which
+    // is what the strict reader cannot do.
+    let input = "(broken\n(define after 1)\n"
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Equal(1, List.length errors)
+    match forms with
+    | [ { kind = LList ({ kind = LAtom "define" } :: { kind = LAtom "after" } :: _) } ] -> ()
+    | other -> failwithf "unexpected recovery: %A" other
+
+[<Fact>]
+let ``a stray closer costs one error and keeps both neighbours`` () =
+    let input = "(a 1))\n(b 2)\n"
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Equal(1, List.length errors)
+    Assert.Equal(2, List.length forms)
+
+[<Fact>]
+let ``each broken region reports its own error`` () =
+    let input = ")\n(ok 1)\n)\n(ok2 2)\n"
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Equal<int64 list>([1L; 3L], recoveringErrorLines errors)
+    let formLines = forms |> List.map (fun form -> form.span.startPosition.line)
+    Assert.Equal<int64 list>([2L; 4L], formLines)
+
+[<Fact>]
+let ``the trailing form is completed so mid-edit buffers keep their tree`` () =
+    let input = "(define done 1)\n(define partial (lambda (x)\n"
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Equal(1, List.length errors)
+    match forms with
+    | [ first; second ] ->
+        (match first.kind with
+         | LList ({ kind = LAtom "define" } :: { kind = LAtom "done" } :: _) -> ()
+         | other -> failwithf "unexpected first form: %A" other)
+        (match second.kind with
+         | LList ({ kind = LAtom "define" } :: { kind = LAtom "partial" } :: _) -> ()
+         | other -> failwithf "unexpected completed form: %A" other)
+        Assert.Equal(2L, second.span.startPosition.line)
+    | other -> failwithf "expected two forms, got %A" other
+
+[<Fact>]
+let ``recovered spans survive the window remap exactly`` () =
+    let input = ")\n(marker 1)\n"
+    let forms, _ = readLocatedExprListRecovering "recover.ikr" input
+    match forms with
+    | [ { kind = LList ({ kind = LAtom "marker"; span = atomSpan } :: _); span = formSpan } ] ->
+        Assert.Equal(2L, formSpan.startPosition.line)
+        Assert.Equal(1L, formSpan.startPosition.column)
+        Assert.Equal(2L, atomSpan.startPosition.line)
+        Assert.Equal(2L, atomSpan.startPosition.column)
+        Assert.Equal(6L, atomSpan.endPosition.offset - atomSpan.startPosition.offset)
+    | other -> failwithf "unexpected forms: %A" other
+
+[<Fact>]
+let ``an unclosed string disables trailing completion`` () =
+    let input = "(define ok 1)\n(define s \"unterminated\n"
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Equal(1, List.length errors)
+    Assert.Equal(1, List.length forms)
+
+[<Fact>]
+let ``the nesting bomb stays a single error with no forms`` () =
+    let input = String.replicate 300 "("
+    let forms, errors = readLocatedExprListRecovering "recover.ikr" input
+    Assert.Empty forms
+    Assert.Equal(1, List.length errors)

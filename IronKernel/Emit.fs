@@ -165,18 +165,22 @@ module Emit =
                 | Choice1Of2 e -> throwError e
                 | Choice2Of2 expressions -> writeIkcPackage outputPath expressions
 
-    /// Everything `compile` checks -- parse, analyze -- on in-memory source.
-    let checkSourceInEnv env sourceName source : ThrowsError<unit> =
-        match analyzePackage env sourceName source with
-        | Choice1Of2 e -> throwError e
-        | Choice2Of2 _ -> returnM ()
+    /// Everything `compile` checks, with recovery: every parse error in the
+    /// source (one per broken region), and the same analysis `compile` runs
+    /// over every form that did parse -- analysis cannot fail today, but the
+    /// semantic checks that land there will surface here for free.
+    let checkSourceDiagnostics env sourceName (source: string) : LispError list =
+        let forms, errors = Parser.readLocatedExprListRecovering sourceName source
+        for form in forms do
+            Analyze.analyzeLocatedGuarded env source form |> ignore
+        errors
 
-    /// Everything `compile` checks -- read, parse, analyze -- with nothing written.
-    let checkSourceFileForProfile profile (inputPath: string) : ThrowsError<unit> =
+    /// The same on a file; an unreadable file is itself the one diagnostic.
+    let checkFileDiagnostics profile (inputPath: string) : LispError list =
         match readSource inputPath with
-        | Choice1Of2 e -> throwError e
+        | Choice1Of2 e -> [e]
         | Choice2Of2 source ->
-            checkSourceInEnv (makePrimitiveBindingsForProfile profile) inputPath source
+            checkSourceDiagnostics (makePrimitiveBindingsForProfile profile) inputPath source
 
     [<Obsolete("Use compileFileToPackage; IKC files are packages, not CLR assemblies.")>]
     let compileFileToAssembly inputPath outputPath =

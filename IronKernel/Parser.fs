@@ -333,6 +333,173 @@ module Parser =
     let readLocatedExprList sourceName input =
         readLocatedOrThrow (ws >>. many (parseLocatedExpr .>> ws) .>> eof) sourceName input
 
+    // ---- Recovering reader (ADR 0009 phase 4) -----------------------------
+    //
+    // Recovery lives outside the grammar: broken regions are re-windowed and
+    // re-parsed with the same strict parsers, and positions are remapped
+    // exactly, instead of weaving error-recovery alternatives through the
+    // grammar that `compile` depends on.
+
+    /// A parse run on `input.Substring(offset)` reports positions relative to
+    /// the window; this is where the window sits in the whole input.
+    type private WindowBase = {
+        offset : int64
+        line : int64
+        column : int64
+    }
+
+    /// Exact for any cut point: a window position on line 1 shifts by the
+    /// base column, every later line already has real columns.
+    let private remapPosition (window: WindowBase) (position: SourcePosition) : SourcePosition =
+        { offset = window.offset + position.offset
+          line = window.line + position.line - 1L
+          column =
+            if position.line = 1L then window.column + position.column - 1L
+            else position.column }
+
+    let private remapSpan window span =
+        { span with
+            startPosition = remapPosition window span.startPosition
+            endPosition = remapPosition window span.endPosition }
+
+    let rec private remapLocated window (value: LocatedValue) =
+        { kind =
+            match value.kind with
+            | LList items -> LList(List.map (remapLocated window) items)
+            | LDottedList(items, tail) ->
+                LDottedList(List.map (remapLocated window) items, remapLocated window tail)
+            | LVector items -> LVector(Array.map (remapLocated window) items)
+            | LQuote inner -> LQuote(remapLocated window inner)
+            | leaf -> leaf
+          span = remapSpan window value.span }
+
+    /// The next offset strictly inside a later line whose first character
+    /// opens a form -- top-level forms conventionally start at column 1, and
+    /// that convention is what makes them recovery points.
+    let private nextTopLevelStart (input: string) (after: int) =
+        let mutable index = after
+        let mutable result = None
+        while result.IsNone && index < input.Length - 1 do
+            if input.[index] = '\n' && (input.[index + 1] = '(' || input.[index + 1] = '[') then
+                result <- Some(index + 1)
+            index <- index + 1
+        result
+
+    let private lineAt (input: string) (offset: int) =
+        let mutable line = 1L
+        let mutable index = 0
+        let mutable previousWasCarriageReturn = false
+        while index < offset do
+            match input.[index] with
+            | '\r' ->
+                line <- line + 1L
+                previousWasCarriageReturn <- true
+            | '\n' ->
+                if not previousWasCarriageReturn then line <- line + 1L
+                previousWasCarriageReturn <- false
+            | _ -> previousWasCarriageReturn <- false
+            index <- index + 1
+        line
+
+    /// The closers that would balance `input.[start..]`, outermost last,
+    /// respecting strings and comments as `tryNestingError` does. Empty when
+    /// the region is balanced, over-closed, or ends inside a string -- none
+    /// of which appending brackets can fix.
+    let private unclosedBrackets (input: string) (start: int) =
+        let mutable stack = []
+        let mutable inString = false
+        let mutable escaped = false
+        let mutable inComment = false
+        for index in start .. input.Length - 1 do
+            let character = input.[index]
+            if inComment then
+                if character = '\r' || character = '\n' then inComment <- false
+            elif inString then
+                if escaped then escaped <- false
+                elif character = '\\' then escaped <- true
+                elif character = '"' then inString <- false
+            else
+                match character with
+                | ';' -> inComment <- true
+                | '"' -> inString <- true
+                | '(' -> stack <- ')' :: stack
+                | '[' -> stack <- ']' :: stack
+                | ')' | ']' ->
+                    match stack with
+                    | _ :: rest -> stack <- rest
+                    | [] -> ()
+                | _ -> ()
+        if inString || List.isEmpty stack then ""
+        else
+            // A trailing comment would swallow closers appended on its line.
+            let closers = System.String(Array.ofList stack)
+            if inComment then "\n" + closers else closers
+
+    /// Parse as much of `input` as possible: every form that parses, plus one
+    /// error per broken region, all in source order. Recovery resumes at the
+    /// next top-level form start; the final broken region is re-parsed with
+    /// its unclosed brackets closed, so the form being typed still yields a
+    /// tree. `readLocatedExprList` stays the strict reader `compile` uses.
+    let readLocatedExprListRecovering sourceName (input: string) : LocatedValue list * LispError list =
+        match tryNestingError sourceName input with
+        | Some error -> [], [error]
+        | None ->
+            let asManyAsParse =
+                ws >>. many (attempt (parseLocatedExpr .>> ws)) .>>. getPosition
+            let forms = ResizeArray()
+            let errors = ResizeArray()
+            let pointError (position: SourcePosition) message =
+                let span =
+                    { sourceName = sourceName
+                      startPosition = position
+                      endPosition = position }
+                LocatedError(span, sourceLineAt input position.line, Parser message)
+            let rec parseWindow (baseOffset: int) (baseLine: int64) (baseColumn: int64) =
+                let window =
+                    { offset = int64 baseOffset; line = baseLine; column = baseColumn }
+                match runParserOnString asManyAsParse () sourceName (input.Substring baseOffset) with
+                | Failure _ -> ()   // `many` of an `attempt` cannot fail.
+                | Success((parsed, stopPosition), _, _) ->
+                    for form in parsed do
+                        forms.Add(remapLocated window form)
+                    let stopOffset = baseOffset + int stopPosition.Index
+                    if stopOffset < input.Length then
+                        let stop = remapPosition window (sourcePosition stopPosition)
+                        // Word this region's error exactly as the strict
+                        // reader would.
+                        let errorWindow =
+                            { offset = int64 stopOffset; line = stop.line; column = stop.column }
+                        (match runParserOnString
+                                   (ws >>. parseLocatedExpr .>> ws .>> eof)
+                                   ()
+                                   sourceName
+                                   (input.Substring stopOffset) with
+                         | Failure(message, parserError, _) ->
+                             let position =
+                                 remapPosition errorWindow (sourcePosition parserError.Position)
+                             errors.Add(pointError position (conciseParseMessage message))
+                         | Success _ ->
+                             // Unreachable: the region stopped parsing above.
+                             errors.Add(pointError stop "invalid syntax"))
+                        match nextTopLevelStart input stopOffset with
+                        | Some start -> parseWindow start (lineAt input start) 1L
+                        | None ->
+                            match unclosedBrackets input stopOffset with
+                            | "" -> ()
+                            | closers ->
+                                let completed = input.Substring stopOffset + closers
+                                match runParserOnString
+                                          (ws >>. many (parseLocatedExpr .>> ws) .>> eof)
+                                          ()
+                                          sourceName
+                                          completed with
+                                | Success(parsed, _, _) ->
+                                    for form in parsed do
+                                        forms.Add(remapLocated errorWindow form)
+                                | Failure _ -> ()
+            parseWindow 0 1L 1L
+            List.ofSeq forms, List.ofSeq errors
+
     let readExprFromSource sourceName input =
         match readLocatedExpr sourceName input with
         | Choice1Of2 error -> throwError error

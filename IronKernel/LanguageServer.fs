@@ -181,9 +181,9 @@ module LanguageServer =
         | _ -> acc
 
     let private parsedForms sourceName text =
-        match Parser.readLocatedExprList sourceName text with
-        | Choice2Of2 forms -> forms
-        | Choice1Of2 _ -> []
+        // Recovering: a broken buffer still yields the forms that do parse,
+        // including the trailing form with its brackets closed.
+        Parser.readLocatedExprListRecovering sourceName text |> fst
 
 
     // ---- Contracts and hover text -----------------------------------------
@@ -234,12 +234,6 @@ module LanguageServer =
 
     type private Session = {
         documents : Dictionary<string, string>
-        /// Buffer defines from each document's last *successful* parse. A
-        /// half-typed buffer does not parse (the reader has no error
-        /// recovery, ADR 0009 phase 4), and completion mid-edit is exactly
-        /// when the buffer is broken -- so the last good parse serves until
-        /// the next one.
-        defines : Dictionary<string, Map<string, SymbolClass>>
         /// Bootstrapped kernel environment: symbol source for completion,
         /// hover, and semantic classification. Never evaluated into by the
         /// server -- buffers are parsed and analyzed, not run.
@@ -255,16 +249,11 @@ module LanguageServer =
             if parsed.IsFile then parsed.LocalPath else uri
         with _ -> uri
 
-    let private refreshDefines session (uri: string) text =
-        match Parser.readLocatedExprList (uriToPath uri) text with
-        | Choice2Of2 forms ->
-            session.defines.[uri] <- List.fold collectDefines Map.empty forms
-        | Choice1Of2 _ -> ()
-
-    let private definesFor session (uri: string) =
-        match session.defines.TryGetValue uri with
-        | true, value -> value
-        | _ -> Map.empty
+    /// Defines straight from the current buffer: the recovering reader
+    /// keeps them available mid-edit, which retired the last-good-parse
+    /// cache phase 3 carried (ADR 0009 phase 4).
+    let private definesIn (uri: string) text =
+        parsedForms (uriToPath uri) text |> List.fold collectDefines Map.empty
 
     let private classifySymbol session defines name =
         match Map.tryFind name defines with
@@ -292,9 +281,7 @@ module LanguageServer =
             writer.WriteString("uri", uri)
             writer.WritePropertyName "diagnostics"
             writer.WriteStartArray()
-            match Emit.checkSourceInEnv session.checkEnv sourceName text with
-            | Choice2Of2 () -> ()
-            | Choice1Of2 error ->
+            for error in Emit.checkSourceDiagnostics session.checkEnv sourceName text do
                 let locations, core = errorLocations error
                 writer.WriteStartObject()
                 writer.WritePropertyName "range"
@@ -340,7 +327,7 @@ module LanguageServer =
             | _ -> ""
         let offset = offsetAt text line character
         let prefix, envMatches = Repl.completionCandidates session.env text offset
-        let defines = definesFor session uri
+        let defines = definesIn uri text
         let fromBuffer =
             if prefix = "" then []
             else
@@ -374,7 +361,7 @@ module LanguageServer =
         match symbolAt text offset with
         | None -> respond output id (fun writer -> writer.WriteNullValue())
         | Some name ->
-            let defines = definesFor session uri
+            let defines = definesIn uri text
             let lines =
                 match SymbolTable.getVar' session.env name with
                 | Some value ->
@@ -440,7 +427,7 @@ module LanguageServer =
             | true, value -> value
             | _ -> ""
         let sourceName = uriToPath uri
-        let data = semanticTokenData (classifySymbol session (definesFor session uri)) sourceName text
+        let data = semanticTokenData (classifySymbol session (definesIn uri text)) sourceName text
         respond output id (fun writer ->
             writer.WriteStartObject()
             writer.WritePropertyName "data"
@@ -468,7 +455,6 @@ module LanguageServer =
         | Choice2Of2 env ->
             let session = {
                 documents = Dictionary()
-                defines = Dictionary()
                 env = env
                 checkEnv = Runtime.makePrimitiveBindingsForProfile profile
             }
@@ -530,7 +516,6 @@ module LanguageServer =
                         let textDocument = parameters.GetProperty "textDocument"
                         let uri = textDocument.GetProperty("uri").GetString()
                         session.documents.[uri] <- textDocument.GetProperty("text").GetString()
-                        refreshDefines session uri session.documents.[uri]
                         publishDiagnostics output session uri
                     | "textDocument/didChange" ->
                         let uri = textDocumentUri parameters
@@ -542,13 +527,11 @@ module LanguageServer =
                         match text with
                         | Some value ->
                             session.documents.[uri] <- value
-                            refreshDefines session uri value
                             publishDiagnostics output session uri
                         | None -> ()
                     | "textDocument/didClose" ->
                         let uri = textDocumentUri parameters
                         session.documents.Remove uri |> ignore
-                        session.defines.Remove uri |> ignore
                         notify output "textDocument/publishDiagnostics" (fun writer ->
                             writer.WriteStartObject()
                             writer.WriteString("uri", uri)

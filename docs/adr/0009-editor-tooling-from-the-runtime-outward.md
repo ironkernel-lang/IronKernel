@@ -1,6 +1,6 @@
 # ADR 0009: Editor tooling grows from the runtime outward
 
-Status: Accepted — phases 1 through 3 implemented
+Status: Accepted — phases 1 through 4 implemented
 
 ## Decision
 
@@ -152,10 +152,32 @@ parse — a cache that parser recovery will later make unnecessary.
 Marketplace publishing remains a human decision: it needs a publisher
 account, and CI already builds the `.vsix` on every push.
 
-**Phase 4 — parser error recovery.** A first failure with no partial tree is
-acceptable for check-on-save and fatal for as-you-type diagnostics and
-mid-edit completion. This is the largest single piece and nothing above
-depends on it, which is why it is fourth and not first.
+**Phase 4 — parser error recovery.** *Done.* Recovery lives outside the
+grammar: `readLocatedExprListRecovering` re-windows broken input and re-runs
+the same strict parsers, remapping positions exactly (a window position on
+line 1 shifts by the base column; every later line already has real columns).
+The alternative — error-recovery alternatives woven through the FParsec
+grammar — was rejected because it would distort the strict path that
+`compile` depends on; here the strict readers are untouched and recovery is
+composition around them.
+
+Semantics: one error per broken region, worded by the strict parser; parsing
+resumes at the next line that opens a form at column 1 (the convention that
+makes top-level forms recovery points); and the final broken region is
+re-parsed with its unclosed brackets closed — respecting strings and
+comments — so the form being typed still yields a tree. What it deliberately
+does not do: a mid-file broken region's own content is dropped up to the
+resync point, only the trailing region gets bracket completion, and error
+positions are the strict reader's — an unclosed opener still reports at end
+of input rather than at the opener.
+
+Two predictions corrected. "The largest single piece" it was not: it landed
+smaller than the language server, because composing recovery from the strict
+parsers plus one remap rule avoided the rewrite the estimate priced in. And
+the payoff arrived where phase 3 said it would: the last-good-parse defines
+cache is deleted, completion and semantic tokens run against the actual
+buffer mid-edit, `ik check` reports every broken region in a file, and the
+server publishes every error instead of the first.
 
 **Phase 5 — the visible surfaces.** Environment inspector (a UI over phase
 2), a profile status-bar item that also reads the project's own `<Profile>`,
