@@ -114,8 +114,23 @@
             // Reference-equal cells were settled above; for eq? distinct cells are
             // distinct pairs however alike they look, so it never descends.
             | Pair _, Pair _ -> if pairsByIdentity then ValueSome false else ValueNone
+            // Vectors compare like pairs: by identity for eq?, element by element
+            // for the structural predicates -- 4.3.1's "look alike", extended to
+            // this non-report type.
+            | Vector _, Vector _ -> if pairsByIdentity then ValueSome false else ValueNone
             | Nil, Nil -> ValueSome true
             | _ -> ValueSome false
+
+        /// Element arrays under comparison, both components by reference. One
+        /// shared instance: the comparer itself is stateless.
+        let private arrayPairIdentity =
+            { new System.Collections.Generic.IEqualityComparer<
+                  struct (LispVal array * LispVal array)> with
+                member _.Equals(struct (a1, b1), struct (a2, b2)) =
+                    obj.ReferenceEquals(a1, a2) && obj.ReferenceEquals(b1, b2)
+                member _.GetHashCode(struct (a, b)) =
+                    LanguagePrimitives.PhysicalHash a
+                    ^^^ (LanguagePrimitives.PhysicalHash b * 31) }
 
         /// The work list and the visited set are built only once a comparison actually
         /// descends. `eq?` never does, and neither does any comparison of scalars, so
@@ -129,6 +144,14 @@
                 let visited =
                     System.Collections.Generic.HashSet<struct (PairCell * PairCell)>(
                         HashIdentity.Structural)
+                // Vector pairs under comparison, by element-array identity, so a
+                // self-containing vector terminates the same way a cyclic list
+                // does. Allocated only if a vector is actually reached; a plain
+                // mutable local, not a captured one, so list-only comparisons
+                // stay allocation-free here.
+                let mutable visitedVectors :
+                    System.Collections.Generic.HashSet<struct (LispVal array * LispVal array)> =
+                    null
                 pending.Push(left, right)
                 let mutable equal = true
 
@@ -150,12 +173,22 @@
                         else
                             pending.Push(leftCell.cdr, rightCell.cdr)
                             pending.Push(leftCell.car, rightCell.car)
+                    | Vector leftItems, Vector rightItems when
+                        not (obj.ReferenceEquals(first, second)) ->
+                        if leftItems.Length <> rightItems.Length then equal <- false
+                        else
+                            if isNull visitedVectors then
+                                visitedVectors <-
+                                    System.Collections.Generic.HashSet<_>(arrayPairIdentity)
+                            if visitedVectors.Add(struct (leftItems, rightItems)) then
+                                for index in 0 .. leftItems.Length - 1 do
+                                    pending.Push(leftItems.[index], rightItems.[index])
                     | _ ->
                         match compareStep pairsByIdentity first second with
                         | ValueSome true -> ()
                         | ValueSome false -> equal <- false
-                        // Unreachable: the only ValueNone is two distinct pairs, taken
-                        // by the case above.
+                        // Unreachable: the only ValueNones are two distinct pairs and
+                        // two distinct vectors, taken by the cases above.
                         | ValueNone -> equal <- false
 
                 equal
