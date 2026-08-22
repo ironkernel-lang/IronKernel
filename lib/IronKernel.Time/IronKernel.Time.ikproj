@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PackageId>IronKernel.Time</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>IronKernel</Authors>
+    <Description>Dates, durations, and formatting for IronKernel over System.DateTime and System.TimeSpan: UTC-disciplined instants the arithmetic tower already adds and subtracts, calendar operations, unix time, and invariant-culture ISO 8601 formatting and parsing.</Description>
+    <PackageTags>ironkernel</PackageTags>
+    <IronKernelMain>src/time.ikr</IronKernelMain>
+    <IronKernelProfile>unrestricted</IronKernelProfile>
+  </PropertyGroup>
+  <ItemGroup>
+    <IronKernelSource Include="src/**/*.ikr" />
+    <IronKernelTest Include="test/**/*.ikr" />
+    <PackageReference Include="IronKernel.Test" Version="0.1.0" IronKernelKind="IronKernel" IronKernelScope="test" />
+  </ItemGroup>
+</Project>

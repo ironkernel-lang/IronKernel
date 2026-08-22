@@ -391,6 +391,12 @@ namespace IronKernel
                 match b with
                 | :? TimeSpan as span -> returnM (Obj(date + span))
                 | _ -> throwError (ClrTypeMismatch("TimeSpan", b.GetType().Name))
+            | Obj (:? TimeSpan as span), Obj b ->
+                match b with
+                | :? TimeSpan as other -> returnM (Obj(span + other))
+                // Commutative with the case above: (+ span date) is (+ date span).
+                | :? DateTime as date -> returnM (Obj(date + span))
+                | _ -> throwError (ClrTypeMismatch("TimeSpan or DateTime", b.GetType().Name))
             | Obj a, Obj b ->
                 dispatchInfinities addCombine addMixed a b (fun () ->
                     numericBinaryOp addWidened a' b')
@@ -402,7 +408,12 @@ namespace IronKernel
             | Obj (:? DateTime as date), Obj b ->
                 match b with
                 | :? DateTime as other -> returnM (Obj(date - other))
-                | _ -> throwError (ClrTypeMismatch("DateTime", b.GetType().Name))
+                | :? TimeSpan as span -> returnM (Obj(date - span))
+                | _ -> throwError (ClrTypeMismatch("DateTime or TimeSpan", b.GetType().Name))
+            | Obj (:? TimeSpan as span), Obj b ->
+                match b with
+                | :? TimeSpan as other -> returnM (Obj(span - other))
+                | _ -> throwError (ClrTypeMismatch("TimeSpan", b.GetType().Name))
             | Obj a, Obj b ->
                 dispatchInfinities subtractCombine subtractMixed a b (fun () ->
                     numericBinaryOp subtractWidened a' b')
