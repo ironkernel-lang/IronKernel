@@ -2,12 +2,12 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <PackageId>IronKernel.Amb</PackageId>
+    <PackageId>IronKernel.Strings</PackageId>
     <Version>0.1.0</Version>
     <Authors>IronKernel</Authors>
-    <Description>Nondeterministic search for IronKernel: amb, require, and pluggable search strategies built on multi-shot delimited continuations.</Description>
+    <Description>String and format utilities for IronKernel: search, split/join, case, trimming, padding, characters, invariant number conversion, and a variadic culture-invariant format -- ordinal semantics throughout.</Description>
     <PackageTags>ironkernel</PackageTags>
-    <IronKernelMain>src/amb.ikr</IronKernelMain>
+    <IronKernelMain>src/strings.ikr</IronKernelMain>
     <IronKernelProfile>unrestricted</IronKernelProfile>
   </PropertyGroup>
   <ItemGroup>

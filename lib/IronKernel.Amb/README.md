@@ -25,7 +25,8 @@ ik add IronKernel.Amb 0.1.0
 Or, from a checkout of this repository:
 
 ```bash
-cd lib/IronKernel.Amb
+cd lib/IronKernel.Test && ik pack     # seed the local feed for the test DSL
+cd ../IronKernel.Amb
 ik test
 ik pack
 ```

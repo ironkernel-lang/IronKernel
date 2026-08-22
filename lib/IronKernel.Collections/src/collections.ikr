@@ -1,0 +1,284 @@
+; IronKernel.Collections -- list, alist, set, and vector utilities
+; ================================================================
+;
+; The combinators the standard library stops short of: folds, slicing,
+; a stable sort, association-list editing, sets over equal?, and the
+; vector/list bridge.
+;
+;   (sort (list 3 1 2) <?)                     ; => (1 2 3)
+;   (take (list 1 2 3 4) 2)                    ; => (1 2)
+;   (group-by odd? (list 1 2 3 4 5))           ; => ((#t 1 3 5) (#f 2 4))
+;   (vector->list (list->vector (list 1 2)))   ; => (1 2)
+;
+; Conventions, matching the standard library's own:
+;
+; * Procedure arguments come first, the collection last, as in `filter`,
+;   `map`, and `any?`: `(fold-left + 0 xs)`, `(remove null? xs)`.
+; * Everything is applicative and none of it mutates its argument, with the
+;   two `!`-marked vector exceptions at the bottom.
+; * Set and alist operations compare with `equal?` (structural), like `assoc`
+;   and `member?` (R-1RK 6.3.6).
+; * `sort` is stable: elements the comparator cannot distinguish keep their
+;   original order.
+;
+; Nothing here touches the CLR or performs host I/O.
+
+(provide! (reverse fold-left fold-right
+           take drop take-while drop-while
+           append-map flatten partition remove find count every?
+           iota range zip-with
+           sort sort-by distinct
+           union intersection difference
+           assoc-set assoc-remove assoc-keys assoc-values group-by
+           vector->list list->vector vector-map vector-for-each vector-fill!)
+
+  ; --- folds and the basics -----------------------------------------------
+
+  (define reverse
+    (lambda (xs)
+      (letrec ((loop (lambda (rest acc)
+                       (if (null? rest) acc
+                         (loop (cdr rest) (cons (car rest) acc))))))
+        (loop xs ()))))
+
+  ; (fold-left f init (x1 x2 ... xn)) = (f (... (f (f init x1) x2) ...) xn)
+  (define fold-left
+    (lambda (f init xs)
+      (letrec ((loop (lambda (acc rest)
+                       (if (null? rest) acc
+                         (loop (f acc (car rest)) (cdr rest))))))
+        (loop init xs))))
+
+  ; (fold-right f init (x1 x2 ... xn)) = (f x1 (f x2 (... (f xn init) ...)))
+  (define fold-right
+    (lambda (f init xs)
+      (letrec ((loop (lambda (rest)
+                       (if (null? rest) init
+                         (f (car rest) (loop (cdr rest)))))))
+        (loop xs))))
+
+  ; --- slicing ------------------------------------------------------------
+
+  ; The first n elements; fewer if the list runs out.
+  (define take
+    (lambda (xs n)
+      (if ($or? (zero? n) (null? xs))
+        ()
+        (cons (car xs) (take (cdr xs) (- n 1))))))
+
+  ; Everything after the first n elements; () if the list runs out.
+  (define drop
+    (lambda (xs n)
+      (if ($or? (zero? n) (null? xs))
+        xs
+        (drop (cdr xs) (- n 1)))))
+
+  (define take-while
+    (lambda (keep? xs)
+      (if ($or? (null? xs) (not? (keep? (car xs))))
+        ()
+        (cons (car xs) (take-while keep? (cdr xs))))))
+
+  (define drop-while
+    (lambda (keep? xs)
+      (if ($and? (pair? xs) (keep? (car xs)))
+        (drop-while keep? (cdr xs))
+        xs)))
+
+  ; --- mapping and searching ----------------------------------------------
+
+  ; Map f over xs and append the resulting lists.
+  (define append-map
+    (lambda (f xs)
+      (fold-right (lambda (x acc) (append (f x) acc)) () xs)))
+
+  ; Every non-pair leaf, in order; () sublists vanish, being empty.
+  (define flatten
+    (lambda (xs)
+      (fold-right
+        (lambda (x acc)
+          (cond ((null? x) acc)
+                ((pair? x) (append (flatten x) acc))
+                (#t (cons x acc))))
+        () xs)))
+
+  ; ((elements satisfying keep?) (the rest)), each in original order.
+  (define partition
+    (lambda (keep? xs)
+      (list (filter keep? xs)
+            (filter (lambda (x) (not? (keep? x))) xs))))
+
+  ; The complement of filter.
+  (define remove
+    (lambda (reject? xs)
+      (filter (lambda (x) (not? (reject? x))) xs)))
+
+  ; The first element satisfying accept?, or #f.
+  (define find
+    (lambda (accept? xs)
+      (cond ((null? xs) #f)
+            ((accept? (car xs)) (car xs))
+            (#t (find accept? (cdr xs))))))
+
+  (define count
+    (lambda (accept? xs)
+      (fold-left (lambda (n x) (if (accept? x) (+ n 1) n)) 0 xs)))
+
+  ; The applicative companion to any? (5.7): #t when accept? holds everywhere.
+  (define every?
+    (lambda (accept? xs)
+      (cond ((null? xs) #t)
+            ((accept? (car xs)) (every? accept? (cdr xs)))
+            (#t #f))))
+
+  ; --- generation ---------------------------------------------------------
+
+  ; (iota n) = (0 1 ... n-1); optional start and step follow.
+  (define iota
+    (lambda (n & opt)
+      (let ((start (if (null? opt) 0 (car opt)))
+            (step (if ($or? (null? opt) (null? (cdr opt))) 1 (cadr opt))))
+        (letrec ((loop (lambda (i value)
+                         (if (=? i n) ()
+                           (cons value (loop (+ i 1) (+ value step)))))))
+          (loop 0 start)))))
+
+  ; The integers in [lo, hi), half-open like the language's other ranges.
+  (define range
+    (lambda (lo hi)
+      (if (<? lo hi) (cons lo (range (+ lo 1) hi)) ())))
+
+  ; (zip-with f xs ys): stops with the shorter list.
+  (define zip-with
+    (lambda (f xs ys)
+      (if ($or? (null? xs) (null? ys))
+        ()
+        (cons (f (car xs) (car ys))
+              (zip-with f (cdr xs) (cdr ys))))))
+
+  ; --- sorting ------------------------------------------------------------
+
+  ; Stable merge sort. less? orders strictly, as <? does: an element of the
+  ; second half moves ahead only when it is strictly less.
+  (define sort
+    (lambda (xs less?)
+      (letrec
+        ((merge (lambda (a b)
+                  (cond ((null? a) b)
+                        ((null? b) a)
+                        ((less? (car b) (car a))
+                         (cons (car b) (merge a (cdr b))))
+                        (#t (cons (car a) (merge (cdr a) b))))))
+         (go (lambda (rest n)
+               (if (<=? n 1)
+                 (take rest n)
+                 (let ((half (div n 2)))
+                   (merge (go rest half)
+                          (go (drop rest half) (- n half))))))))
+        (go xs (length xs)))))
+
+  ; Sort by a key: (sort-by string-length <? (list "ccc" "a" "bb")).
+  (define sort-by
+    (lambda (key less? xs)
+      (sort xs (lambda (a b) (less? (key a) (key b))))))
+
+  ; --- sets over equal? ---------------------------------------------------
+
+  ; The distinct elements, keeping each first occurrence.
+  (define distinct
+    (lambda (xs)
+      (letrec ((loop (lambda (rest seen)
+                       (cond ((null? rest) (reverse seen))
+                             ((member? (car rest) seen) (loop (cdr rest) seen))
+                             (#t (loop (cdr rest) (cons (car rest) seen)))))))
+        (loop xs ()))))
+
+  ; Every element of a, then the elements of b not already present.
+  (define union
+    (lambda (a b)
+      (append a (remove (lambda (x) (member? x a)) (distinct b)))))
+
+  (define intersection
+    (lambda (a b)
+      (filter (lambda (x) (member? x b)) a)))
+
+  ; The elements of a not in b.
+  (define difference
+    (lambda (a b)
+      (remove (lambda (x) (member? x b)) a)))
+
+  ; --- association lists --------------------------------------------------
+
+  ; A fresh alist where key maps to value, replacing an existing entry in
+  ; place or appending a new one at the end.
+  (define assoc-set
+    (lambda (alist key value)
+      (if (null? (assoc key alist))
+        (append alist (list (cons key value)))
+        (map (lambda (entry)
+               (if (equal? key (car entry)) (cons key value) entry))
+             alist))))
+
+  (define assoc-remove
+    (lambda (alist key)
+      (remove (lambda (entry) (equal? key (car entry))) alist)))
+
+  (define assoc-keys (lambda (alist) (map car alist)))
+  (define assoc-values (lambda (alist) (map cdr alist)))
+
+  ; An alist from key values to the elements producing them, keys in first-
+  ; appearance order: (group-by odd? (list 1 2 3)) => ((#t 1 3) (#f 2)).
+  (define group-by
+    (lambda (key xs)
+      (let ((keys (distinct (map key xs))))
+        (map (lambda (k)
+               (cons k (filter (lambda (x) (equal? k (key x))) xs)))
+             keys))))
+
+  ; --- vectors ------------------------------------------------------------
+
+  (define vector->list
+    (lambda (v)
+      (let ((n (vector-length v)))
+        (letrec ((loop (lambda (i)
+                         (if (=? i n) ()
+                           (cons (vector-ref v i) (loop (+ i 1)))))))
+          (loop 0)))))
+
+  (define list->vector
+    (lambda (xs)
+      (let ((v (make-vector (length xs) #inert)))
+        (letrec ((loop (lambda (i rest)
+                         (if (null? rest) v
+                           (begin
+                             (vector-set! v i (car rest))
+                             (loop (+ i 1) (cdr rest)))))))
+          (loop 0 xs)))))
+
+  ; A fresh vector of (f x) for each element.
+  (define vector-map
+    (lambda (f v)
+      (let ((n (vector-length v)))
+        (let ((result (make-vector n #inert)))
+          (letrec ((loop (lambda (i)
+                           (if (=? i n) result
+                             (begin
+                               (vector-set! result i (f (vector-ref v i)))
+                               (loop (+ i 1)))))))
+            (loop 0))))))
+
+  (define vector-for-each
+    (lambda (f v)
+      (let ((n (vector-length v)))
+        (letrec ((loop (lambda (i)
+                         (if (=? i n) #inert
+                           (begin (f (vector-ref v i)) (loop (+ i 1)))))))
+          (loop 0)))))
+
+  (define vector-fill!
+    (lambda (v value)
+      (let ((n (vector-length v)))
+        (letrec ((loop (lambda (i)
+                         (if (=? i n) #inert
+                           (begin (vector-set! v i value) (loop (+ i 1)))))))
+          (loop 0))))))

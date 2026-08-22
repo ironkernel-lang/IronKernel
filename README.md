@@ -178,11 +178,20 @@ extension and ecosystem decision.
 ### Libraries in this repository
 
 [`lib/`](lib/) holds first-party IronKernel packages, each an ordinary
-`.ikproj` built with `ik test` / `ik pack`.
+`.ikproj` built with `ik test` / `ik pack`. See [`lib/README.md`](lib/README.md)
+for the local-feed workflow and the roadmap.
 
 | Package | Provides |
 |---|---|
+| [`IronKernel.Test`](lib/IronKernel.Test/) | Testing DSL: checks as operatives that report the failing source form, error assertions, suites, and a tally that fails `ik test` when a check does |
+| [`IronKernel.Collections`](lib/IronKernel.Collections/) | Folds, slicing, stable sort, sets over `equal?`, alist editing, and the vector/list bridge — pure Kernel |
+| [`IronKernel.Strings`](lib/IronKernel.Strings/) | Search, split/join, case, trimming, padding, characters, invariant number conversion, and a variadic `format` — ordinal semantics throughout |
+| [`IronKernel.Json`](lib/IronKernel.Json/) | Grammar-enforcing JSON reader with offsets in its errors, a writer that refuses what JSON cannot carry, pretty-printing, and path traversal |
 | [`IronKernel.Amb`](lib/IronKernel.Amb/) | Nondeterministic search: `amb`, `require`, bracketed choice, and pluggable search strategies over multi-shot delimited continuations |
+
+Packages test against `IronKernel.Test` through a test-scoped reference
+(`ik add <package> <version> --test`), which loads for `ik test` only and never
+becomes a dependency of the published package.
 
 ## REPL
 

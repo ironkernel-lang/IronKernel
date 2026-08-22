@@ -1,0 +1,391 @@
+; IronKernel.Json -- JSON reading and writing
+; ===========================================
+;
+; JSON as Kernel data, in the mapping the Scheme world has settled on:
+;
+;   object   <->  association list with string keys, () for {}
+;   array    <->  vector, so the empty array and the empty object differ
+;   string   <->  string
+;   number   <->  exact integer when the text is integral, inexact otherwise
+;   true     <->  #t          false  <->  #f
+;   null     <->  json-null (the symbol; test with json-null?)
+;
+;   (json-parse "{\"a\": [1, 2]}")   ; => (("a" . #(1 2)))
+;   (json->string (list (cons "a" (vector 1 2))))
+;                                    ; => "{\"a\":[1,2]}"
+;   (json-get doc "users" 0 "name")  ; strings index objects, integers arrays
+;
+; The reader is a recursive-descent parser over the string -- not a wrapper
+; around System.Text.Json -- so errors carry the offset and the grammar is
+; enforced: leading zeros, bare '+', trailing commas, and trailing text all
+; signal. The writer refuses values JSON cannot carry (NaN, infinities,
+; non-string keys, arbitrary Kernel or CLR objects) rather than guessing.
+;
+; Built on IronKernel.Strings for character work; numbers read and write the
+; invariant culture throughout. Nothing here performs host I/O.
+
+(provide! (json-parse json->string json-get json-null json-null?)
+
+  ; --- the null sentinel ----------------------------------------------------
+
+  (define json-null (string->symbol "json-null"))
+  (define json-null? (lambda (x) (eq? x json-null)))
+
+  ; --- private helpers ------------------------------------------------------
+
+  (define quote-char (string-ref "\"" 0))
+  (define backslash (string-ref "\\" 0))
+
+  (define vector-of
+    (lambda (xs)
+      (let ((v (make-vector (length xs) #inert)))
+        (letrec ((fill (lambda (i rest)
+                         (if (null? rest) v
+                           (begin (vector-set! v i (car rest))
+                                  (fill (+ i 1) (cdr rest)))))))
+          (fill 0 xs)))))
+
+  (define vector->items
+    (lambda (v)
+      (let ((n (vector-length v)))
+        (letrec ((from (lambda (i)
+                         (if (=? i n) ()
+                           (cons (vector-ref v i) (from (+ i 1)))))))
+          (from 0)))))
+
+  ; --- the reader -----------------------------------------------------------
+  ;
+  ; Each parse-* takes the text and an index and returns (value . next-index).
+
+  (define bad
+    (lambda (text i why)
+      (error (format "json: {0} at offset {1}" why i))))
+
+  (define skip-ws
+    (lambda (text i)
+      (if ($and? (<? i (string-length text))
+                 (char-whitespace? (string-ref text i)))
+        (skip-ws text (+ i 1))
+        i)))
+
+  ; The exact characters of word at i, or complain that expected was not there.
+  (define parse-literal
+    (lambda (text i word value)
+      (let ((end (+ i (string-length word))))
+        (if ($and? (<=? end (string-length text))
+                   (string=? word (substring text i end)))
+          (cons value end)
+          (bad text i "invalid literal")))))
+
+  ; A JSON string body; i points just past the opening quote. Collects
+  ; characters in reverse and joins once at the closing quote.
+  (define parse-string-body
+    (lambda (text i)
+      (letrec
+        ((hex-digit?
+           (lambda (c)
+             ($or? (char-digit? c)
+                   (string-contains? "abcdefABCDEF" (list->string (list c))))))
+         (escape
+           (lambda (i acc)
+             (if (>=? i (string-length text)) (bad text i "unterminated string") #inert)
+             (let ((c (string-ref text i)))
+               (cond ((eqv? c quote-char) (walk (+ i 1) (cons quote-char acc)))
+                     ((eqv? c backslash) (walk (+ i 1) (cons backslash acc)))
+                     ((string=? "/" (list->string (list c)))
+                      (walk (+ i 1) (cons c acc)))
+                     ((string=? "b" (list->string (list c)))
+                      (walk (+ i 1) (cons (integer->char 8) acc)))
+                     ((string=? "f" (list->string (list c)))
+                      (walk (+ i 1) (cons (integer->char 12) acc)))
+                     ((string=? "n" (list->string (list c)))
+                      (walk (+ i 1) (cons (integer->char 10) acc)))
+                     ((string=? "r" (list->string (list c)))
+                      (walk (+ i 1) (cons (integer->char 13) acc)))
+                     ((string=? "t" (list->string (list c)))
+                      (walk (+ i 1) (cons (integer->char 9) acc)))
+                     ((string=? "u" (list->string (list c)))
+                      (let ((end (+ i 5)))
+                        (if (>? end (string-length text))
+                          (bad text i "truncated \\u escape")
+                          (let ((hex (substring text (+ i 1) end)))
+                            (if (every-char? hex-digit? hex)
+                              (walk end
+                                    (cons (integer->char (. System.Convert ToInt32 hex 16))
+                                          acc))
+                              (bad text i "malformed \\u escape"))))))
+                     (#t (bad text i "unknown escape"))))))
+         (walk
+           (lambda (i acc)
+             (if (>=? i (string-length text)) (bad text i "unterminated string") #inert)
+             (let ((c (string-ref text i)))
+               (cond ((eqv? c quote-char)
+                      (cons (list->string (reverse-chars acc)) (+ i 1)))
+                     ((eqv? c backslash) (escape (+ i 1) acc))
+                     ((<? (char->integer c) 32)
+                      (bad text i "unescaped control character"))
+                     (#t (walk (+ i 1) (cons c acc))))))))
+        (walk i ()))))
+
+  (define reverse-chars
+    (lambda (xs)
+      (letrec ((loop (lambda (rest acc)
+                       (if (null? rest) acc
+                         (loop (cdr rest) (cons (car rest) acc))))))
+        (loop xs ()))))
+
+  (define every-char?
+    (lambda (ok? s)
+      (letrec ((from (lambda (i)
+                       (cond ((=? i (string-length s)) #t)
+                             ((ok? (string-ref s i)) (from (+ i 1)))
+                             (#t #f)))))
+        (from 0))))
+
+  ; A JSON number per the grammar: -? (0 | [1-9][0-9]*) frac? exp?. Returns an
+  ; exact integer when there is no fraction or exponent, an inexact otherwise.
+  (define parse-number
+    (lambda (text i)
+      (let ((n (string-length text)))
+        (letrec
+          ((char-at (lambda (j) (string-ref text j)))
+           (digit-at? (lambda (j) ($and? (<? j n) (char-digit? (char-at j)))))
+           (digits (lambda (j) (if (digit-at? j) (digits (+ j 1)) j)))
+           (int-part
+             (lambda (j)
+               (cond ((not? (digit-at? j)) (bad text j "malformed number"))
+                     ; A leading zero stands alone.
+                     ((string=? "0" (substring text j (+ j 1))) (+ j 1))
+                     (#t (digits j)))))
+           (frac-part
+             (lambda (j)
+               (if ($and? (<? j n) (string=? "." (substring text j (+ j 1))))
+                 (if (digit-at? (+ j 1))
+                   (list (digits (+ j 1)) #t)
+                   (bad text j "malformed number"))
+                 (list j #f))))
+           (exp-part
+             (lambda (j)
+               (if ($and? (<? j n)
+                          ($or? (string=? "e" (substring text j (+ j 1)))
+                                (string=? "E" (substring text j (+ j 1)))))
+                 (let ((after-sign
+                         (if ($and? (<? (+ j 1) n)
+                                    ($or? (string=? "+" (substring text (+ j 1) (+ j 2)))
+                                          (string=? "-" (substring text (+ j 1) (+ j 2)))))
+                           (+ j 2)
+                           (+ j 1))))
+                   (if (digit-at? after-sign)
+                     (list (digits after-sign) #t)
+                     (bad text j "malformed number")))
+                 (list j #f)))))
+          (let ((start i))
+            (let ((after-sign
+                    (if (string=? "-" (substring text i (+ i 1))) (+ i 1) i)))
+              (let ((after-int (int-part after-sign)))
+                (let (((after-frac fractional) (frac-part after-int)))
+                  (let (((end exponential) (exp-part after-frac)))
+                    (let ((token (substring text start end))
+                          (inexact? ($or? fractional exponential)))
+                      (let ((value (string->number token)))
+                        (if (eq? value #f)
+                          (bad text start "malformed number")
+                          (cons (if inexact? (* 1.0 value) value) end)))))))))))))
+
+  (define parse-array
+    (lambda (text i)
+      (let ((j (skip-ws text i)))
+        (if ($and? (<? j (string-length text))
+                   (string=? "]" (substring text j (+ j 1))))
+          (cons (vector-of ()) (+ j 1))
+          (letrec ((items
+                     (lambda (j acc)
+                       (let (((value & after) (parse-value text j)))
+                         (let ((next (skip-ws text after)))
+                           (if (>=? next (string-length text))
+                             (bad text next "unterminated array")
+                             (let ((c (substring text next (+ next 1))))
+                               (cond ((string=? c ",") (items (+ next 1) (cons value acc)))
+                                     ((string=? c "]")
+                                      (cons (vector-of (reverse-chars (cons value acc)))
+                                            (+ next 1)))
+                                     (#t (bad text next "expected , or ] in array"))))))))))
+            (items j ()))))))
+
+  (define parse-object
+    (lambda (text i)
+      (let ((j (skip-ws text i)))
+        (if ($and? (<? j (string-length text))
+                   (string=? "}" (substring text j (+ j 1))))
+          (cons () (+ j 1))
+          (letrec ((members
+                     (lambda (j acc)
+                       (let ((j (skip-ws text j)))
+                         (if ($or? (>=? j (string-length text))
+                                   (not? (eqv? (string-ref text j) quote-char)))
+                           (bad text j "expected a string key")
+                           (let (((key & after-key) (parse-string-body text (+ j 1))))
+                             (let ((colon (skip-ws text after-key)))
+                               (if ($or? (>=? colon (string-length text))
+                                         (not? (string=? ":" (substring text colon (+ colon 1)))))
+                                 (bad text colon "expected : after key")
+                                 (let (((value & after) (parse-value text (+ colon 1))))
+                                   (let ((next (skip-ws text after)))
+                                     (if (>=? next (string-length text))
+                                       (bad text next "unterminated object")
+                                       (let ((c (substring text next (+ next 1))))
+                                         (cond ((string=? c ",")
+                                                (members (+ next 1)
+                                                         (cons (cons key value) acc)))
+                                               ((string=? c "}")
+                                                (cons (reverse-chars (cons (cons key value) acc))
+                                                      (+ next 1)))
+                                               (#t (bad text next
+                                                        "expected , or } in object")))))))))))))))
+            (members j ()))))))
+
+  (define parse-value
+    (lambda (text i)
+      (let ((j (skip-ws text i)))
+        (if (>=? j (string-length text))
+          (bad text j "unexpected end of input")
+          (let ((c (substring text j (+ j 1))))
+            (cond ((string=? c "{") (parse-object text (+ j 1)))
+                  ((string=? c "[") (parse-array text (+ j 1)))
+                  ((string=? c "\"") (parse-string-body text (+ j 1)))
+                  ((string=? c "t") (parse-literal text j "true" #t))
+                  ((string=? c "f") (parse-literal text j "false" #f))
+                  ((string=? c "n") (parse-literal text j "null" json-null))
+                  (($or? (string=? c "-") (char-digit? (string-ref text j)))
+                   (parse-number text j))
+                  (#t (bad text j "unexpected character"))))))))
+
+  ; The one JSON value denoted by the whole string.
+  (define json-parse
+    (lambda (text)
+      (let (((value & after) (parse-value text 0)))
+        (let ((end (skip-ws text after)))
+          (if (=? end (string-length text))
+            value
+            (bad text end "trailing characters"))))))
+
+  ; --- the writer -----------------------------------------------------------
+
+  (define escape-string
+    (lambda (s)
+      (letrec
+        ((walk (lambda (i acc)
+                 (if (=? i (string-length s))
+                   (string-append "\"" (string-join (reverse-chars acc) "") "\"")
+                   (let ((c (string-ref s i)))
+                     (walk (+ i 1)
+                           (cons
+                             (cond ((eqv? c quote-char) "\\\"")
+                                   ((eqv? c backslash) "\\\\")
+                                   ((=? (char->integer c) 10) "\\n")
+                                   ((=? (char->integer c) 13) "\\r")
+                                   ((=? (char->integer c) 9) "\\t")
+                                   ((=? (char->integer c) 8) "\\b")
+                                   ((=? (char->integer c) 12) "\\f")
+                                   ((<? (char->integer c) 32)
+                                    (format "\\u{0:x4}" (char->integer c)))
+                                   (#t (list->string (list c))))
+                             acc)))))))
+        (walk 0 ()))))
+
+  (define object?
+    (lambda (x)
+      ($or? (null? x)
+            ($and? (pair? x)
+                   (every-entry? x)))))
+
+  (define every-entry?
+    (lambda (xs)
+      (cond ((null? xs) #t)
+            ((not? (pair? xs)) #f)
+            (($and? (pair? (car xs)) (string? (car (car xs))))
+             (every-entry? (cdr xs)))
+            (#t #f))))
+
+  (define write-number
+    (lambda (x)
+      (if (inexact? x)
+        (if (finite? x)
+          (number->string x)
+          (error "json->string: JSON cannot represent a non-finite number"))
+        (number->string x))))
+
+  (define write-value
+    (lambda (x)
+      (cond ((json-null? x) "null")
+            ((eq? x #t) "true")
+            ((eq? x #f) "false")
+            ((string? x) (escape-string x))
+            ((number? x) (write-number x))
+            ((vector? x)
+             (string-append "[" (string-join (map write-value (vector->items x)) ",") "]"))
+            ((object? x)
+             (string-append
+               "{"
+               (string-join
+                 (map (lambda (entry)
+                        (string-append (escape-string (car entry))
+                                       ":"
+                                       (write-value (cdr entry))))
+                      x)
+                 ",")
+               "}"))
+            (#t (error "json->string: value has no JSON representation")))))
+
+  ; Compact by default; any second argument other than #f pretty-prints with
+  ; two-space indentation.
+  (define json->string
+    (lambda (x & pretty)
+      (if ($or? (null? pretty) (eq? (car pretty) #f))
+        (write-value x)
+        (pretty-value x ""))))
+
+  (define pretty-value
+    (lambda (x indent)
+      (let ((deeper (string-append indent "  ")))
+        (cond ((vector? x)
+               (if (zero? (vector-length x))
+                 "[]"
+                 (string-append
+                   "[\n" deeper
+                   (string-join
+                     (map (lambda (item) (pretty-value item deeper)) (vector->items x))
+                     (string-append ",\n" deeper))
+                   "\n" indent "]")))
+              ((object? x)
+               (if (null? x)
+                 "{}"
+                 (string-append
+                   "{\n" deeper
+                   (string-join
+                     (map (lambda (entry)
+                            (string-append (escape-string (car entry)) ": "
+                                           (pretty-value (cdr entry) deeper)))
+                          x)
+                     (string-append ",\n" deeper))
+                   "\n" indent "}")))
+              (#t (write-value x))))))
+
+  ; --- traversal ------------------------------------------------------------
+
+  ; Follow a path into parsed JSON: a string step indexes an object, an
+  ; integer step indexes an array. Signals when a step does not apply.
+  (define json-get
+    (lambda (x & path)
+      (letrec
+        ((step (lambda (x path)
+                 (cond ((null? path) x)
+                       ((string? (car path))
+                        (let ((entry (assoc (car path) x)))
+                          (if (null? entry)
+                            (error (format "json-get: no key {0}" (car path)))
+                            (step (cdr entry) (cdr path)))))
+                       ((vector? x)
+                        (step (vector-ref x (car path)) (cdr path)))
+                       (#t (error "json-get: step does not match the value"))))))
+        (step x path)))))

@@ -1,0 +1,344 @@
+; IronKernel.Strings -- string and format utilities
+; =================================================
+;
+; IronKernel strings are CLR strings, and the runtime deliberately keeps its
+; primitive surface small -- string work is meant to go through CLR interop.
+; This package wraps that interop in the vocabulary a Kernel program expects:
+;
+;   (string-split "a,b,c" ",")            ; => ("a" "b" "c")
+;   (string-join (list "a" "b" "c") "-")  ; => "a-b-c"
+;   (substring "hello" 1 4)               ; => "ell"
+;   (format "{0} of {1:F1}" 2 3.0)        ; => "2 of 3.0"
+;
+; Three commitments, chosen once here so no caller has to think about them:
+;
+; Comparisons are ordinal. Search, prefix, suffix, and ordering all use
+; ordinal semantics -- byte-for-byte on the UTF-16 units -- never the current
+; culture. A program that wants linguistic comparison should reach for the
+; CLR directly and say so.
+;
+; Formatting is culture-invariant. `format`, `number->string`, and
+; `string->number` always read and write the invariant culture, so 3.5
+; renders as "3.5" on every machine, whatever the host locale.
+;
+; Half-open intervals. `substring` takes [start, end) like the rest of the
+; language's ranges (`amb-range`, vector indexing), not .NET's
+; (start, length).
+;
+; `format` is implemented here rather than delegated to String.Format so that
+; it accepts any number of arguments: the walker finds each `{n}` or
+; `{n:spec}` hole, formats that one argument invariantly, and appends. `{{`
+; and `}}` escape braces, as in .NET.
+;
+; Notes
+; -----
+; * `string?` and `char?` classify by CLR runtime type, guarded so that
+;   Kernel values (pairs, symbols, ...) answer #f rather than signal.
+; * `string->number` accepts an integer or float in invariant notation and
+;   returns #f -- not an error -- when the string is not a number. Leading
+;   and trailing whitespace are tolerated; group separators are not.
+; * Nothing here performs host I/O.
+
+(provide! (string? char? string-length string-empty? string-ref substring
+           string-append string->list list->string
+           string-split string-lines string-join
+           string-contains? string-starts-with? string-ends-with?
+           string-index-of
+           string-upcase string-downcase
+           string-trim string-trim-start string-trim-end
+           string-replace string-repeat string-reverse
+           string-pad-left string-pad-right
+           string->number number->string
+           string-compare string=? string<? string>? string<=? string>=?
+           char->integer integer->char
+           char-digit? char-letter? char-whitespace? char-upper? char-lower?
+           char-upcase char-downcase
+           format)
+
+  ; --- private ------------------------------------------------------------
+
+  (define invariant (.get System.Globalization.CultureInfo InvariantCulture))
+  (define ordinal (.get System.StringComparison Ordinal))
+  (define integer-style (.get System.Globalization.NumberStyles Integer))
+  (define float-style (.get System.Globalization.NumberStyles Float))
+  (define clr-string (clr-type System.String))
+  (define clr-char (clr-type System.Char))
+
+  (define try-thunk
+    (lambda (thunk)
+      (call/cc (lambda (escape)
+        (guard-dynamic-extent
+          ()
+          (lambda () (list #t (thunk)))
+          (list (list error-continuation
+                      (lambda (obj divert) (escape (list #f obj))))))))))
+
+  ; #t when x is a CLR object of exactly type t; #f for every Kernel value,
+  ; which has no GetType to call -- the guard turns that signal into #f.
+  (define clr-instance?
+    (lambda (t)
+      (lambda (x)
+        (let ((outcome (try-thunk (lambda () (eq? (. x GetType) t)))))
+          (if (car outcome) (cadr outcome) #f)))))
+
+  (define open-brace (. "{" get_Chars 0))
+  (define close-brace (. "}" get_Chars 0))
+  (define colon (. ":" get_Chars 0))
+
+  ; --- classification -----------------------------------------------------
+
+  (define string? (clr-instance? clr-string))
+  (define char? (clr-instance? clr-char))
+
+  ; --- the basics ---------------------------------------------------------
+
+  (define string-length (lambda (s) (.get s Length)))
+  (define string-empty? (lambda (s) (zero? (string-length s))))
+  (define string-ref (lambda (s i) (. s get_Chars i)))
+
+  ; The characters in [start, end), half-open like the language's ranges.
+  (define substring
+    (lambda (s start end) (. s Substring start (- end start))))
+
+  (define string-append
+    (lambda strings
+      (let ((sb (new System.Text.StringBuilder)))
+        (for-each (lambda (s) (. sb Append s)) strings)
+        (. sb ToString))))
+
+  (define string->list
+    (lambda (s)
+      (let ((n (string-length s)))
+        (letrec ((loop (lambda (i)
+                         (if (=? i n)
+                           ()
+                           (cons (string-ref s i) (loop (+ i 1)))))))
+          (loop 0)))))
+
+  (define list->string
+    (lambda (chars)
+      (let ((sb (new System.Text.StringBuilder)))
+        (for-each (lambda (c) (. sb Append c)) chars)
+        (. sb ToString))))
+
+  ; --- search -------------------------------------------------------------
+
+  ; Index of the first occurrence of sub at or after start, or #f.
+  (define index-from
+    (lambda (s sub start)
+      (let ((i (. s IndexOf sub start ordinal)))
+        (if (<? i 0) #f i))))
+
+  (define string-index-of (lambda (s sub) (index-from s sub 0)))
+
+  (define string-contains?
+    (lambda (s sub) (not? (eq? (string-index-of s sub) #f))))
+
+  (define string-starts-with?
+    (lambda (s prefix) (. s StartsWith prefix ordinal)))
+
+  (define string-ends-with?
+    (lambda (s suffix) (. s EndsWith suffix ordinal)))
+
+  ; --- splitting and joining ----------------------------------------------
+
+  ; Every field, empties included: (string-split "a,,b" ",") => ("a" "" "b").
+  ; The separator is a non-empty string.
+  (define string-split
+    (lambda (s sep)
+      (if (string-empty? sep)
+        (error "string-split: empty separator")
+        (letrec ((fields (lambda (start)
+                           (let ((hit (index-from s sep start)))
+                             (if (eq? hit #f)
+                               (list (substring s start (string-length s)))
+                               (cons (substring s start hit)
+                                     (fields (+ hit (string-length sep)))))))))
+          (fields 0)))))
+
+  ; Lines of a text, treating \r\n and \n alike; a trailing newline does not
+  ; produce a final empty line.
+  (define string-lines
+    (lambda (s)
+      (let ((normalized (string-replace s "\r\n" "\n")))
+        (let ((all (string-split normalized "\n")))
+          (if ($and? (<? 1 (length all))
+                     (string-empty? (list-ref all (- (length all) 1))))
+            (reverse-onto (cdr (reverse-onto all ())) ())
+            all)))))
+
+  (define reverse-onto
+    (lambda (xs acc)
+      (if (null? xs) acc (reverse-onto (cdr xs) (cons (car xs) acc)))))
+
+  (define string-join
+    (lambda (strings sep)
+      (let ((sb (new System.Text.StringBuilder)))
+        (letrec ((loop (lambda (rest first)
+                         (if (null? rest)
+                           #inert
+                           (begin
+                             (if first #inert (. sb Append sep))
+                             (. sb Append (car rest))
+                             (loop (cdr rest) #f))))))
+          (loop strings #t))
+        (. sb ToString))))
+
+  ; --- case, trimming, editing --------------------------------------------
+
+  (define string-upcase (lambda (s) (. s ToUpperInvariant)))
+  (define string-downcase (lambda (s) (. s ToLowerInvariant)))
+
+  (define string-trim (lambda (s) (. s Trim)))
+  (define string-trim-start (lambda (s) (. s TrimStart)))
+  (define string-trim-end (lambda (s) (. s TrimEnd)))
+
+  ; Ordinal replacement of every occurrence, as String.Replace guarantees.
+  (define string-replace (lambda (s old new) (. s Replace old new)))
+
+  (define string-repeat
+    (lambda (s n)
+      (let ((sb (new System.Text.StringBuilder)))
+        (letrec ((loop (lambda (i)
+                         (if (zero? i)
+                           (. sb ToString)
+                           (begin (. sb Append s) (loop (- i 1)))))))
+          (loop n)))))
+
+  (define string-reverse
+    (lambda (s)
+      (let ((sb (new System.Text.StringBuilder)))
+        (letrec ((loop (lambda (i)
+                         (if (<? i 0)
+                           (. sb ToString)
+                           (begin (. sb Append (string-ref s i))
+                                  (loop (- i 1)))))))
+          (loop (- (string-length s) 1))))))
+
+  ; Pad with spaces, or with the first character of the optional pad string.
+  (define string-pad-left
+    (lambda (s width & pad)
+      (if (null? pad)
+        (. s PadLeft width)
+        (. s PadLeft width (string-ref (car pad) 0)))))
+
+  (define string-pad-right
+    (lambda (s width & pad)
+      (if (null? pad)
+        (. s PadRight width)
+        (. s PadRight width (string-ref (car pad) 0)))))
+
+  ; --- numbers ------------------------------------------------------------
+
+  ; The number denoted in invariant notation, or #f. Integers stay exact --
+  ; narrowed to the language's native 32-bit width when they fit, like the
+  ; reader narrows literals; anything with a point or exponent comes back
+  ; inexact.
+  (define string->number
+    (lambda (s)
+      (let ((as-integer
+              (try-thunk (lambda () (. System.Int64 Parse s integer-style invariant)))))
+        (if (car as-integer)
+          (let ((n (cadr as-integer)))
+            (if ($and? (<=? -2147483648 n) (<=? n 2147483647))
+              (. System.Convert ToInt32 n)
+              n))
+          (let ((as-float
+                  (try-thunk (lambda () (. System.Double Parse s float-style invariant)))))
+            (if (car as-float) (cadr as-float) #f))))))
+
+  ; Invariant rendering; an optional .NET format spec ("F2", "X", ...) applies.
+  (define number->string
+    (lambda (n & spec)
+      (if (null? spec)
+        (. n ToString invariant)
+        (. n ToString (car spec) invariant))))
+
+  ; --- ordering -----------------------------------------------------------
+
+  ; -1, 0, or 1, by ordinal comparison.
+  (define string-compare
+    (lambda (a b)
+      (let ((d (. System.String CompareOrdinal a b)))
+        (cond ((<? d 0) -1)
+              ((zero? d) 0)
+              (#t 1)))))
+
+  (define string=? (lambda (a b) (zero? (string-compare a b))))
+  (define string<? (lambda (a b) (<? (string-compare a b) 0)))
+  (define string>? (lambda (a b) (>? (string-compare a b) 0)))
+  (define string<=? (lambda (a b) (<=? (string-compare a b) 0)))
+  (define string>=? (lambda (a b) (>=? (string-compare a b) 0)))
+
+  ; --- characters ---------------------------------------------------------
+
+  (define char->integer (lambda (c) (. System.Convert ToInt32 c)))
+  (define integer->char (lambda (n) (. System.Convert ToChar n)))
+
+  (define char-digit? (lambda (c) (. System.Char IsDigit c)))
+  (define char-letter? (lambda (c) (. System.Char IsLetter c)))
+  (define char-whitespace? (lambda (c) (. System.Char IsWhiteSpace c)))
+  (define char-upper? (lambda (c) (. System.Char IsUpper c)))
+  (define char-lower? (lambda (c) (. System.Char IsLower c)))
+  (define char-upcase (lambda (c) (. System.Char ToUpperInvariant c)))
+  (define char-downcase (lambda (c) (. System.Char ToLowerInvariant c)))
+
+  ; --- format -------------------------------------------------------------
+
+  ; One argument through String.Format, invariantly, with an optional spec.
+  (define format-one
+    (lambda (spec value)
+      (if (string-empty? spec)
+        (. System.String Format invariant "{0}" value)
+        (. System.String Format invariant (string-append "{0:" spec "}") value))))
+
+  ; (format fmt arg ...) -- .NET-style holes {n} and {n:spec}, any number of
+  ; arguments, always the invariant culture. {{ and }} are literal braces.
+  (define format
+    (lambda (fmt & args)
+      (let ((n (string-length fmt))
+            (sb (new System.Text.StringBuilder))
+            (argc (length args)))
+        (letrec
+          ((digits-end
+             (lambda (i)
+               (if ($and? (<? i n) (char-digit? (string-ref fmt i)))
+                 (digits-end (+ i 1))
+                 i)))
+           ; i points just past '{'; append the formatted hole, return the
+           ; index just past '}'.
+           (hole
+             (lambda (i)
+               (let ((d (digits-end i)))
+                 (if (=? d i) (error "format: hole without an index") #inert)
+                 (let ((index (. System.Int32 Parse (substring fmt i d)))
+                       (close (index-from fmt "}" d)))
+                   (cond ((eq? close #f)
+                          (error "format: unterminated hole"))
+                         ((>=? index argc)
+                          (error (string-append
+                                   "format: no argument for hole {"
+                                   (substring fmt i d) "}")))
+                         ((=? close d) #inert)
+                         ((eqv? (string-ref fmt d) colon) #inert)
+                         (#t (error "format: malformed hole")))
+                   (let ((spec (if (=? close d) "" (substring fmt (+ d 1) close))))
+                     (. sb Append (format-one spec (list-ref args index)))
+                     (+ close 1))))))
+           (walk
+             (lambda (i)
+               (if (>=? i n)
+                 (. sb ToString)
+                 (let ((c (string-ref fmt i)))
+                   (cond ((eqv? c open-brace)
+                          (if ($and? (<? (+ i 1) n)
+                                     (eqv? (string-ref fmt (+ i 1)) open-brace))
+                            (begin (. sb Append open-brace) (walk (+ i 2)))
+                            (walk (hole (+ i 1)))))
+                         ((eqv? c close-brace)
+                          (if ($and? (<? (+ i 1) n)
+                                     (eqv? (string-ref fmt (+ i 1)) close-brace))
+                            (begin (. sb Append close-brace) (walk (+ i 2)))
+                            (error "format: unmatched '}'")))
+                         (#t (. sb Append c) (walk (+ i 1)))))))))
+          (walk 0))))))
