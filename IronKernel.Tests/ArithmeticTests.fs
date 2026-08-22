@@ -234,6 +234,24 @@ let ``variadic addition preserves the datetime extension`` () =
         assertEval env "(=? (.get (- (+ d ts ts) d) TotalHours) 48.0)" (Bool true))
 
 [<Fact>]
+let ``timespan arithmetic composes and subtracts from datetimes`` () =
+    // The full closed set: span+span and span-span are spans, date-span is a date,
+    // and (+ span date) commutes with (+ date span). Combinations the CLR does not
+    // define -- here span - date -- still signal.
+    withKernel (fun env ->
+        ignore (evalIn env "(define d (new System.DateTime 2020 1 1))")
+        ignore (evalIn env "(define h6 (new System.TimeSpan 6 0 0))")
+        ignore (evalIn env "(define h2 (new System.TimeSpan 2 0 0))")
+        assertEval env "(=? (.get (+ h6 h2) TotalHours) 8.0)" (Bool true)
+        assertEval env "(=? (.get (- h6 h2) TotalHours) 4.0)" (Bool true)
+        assertEval env "(equal? (- (+ d h6) h6) d)" (Bool true)
+        assertEval env "(equal? (+ h6 d) (+ d h6))" (Bool true)
+        assertEval env "(=? (.get (+ h6 h2 h2) TotalHours) 10.0)" (Bool true)
+        match evalIn env "(- h6 d)" with
+        | Status _ -> ()
+        | value -> failwithf "(- span date) should signal an error, got %s" (showVal value))
+
+[<Fact>]
 let ``division is not the truncating quotient`` () =
     // R-1RK 12.8.2: `/` is ordinary division. It stays integral only when it divides
     // evenly; the truncating quotient is `div` (12.5.8), a separate feature.
