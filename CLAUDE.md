@@ -70,7 +70,7 @@ package format · 0004 compiling procedure bodies · 0005 mutable pairs · 0006 
 as abnormal passes · 0007 identity for derived combiners · 0008 caching compiled
 bodies (proposed, deliberately not built) · 0009 editor tooling from the runtime
 outward (`ik check --json`, environment enumeration, the `ik lsp` language
-server, and reader recovery are its phases 1–4).
+server, reader recovery, and the environment/profile views are its phases 1–5).
 
 They record measurements and rejected options, not just decisions. When a prediction
 in one turns out wrong, correct it in place rather than leaving it — several carry

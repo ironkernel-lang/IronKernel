@@ -71,3 +71,14 @@ export function rankIkProjects(activePath: string | undefined, projects: string[
     return left.localeCompare(right);
   });
 }
+
+/**
+ * The project's own declared profile, if the .ikproj carries one. The
+ * extension always passes --profile from the setting, which overrides this;
+ * the status bar surfaces the mismatch instead of leaving it a surprise.
+ */
+export function parseProjectProfile(xml: string): string | undefined {
+  const match =
+    /<IronKernelProfile>\s*(minimal|safe|unrestricted)\s*<\/IronKernelProfile>/.exec(xml);
+  return match?.[1];
+}

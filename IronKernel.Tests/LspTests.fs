@@ -231,3 +231,36 @@ let ``a broken buffer still gets tokens defines and every error`` () =
           0; 7; 3; 0; 0      // vau
           2; 1; 5; 0; 0 ],   // twice (use, on the completed trailing form)
         data)
+
+[<Fact>]
+let ``the environment request reports capabilities and frames`` () =
+    let frames =
+        session
+            [ request 1 "initialize" "{}"
+              didOpen "(define twice (vau (x) e x))\n"
+              request 2 "ironkernel/environment"
+                  """{"textDocument":{"uri":"file:///probe.ikr"}}""" ]
+    let report = resultOf 2 frames
+    let capabilities =
+        report.GetProperty("capabilities").EnumerateArray()
+        |> Seq.map (fun value -> value.GetString())
+        |> List.ofSeq
+    Assert.Contains("host-io", capabilities)
+    let reportFrames = report.GetProperty("frames").EnumerateArray() |> List.ofSeq
+    // The buffer frame comes first and carries the vau define as an operative.
+    let buffer = reportFrames.Head
+    Assert.Equal("buffer", buffer.GetProperty("label").GetString())
+    let bufferSymbols =
+        buffer.GetProperty("symbols").EnumerateArray()
+        |> Seq.map (fun symbol ->
+            symbol.GetProperty("name").GetString(), symbol.GetProperty("class").GetString())
+        |> List.ofSeq
+    Assert.Contains(("twice", "operative"), bufferSymbols)
+    // Environment frames follow; somewhere in them `+` is an applicative
+    // carrying its certified contract as detail.
+    let plus =
+        reportFrames.Tail
+        |> List.collect (fun frame -> frame.GetProperty("symbols").EnumerateArray() |> List.ofSeq)
+        |> List.find (fun symbol -> symbol.GetProperty("name").GetString() = "+")
+    Assert.Equal("applicative", plus.GetProperty("class").GetString())
+    Assert.Contains("certified", plus.GetProperty("detail").GetString())

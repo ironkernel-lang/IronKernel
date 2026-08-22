@@ -12,7 +12,9 @@ import {
   type CheckDiagnostic,
   type CheckLocation
 } from "./diagnostics.js";
+import { EnvironmentViewProvider, type EnvironmentReport } from "./environmentView.js";
 import { PlaygroundPanel } from "./playgroundPanel.js";
+import { ProfileStatus } from "./profileStatus.js";
 import { findIkprojWalkingUp, isIkprojPath, rankIkProjects } from "./projects.js";
 
 const timeoutMs = 120000;
@@ -22,9 +24,68 @@ export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = vscode.languages.createDiagnosticCollection("ironkernel");
   context.subscriptions.push(output, diagnostics);
 
-  void startLanguageServer(output);
+  const profileStatus = new ProfileStatus();
+  const environmentView = new EnvironmentViewProvider(async (uri) => {
+    if (!languageClient) {
+      return undefined;
+    }
+    try {
+      return await languageClient.sendRequest<EnvironmentReport>(
+        "ironkernel/environment",
+        uri ? { textDocument: { uri } } : {}
+      );
+    } catch {
+      return undefined;
+    }
+  });
+  const refreshEnvironment = (): Promise<void> => {
+    const editor = vscode.window.activeTextEditor;
+    const uri =
+      editor && editor.document.languageId === "ironkernel"
+        ? editor.document.uri.toString()
+        : undefined;
+    return environmentView.refresh(uri);
+  };
+  const afterServerChange = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "ironkernel.environmentAvailable",
+      languageClient !== undefined
+    );
+    void refreshEnvironment();
+  };
+  void startLanguageServer(output).then(afterServerChange);
+  void profileStatus.update();
   context.subscriptions.push(
-    vscode.workspace.onDidGrantWorkspaceTrust(() => void startLanguageServer(output))
+    profileStatus,
+    vscode.window.registerTreeDataProvider("ironkernelEnvironment", environmentView),
+    vscode.commands.registerCommand("ironkernel.refreshEnvironment", refreshEnvironment),
+    vscode.commands.registerCommand("ironkernel.selectProfile", async () => {
+      const picked = await vscode.window.showQuickPick(["minimal", "safe", "unrestricted"], {
+        placeHolder: "Capability profile for IronKernel commands and the language server"
+      });
+      if (picked) {
+        await vscode.workspace
+          .getConfiguration("ironkernel")
+          .update("profile", picked, vscode.ConfigurationTarget.Workspace);
+      }
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      void profileStatus.update();
+      void refreshEnvironment();
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("ironkernel.profile")) {
+        void profileStatus.update();
+        // The server was launched with the old --profile; restart it so the
+        // session environment carries the authority the status bar shows.
+        void restartLanguageServer(output).then(afterServerChange);
+      }
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      void startLanguageServer(output).then(afterServerChange);
+      void profileStatus.update();
+    })
   );
 
   context.subscriptions.push(
@@ -39,6 +100,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
+      if (document.languageId === "ironkernel" || isIkprojPath(document.uri.fsPath)) {
+        void profileStatus.update();
+        void refreshEnvironment();
+      }
       if (
         document.languageId === "ironkernel" &&
         vscode.workspace.isTrusted &&
@@ -227,6 +292,19 @@ async function saveIronKernelDocumentsNear(projectPath: string): Promise<void> {
 }
 
 let languageClient: LanguageClient | undefined;
+
+async function restartLanguageServer(output: vscode.OutputChannel): Promise<void> {
+  const client = languageClient;
+  languageClient = undefined;
+  if (client) {
+    try {
+      await client.stop();
+    } catch {
+      // A server that already died still gets its replacement.
+    }
+  }
+  await startLanguageServer(output);
+}
 
 async function startLanguageServer(output: vscode.OutputChannel): Promise<void> {
   if (languageClient !== undefined || !vscode.workspace.isTrusted) {

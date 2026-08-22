@@ -1,6 +1,7 @@
 # ADR 0009: Editor tooling grows from the runtime outward
 
-Status: Accepted — phases 1 through 4 implemented
+Status: Accepted — phases 1 through 5 implemented (phase 5's third item
+deferred behind phase 6)
 
 ## Decision
 
@@ -179,10 +180,37 @@ cache is deleted, completion and semantic tokens run against the actual
 buffer mid-edit, `ik check` reports every broken region in a file, and the
 server publishes every error instead of the first.
 
-**Phase 5 — the visible surfaces.** Environment inspector (a UI over phase
-2), a profile status-bar item that also reads the project's own `<Profile>`,
-compiled-vs-residual highlighting (the IR's `CLocated` forms already mark
-what the analyzer touched).
+**Phase 5 — the visible surfaces.** *Done in two parts of three; the third
+is corrected and deferred, not merely postponed.*
+
+The environment inspector is a tree view over a custom
+`ironkernel/environment` request: the capability set, the buffer's defines
+as the innermost frame, then every reachable frame with each binding
+classified and its contract as detail. Frame structure stays host-side
+exactly as phase 2 decided — the view knows the parents, Kernel code still
+cannot reach them. "Eval in this env" did not ship: it needs the phase-6
+session protocol, not a tree view.
+
+The profile status bar shows the effective profile and, when the nearest
+`.ikproj` declares a different `<IronKernelProfile>`, says so — the
+extension's own `--profile` has silently overridden the project's
+declaration since the profile setting existed, and surfacing that mismatch
+is most of the item's value. Selecting a profile restarts the language
+server, so the authority the status bar reports is the authority the
+server's session environment actually carries.
+
+Compiled-vs-residual highlighting is the correction. The plan's aside —
+"the IR's `CLocated` forms already mark what the analyzer touched" — was
+true and beside the point: `CResidual` almost never occurs (dotted lists
+and oddball values), because the hybrid boundary is not an IR node. Bodies
+compile on first application (ADR 0004) and the performance story lives in
+binding-guard specializations with interpreted fallbacks (`CGuarded`), so
+"compiled vs residual" is a *runtime* property a static walk cannot show
+truthfully — and located spans exist only on the special-form spine anyway.
+An honest coverage view needs runtime instrumentation, which belongs with
+phase 6's session protocol. Deferred with that dependency named, so the
+"nearly free" framing does not get re-derived from the `CLocated` line
+above.
 
 **Phase 6 — debug adapter.** Requires a persistent session protocol that does
 not exist — the REPL cannot even separate errors from values today — so the
