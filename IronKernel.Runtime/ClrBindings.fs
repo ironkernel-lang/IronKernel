@@ -41,5 +41,13 @@ module ClrBindings =
         if has (GeneratedClr manifestId) env then returnM ()
         else throwError (CapabilityDenied("generated CLR binding set '" + manifestId + "'"))
 
+    /// The boundary conversion for a CLR value entering Kernel. Booleans become
+    /// Kernel booleans: the argument path converts Bool to CLR bool, and a CLR
+    /// predicate's result must be usable by `if` on the way back.
+    let fromClrObj (value: obj) : LispVal =
+        match value with
+        | :? bool as b -> Bool b
+        | _ -> Obj value
+
     let returnObject env cont (value: obj) =
-        bounceContinue env cont (if isNull value then Inert else Obj value)
+        bounceContinue env cont (if isNull value then Inert else fromClrObj value)

@@ -1440,7 +1440,7 @@
                         match taskType.GetProperty("Result").GetValue(completed) with
                         | null -> returnM Inert
                         | :? LispVal as value -> returnM value
-                        | other -> returnM (Obj other)
+                        | other -> returnM (ClrBindings.fromClrObj other)
                 | None -> returnM Inert
             with
             | :? OperationCanceledException as error -> throwError (ClrException error)

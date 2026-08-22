@@ -116,12 +116,12 @@
             let f = t.GetField(p)
             if f = null then
                 let f = t.GetProperty(p)
-                if f = null then 
+                if f = null then
                     signal cont (Default("field or property '" + p + "' does not exist"))
                 else
-                    bounceContinue env cont (Obj(f.GetValue(o,null)))
+                    bounceContinue env cont (ClrBindings.fromClrObj (f.GetValue(o,null)))
             else
-                bounceContinue env cont (Obj(f.GetValue(o)))
+                bounceContinue env cont (ClrBindings.fromClrObj (f.GetValue(o)))
 
         let set env cont (t:Type) (o:obj) p (v:obj)=
             let f = t.GetField(p)
@@ -206,7 +206,7 @@
                     let! mapargs = sequence (List.map toObjects args) []
                     let r = t.InvokeMember(m,BindingFlags.InvokeMethod,Type.DefaultBinder,o, List.toArray mapargs)
                     if r = null then return Inert
-                    else return (Obj(r))
+                    else return (ClrBindings.fromClrObj r)
                 }
             with ex -> throwError(Default("member invokation failed: " + ex.Message))
 
