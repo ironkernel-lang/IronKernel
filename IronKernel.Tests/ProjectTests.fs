@@ -38,7 +38,7 @@ let ``new project loads runs tests and builds`` () =
 [<Fact>]
 let ``project package references can be added and removed`` () =
     withProject (fun project ->
-        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.2.3" "IronKernel")
+        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.2.3" "IronKernel" "runtime")
         let reloaded =
             match load project.path with
             | Choice2Of2 value -> value
@@ -57,8 +57,8 @@ let ``project package references can be added and removed`` () =
 [<Fact>]
 let ``add and remove package treat package ids as case-insensitive`` () =
     withProject (fun project ->
-        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.2.3" "IronKernel")
-        Assert.Equal(1, addPackage project.path "example.dependency" "9.9.9" "IronKernel")
+        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.2.3" "IronKernel" "runtime")
+        Assert.Equal(1, addPackage project.path "example.dependency" "9.9.9" "IronKernel" "runtime")
         Assert.Equal(0, removePackage project.path "EXAMPLE.DEPENDENCY")
         let afterRemoval =
             match load project.path with
@@ -109,7 +109,7 @@ let private withDependencyGraph body =
         File.WriteAllText(
             Path.Combine(consumer.directory, "test", "main_test.ikr"),
             "(if (eqv? (hello) \"from package\") #inert missing)\n")
-        Assert.Equal(0, addPackage consumer.path "shared" "0.1.0" "IronKernel")
+        Assert.Equal(0, addPackage consumer.path "shared" "0.1.0" "IronKernel" "runtime")
 
         let feed = Path.Combine(shared.directory, "bin")
         File.WriteAllText(
@@ -136,6 +136,87 @@ let ``NuGet IronKernel dependency sources load before project main`` () =
         Assert.Equal(0, restore consumer false)
         Assert.NotEmpty((assetsOk consumer).sources)
         Assert.Equal(0, run consumer []))
+
+/// A "testlib" package consumed with IronKernelScope="test": the consumer's main
+/// does not need it, its test file does.
+let private withTestScopedGraph body =
+    let root = Path.Combine(Path.GetTempPath(), "ironkernel-testdeps-" + Guid.NewGuid().ToString("N"))
+    Directory.CreateDirectory(root) |> ignore
+    try
+        Assert.Equal(0, create "lib" "testlib" root)
+        let testlib =
+            match load (Path.Combine(root, "testlib", "testlib.ikproj")) with
+            | Choice2Of2 value -> value
+            | Choice1Of2 error -> failwithf "testlib load failed: %A" error
+        File.WriteAllText(
+            testlib.main,
+            "(define assert-true (lambda (x) (if x #inert (assertion-failed))))\n")
+        Assert.Equal(0, pack testlib)
+
+        Assert.Equal(0, create "app" "consumer" root)
+        let consumerPath = Path.Combine(root, "consumer", "consumer.ikproj")
+        File.WriteAllText(
+            Path.Combine(root, "consumer", "src", "main.ikr"),
+            "(define answer 42)\n")
+        File.WriteAllText(
+            Path.Combine(root, "consumer", "test", "main_test.ikr"),
+            "(assert-true (eqv? answer 42))\n")
+        Assert.Equal(0, addPackage consumerPath "testlib" "0.1.0" "IronKernel" "test")
+
+        let feed = Path.Combine(testlib.directory, "bin")
+        File.WriteAllText(
+            Path.Combine(root, "NuGet.config"),
+            $"""<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="local" value="{feed}" />
+  </packageSources>
+</configuration>
+            """)
+        let consumer =
+            match load consumerPath with
+            | Choice2Of2 value -> value
+            | Choice1Of2 error -> failwithf "consumer load failed: %A" error
+        body root testlib consumer
+    finally
+        Directory.Delete(root, true)
+
+[<Fact>]
+let ``test-scoped dependencies load for ik test only`` () =
+    withTestScopedGraph (fun _ _ consumer ->
+        Assert.Equal(0, restore consumer false)
+        let assets = assetsOk consumer
+        Assert.Empty(assets.sources)
+        Assert.NotEmpty(assets.testSources)
+        // The test file can use the dependency's binding...
+        Assert.Equal(0, test consumer)
+        // ...but run does not load it: a main that needs it fails. This is the
+        // negative control -- without the scope split, this run would succeed.
+        File.WriteAllText(consumer.main, "(assert-true #t)\n")
+        Assert.Equal(1, run consumer []))
+
+[<Fact>]
+let ``pack excludes test-scoped references from the package`` () =
+    withTestScopedGraph (fun _ _ consumer ->
+        Assert.Equal(0, restore consumer false)
+        Assert.Equal(0, pack consumer)
+        let generated =
+            File.ReadAllText(Path.Combine(consumer.directory, "obj", consumer.name + ".pack.csproj"))
+        Assert.DoesNotContain("testlib", generated))
+
+[<Fact>]
+let ``unknown IronKernelScope fails to load`` () =
+    withProject (fun project ->
+        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.0.0" "IronKernel" "test")
+        let text =
+            File.ReadAllText(project.path)
+                .Replace("IronKernelScope=\"test\"", "IronKernelScope=\"dev\"")
+        File.WriteAllText(project.path, text)
+        match load project.path with
+        | Choice1Of2 (Default message) -> Assert.Contains("IronKernelScope", message)
+        | Choice1Of2 other -> failwithf "unexpected error: %A" other
+        | Choice2Of2 _ -> failwith "expected scope validation to fail the load")
 
 [<Fact>]
 let ``build concatenates dependency sources before main`` () =
@@ -463,7 +544,7 @@ let ``load rejects unknown IronKernelProfile instead of defaulting to unrestrict
 [<Fact>]
 let ``resolveAssets rejects empty packageFolders when project has packages`` () =
     withProject (fun project ->
-        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.0.0" "IronKernel")
+        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.0.0" "IronKernel" "runtime")
         let reloaded =
             match load project.path with
             | Choice2Of2 value -> value
@@ -482,7 +563,7 @@ let ``resolveAssets rejects empty packageFolders when project has packages`` () 
 [<Fact>]
 let ``ensureRestored does not restore-loop on persistent assets errors`` () =
     withProject (fun project ->
-        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.0.0" "IronKernel")
+        Assert.Equal(0, addPackage project.path "Example.Dependency" "1.0.0" "IronKernel" "runtime")
         let reloaded =
             match load project.path with
             | Choice2Of2 value -> value
@@ -524,7 +605,7 @@ let ``orderedSources keeps IronKernelMain only once when path casing differs`` (
                 Path.GetDirectoryName project.main,
                 Path.GetFileName(project.main).ToUpperInvariant())
         let project' = { project with main = altMain; sources = [ project.main ] }
-        let ordered = orderedSources project' { sources = []; assemblies = [] }
+        let ordered = orderedSources project' { sources = []; assemblies = []; testSources = []; testAssemblies = [] }
         Assert.Equal(1, ordered.Length)
         Assert.True(
             String.Equals(ordered[0], altMain, StringComparison.OrdinalIgnoreCase)))
@@ -579,7 +660,7 @@ let ``load deduplicates IronKernelMain against sources ignoring case`` () =
                     String.Equals(path, loaded.main, StringComparison.OrdinalIgnoreCase))
             Assert.Equal(1, mains.Length)
             Assert.Equal(loaded.main, mains[0])
-            let ordered = orderedSources loaded { sources = []; assemblies = [] }
+            let ordered = orderedSources loaded { sources = []; assemblies = []; testSources = []; testAssemblies = [] }
             Assert.Equal(1, ordered |> List.filter (fun path ->
                 String.Equals(path, loaded.main, StringComparison.OrdinalIgnoreCase)) |> List.length))
 
