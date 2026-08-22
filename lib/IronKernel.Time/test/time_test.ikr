@@ -1,0 +1,125 @@
+; Tests for IronKernel.Time, written with IronKernel.Test.
+
+(suite "construction"
+  (check "date builds midnight UTC"
+    (let ((t (date 2024 3 15)))
+      ($and? (date-utc? t)
+             (=? 0 (date-hour t))
+             (=? 0 (date-minute t)))))
+  (check "date-time carries the clock"
+    (let ((t (date-time 2024 3 15 10 30 45)))
+      ($and? (=? 10 (date-hour t)) (=? 30 (date-minute t)) (=? 45 (date-second t)))))
+  (check-equal "date-time takes optional milliseconds"
+    250 (date-millisecond (date-time 2024 3 15 10 30 45 250)))
+  (check "now is a UTC date" (let ((t (now))) ($and? (date? t) (date-utc? t))))
+  (check "today is now's calendar day at midnight"
+    (let ((t (today)))
+      ($and? (date-utc? t) (=? 0 (date-hour t)) (date<=? t (now)))))
+  (check-error "an impossible day signals" (date 2024 2 30))
+  (check "date? rejects non-dates"
+    ($and? (not? (date? 5)) (not? (date? (hours 1)))))
+  (check "duration? classifies"
+    ($and? (duration? (hours 1)) (not? (duration? (now))) (not? (duration? 5)))))
+
+(suite "accessors"
+  (check-equal "the calendar parts"
+    (list 2024 3 15) (let ((t (date 2024 3 15)))
+                       (list (date-year t) (date-month t) (date-day t))))
+  (check-equal "day of week is a lowercase symbol"
+    (string->symbol "friday") (date-day-of-week (date 2024 3 15)))
+  (check-equal "day of year" 75 (date-day-of-year (date 2024 3 15)))
+  (check "date-only truncates to midnight, kind preserved"
+    (let ((midnight (date-only (date-time 2024 3 15 10 30 0))))
+      ($and? (date=? midnight (date 2024 3 15)) (date-utc? midnight)))))
+
+(suite "the tower does the arithmetic"
+  (check "date plus duration"
+    (date=? (+ (date 2024 3 15) (hours 26)) (date-time 2024 3 16 2 0 0)))
+  (check "date minus duration"
+    (date=? (- (date-time 2024 3 15 10 30 0) (minutes 90))
+            (date-time 2024 3 15 9 0 0)))
+  (check "date minus date is a duration"
+    (=? 13.5 (duration-total-hours (- (date 2024 3 16) (date-time 2024 3 15 10 30 0)))))
+  (check "durations add"
+    (=? 90.0 (duration-total-minutes (+ (hours 1) (minutes 30)))))
+  (check "durations subtract"
+    (=? 30.0 (duration-total-minutes (- (hours 1) (minutes 30))))))
+
+(suite "ordering"
+  (check "date<?" (date<? (date 2024 3 15) (date 2024 3 16)))
+  (check "date<? can miss" (not? (date<? (date 2024 3 16) (date 2024 3 15))))
+  (check "date=?" (date=? (date-time 2024 3 15 10 30 0) (date-time 2024 3 15 10 30 0)))
+  (check "date<=? on equals" (date<=? (date 2024 3 15) (date 2024 3 15)))
+  (check "date>? and date>=?"
+    ($and? (date>? (date 2024 3 16) (date 2024 3 15))
+           (date>=? (date 2024 3 16) (date 2024 3 16))))
+  (check "duration ordering"
+    ($and? (duration<? (minutes 1) (hours 1))
+           (duration>? (hours 1) (minutes 59))
+           (duration=? (minutes 60) (hours 1))
+           (duration<=? (hours 1) (hours 1))
+           (duration>=? (hours 1) (minutes 60)))))
+
+(suite "calendar"
+  (check "add-months clamps at a short month"
+    (date=? (add-months (date 2024 1 31) 1) (date 2024 2 29)))
+  (check "add-years from a leap day clamps"
+    (date=? (add-years (date 2024 2 29) 1) (date 2025 2 28)))
+  (check "add-months goes backward" (date=? (add-months (date 2024 3 15) -1) (date 2024 2 15)))
+  (check "leap-year?" ($and? (leap-year? 2024) (not? (leap-year? 2023)) (not? (leap-year? 1900))))
+  (check-equal "days-in-month in a leap February" 29 (days-in-month 2024 2))
+  (check-equal "days-in-month otherwise" 28 (days-in-month 2023 2)))
+
+(suite "durations"
+  (check "constructors accept exact and inexact"
+    (=? (duration-total-hours (days (/ 1 2))) (duration-total-hours (hours 12))))
+  (check-equal "components wrap at their unit" 2 (duration-hours (hours 26)))
+  (check-equal "components: the day part" 1 (duration-days (hours 26)))
+  (check "totals do not wrap" (=? 26.0 (duration-total-hours (hours 26))))
+  (check "milliseconds round-trip"
+    (=? 1500.0 (duration-total-milliseconds (milliseconds 1500))))
+  (check "negate" (=? -2.0 (duration-total-hours (duration-negate (hours 2)))))
+  (check "seconds and minutes components"
+    (let ((d (+ (minutes 2) (seconds 30))))
+      ($and? (=? 2 (duration-minutes d)) (=? 30 (duration-seconds d))))))
+
+(suite "unix time"
+  (check-equal "the epoch is zero" 0 (date->unix (date 1970 1 1)))
+  (check-equal "a known instant" 1710460800 (date->unix (date 2024 3 15)))
+  (check "unix->date inverts" (date=? (unix->date 1710460800) (date 2024 3 15)))
+  (check-equal "negative times reach before the epoch" -86400 (date->unix (unix->date -86400)))
+  (check-equal "sub-second parts floor" 0 (date->unix (date-time 1970 1 1 0 0 0 900)))
+  (check "far futures stay exact past 32 bits"
+    (=? 7258118400 (date->unix (date 2200 1 1)))))
+
+(suite "local time"
+  (check "utc -> local -> utc round-trips"
+    (let ((t (date-time 2024 3 15 10 30 0)))
+      (date=? (date->utc (date->local t)) t)))
+  (check "date->local leaves UTC kind behind"
+    (not? (date-utc? (date->local (now))))))
+
+(suite "formatting and parsing"
+  (check-equal "ISO 8601 round-trip form"
+    "2024-03-15T10:30:00.0000000Z" (date->string (date-time 2024 3 15 10 30 0)))
+  (check-equal "a custom spec, invariantly"
+    "15/03/2024" (date->string (date 2024 3 15) "dd/MM/yyyy"))
+  (check "string->date reads what date->string writes"
+    (let ((t (date-time 2024 3 15 10 30 45 250)))
+      (date=? (string->date (date->string t)) t)))
+  (check "a zoned string converts to UTC"
+    (date=? (string->date "2024-03-15T12:30:00+02:00") (date-time 2024 3 15 10 30 0)))
+  (check "an unzoned string is taken as UTC, not machine-local"
+    (let ((t (string->date "2024-03-15T10:30:00")))
+      ($and? (date-utc? t) (date=? t (date-time 2024 3 15 10 30 0)))))
+  (check "an exact format parses"
+    (date=? (string->date "15/03/2024" "dd/MM/yyyy") (date 2024 3 15)))
+  (check "a malformed date is #f, not an error" (eq? #f (string->date "nope")))
+  (check "a string missing its exact format is #f"
+    (eq? #f (string->date "2024-03-15" "dd/MM/yyyy")))
+  (check-equal "duration->string" "1.02:30:00" (duration->string (+ (days 1) (hours 2) (minutes 30))))
+  (check "string->duration inverts"
+    (duration=? (string->duration "1.02:30:00") (+ (days 1) (hours 2) (minutes 30))))
+  (check "a malformed duration is #f" (eq? #f (string->duration "junk"))))
+
+(report-checks)

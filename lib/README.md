@@ -12,6 +12,7 @@ conventions, tests that can fail for the right reason.
 | [`IronKernel.Strings`](IronKernel.Strings/) | Search, split/join, case, trimming, padding, characters, invariant number conversion, variadic `format` — ordinal semantics throughout |
 | [`IronKernel.Json`](IronKernel.Json/) | Grammar-enforcing JSON reader with offsets in its errors, a writer that refuses what JSON cannot carry, pretty-printing, path traversal |
 | [`IronKernel.Math`](IronKernel.Math/) | Statistics, combinatorics, number theory — exact wherever the mathematics allows: means as ratios, `isqrt` and `factorial` at any size, primes, factorizations, totients |
+| [`IronKernel.Time`](IronKernel.Time/) | Dates and durations over `System.DateTime`/`System.TimeSpan`: UTC-disciplined instants the arithmetic tower adds and subtracts, calendar operations, unix time, invariant ISO 8601 formatting and parsing |
 | [`IronKernel.Amb`](IronKernel.Amb/) | Nondeterministic search: `amb`, `require`, bracketed choice, pluggable search strategies over multi-shot delimited continuations |
 
 ## Working in this directory
@@ -42,8 +43,6 @@ its version, delete `~/.nuget/packages/<id>/<version>` (and the consumer's
 
 ## Candidates for what comes next
 
-- **Time** — dates, durations, and formatting over `System.DateTime`, with
-  the same invariant-culture discipline as `IronKernel.Strings`.
 - **Ports/IO** — structured file and path helpers over the capability-gated
   port primitives.
 - A **conformance-style docs page** per package, generated from its tests,
