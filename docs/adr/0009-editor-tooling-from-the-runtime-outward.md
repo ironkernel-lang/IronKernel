@@ -1,6 +1,6 @@
 # ADR 0009: Editor tooling grows from the runtime outward
 
-Status: Accepted — phase 1 implemented
+Status: Accepted — phases 1 and 2 implemented
 
 ## Decision
 
@@ -98,10 +98,29 @@ publishing span-accurate diagnostics instead of scraping. The caret-art regex
 remains only for what `run` prints — runtime errors have no JSON channel yet —
 and the three mismatched prefixes are fixed or matched.
 
-**Phase 2 — environment enumeration.** Primitives to list a frame's bindings,
-walk `parents`, and read the capability set, over the existing `SymbolTable`
-machinery. This one gap blocks completion, the environment inspector, and
-REPL tab-completion all at once, which is why it precedes the server.
+**Phase 2 — environment enumeration.** *Done.* Three applicatives, extensions
+in the sense of R-1RK 1.3.2 alongside `clr-opens`, available under every
+profile: `environment-local-symbols` (the frame's own bindings, sorted),
+`environment-symbols` (every visible symbol, deduplicated across the frames
+reachable from the environment), and `environment-capabilities` (the
+capability set, with `(generated-clr "safe")` for the parameterized case).
+They ride a new `SymbolTable.reachableFrames`, which walks the parent graph
+in the order resolution scans it.
+
+One half of the plan as written was wrong to promise. It said "walk
+`parents`", and no primitive does: enumeration returns *names*, never parent
+environments as values. R-1RK keeps the environment type encapsulated — 4.9
+gates mutation on holding the environment being mutated, and 6.7.1's
+rationale weighs even `$binds?`'s information leak — so a primitive handing
+out ancestors would convert visibility into mutation authority over every
+frame above you. The environment inspector still gets frame-by-frame
+structure, but host-side: the in-process server holds the
+`EnvironmentRecord` itself and never needs the Kernel-level primitive.
+
+The predicted payoff landed: REPL tab-completion now works through
+`Mono.Terminal`'s previously dormant `AutoCompleteEvent`, with the candidate
+computation (`Repl.completionCandidates`) split from the editor callback so
+it is testable without a TTY.
 
 **Phase 3 — the language server.** F#, referencing IronKernel in-process.
 Semantic tokens from actual binding resolution and `contract-of` — retiring

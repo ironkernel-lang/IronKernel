@@ -89,6 +89,24 @@ module SymbolTable =
     let resolveBindingCell env var =
         tryResolveBindingCell env var |> ValueOption.toOption
 
+    /// Every frame reachable from `env`, in resolution order: the frame itself,
+    /// then its parents depth-first in declaration order, each frame once. The
+    /// first frame here holding a name is the one `tryResolveBindingCell` finds.
+    let reachableFrames env : EnvironmentRecord list =
+        let visited =
+            Collections.Generic.HashSet<obj>(
+                Collections.Generic.ReferenceEqualityComparer.Instance)
+        let frames = Collections.Generic.List<EnvironmentRecord>()
+        let rec visit value =
+            match value with
+            | Environment record when visited.Add(record :> obj) ->
+                frames.Add record
+                for parent in record.parents do
+                    visit parent
+            | _ -> ()
+        visit env
+        List.ofSeq frames
+
     /// A frame scanned (and missed) on the way to a resolved binding, with the
     /// number of bindings it held at resolution time. Frame dictionaries only
     /// grow — bindings are never removed — so an unchanged count proves no new

@@ -149,3 +149,82 @@ let ``lookup handles deeply nested parent environments`` () =
     match getVar environment "deep-binding" with
     | Choice2Of2 (Obj (:? int as value)) -> Assert.Equal(42, value)
     | result -> failwithf "unexpected deep lookup result: %A" result
+
+/// The Atom names in a proper list, in order.
+let rec private atomNames value =
+    match value with
+    | Pair cell ->
+        match cell.car with
+        | Atom name -> name :: atomNames cell.cdr
+        | _ -> atomNames cell.cdr
+    | _ -> []
+
+[<Fact>]
+let ``environment-local-symbols lists the frame's own bindings sorted`` () =
+    withKernel (fun env ->
+        [ "(define e (make-environment (get-current-environment)))"
+          "(remote-eval (sequence (define bravo 2) (define alpha 1)) e)" ]
+        |> List.iter (fun expr ->
+            match evalIn env expr with
+            | Status s -> failwithf "%s failed: %s" expr s
+            | _ -> ())
+        Assert.Equal("(alpha bravo)", showVal (evalIn env "(environment-local-symbols e)")))
+
+[<Fact>]
+let ``environment-symbols sees inherited bindings once and local-symbols does not`` () =
+    withKernel (fun env ->
+        [ "(define parent-only 41)"
+          "(define shadowed 1)"
+          "(define child (make-environment (get-current-environment)))"
+          "(remote-eval (define shadowed 2) child)" ]
+        |> List.iter (fun expr ->
+            match evalIn env expr with
+            | Status s -> failwithf "%s failed: %s" expr s
+            | _ -> ())
+        let visible = atomNames (evalIn env "(environment-symbols child)")
+        Assert.Contains("parent-only", visible)
+        Assert.Contains("define", visible)
+        Assert.Equal(1, visible |> List.filter ((=) "shadowed") |> List.length)
+        Assert.Equal<string list>(List.sort visible, visible)
+        let local = atomNames (evalIn env "(environment-local-symbols child)")
+        Assert.Equal<string list>(["shadowed"], local))
+
+[<Fact>]
+let ``environment-symbols walks every declared parent`` () =
+    withKernel (fun env ->
+        [ "(define p1 (make-environment (get-current-environment)))"
+          "(remote-eval (define from-first 1) p1)"
+          "(define p2 (make-environment (get-current-environment)))"
+          "(remote-eval (define from-second 2) p2)"
+          "(define both (make-environment p1 p2))" ]
+        |> List.iter (fun expr ->
+            match evalIn env expr with
+            | Status s -> failwithf "%s failed: %s" expr s
+            | _ -> ())
+        let visible = atomNames (evalIn env "(environment-symbols both)")
+        Assert.Contains("from-first", visible)
+        Assert.Contains("from-second", visible))
+
+[<Fact>]
+let ``environment-capabilities reflects the profile`` () =
+    let capabilitiesFor profile =
+        IronKernel.RuntimeSourceServices.configure ()
+        IronKernel.Compiler.installBodyCompiler ()
+        let env = IronKernel.Runtime.makePrimitiveBindingsForProfile profile
+        showVal (evalIn env "(environment-capabilities (make-environment))")
+    Assert.Equal("()", capabilitiesFor Minimal)
+    Assert.Equal("((generated-clr \"safe\"))", capabilitiesFor Safe)
+    Assert.Equal(
+        "(raw-clr-interop host-io source-loading host-async (generated-clr \"safe\"))",
+        capabilitiesFor Unrestricted)
+
+[<Fact>]
+let ``environment enumeration rejects non-environments`` () =
+    withKernel (fun env ->
+        for expr in
+            [ "(environment-symbols 5)"
+              "(environment-local-symbols 5)"
+              "(environment-capabilities 5)" ] do
+            match evalIn env expr with
+            | Status s -> Assert.Contains("expected environment", s)
+            | other -> failwithf "%s unexpectedly returned %s" expr (showVal other))

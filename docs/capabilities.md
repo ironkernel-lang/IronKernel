@@ -14,6 +14,12 @@ Child environments receive the intersection of their own creator's authority
 and every parent environment's authority. This prevents an empty or mixed-parent
 environment from manufacturing additional access.
 
+`(environment-capabilities env)` reports an environment's authority set as a
+list — for example `(host-io (generated-clr "safe"))` — under every profile.
+It reveals information, not authority: reading the set grants nothing, and its
+companions `environment-symbols` / `environment-local-symbols` likewise return
+symbol names, never parent environments as values (ADR 0009).
+
 ## Defense in depth
 
 Restricted profiles omit dangerous names from their primitive environments.

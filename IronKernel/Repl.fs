@@ -43,7 +43,44 @@ module Repl =
           Console.Out.Flush()
           Console.ReadLine()
 
-    let evalString env cont expr = 
+    /// Symbol constituents the reader admits, so completion stops at delimiters
+    /// like parentheses, quotes, and whitespace.
+    let private isSymbolChar (c: char) =
+        Char.IsLetterOrDigit c || "!#$%|*+-/:<=>?@^_~.&".Contains c
+
+    /// The word ending at `cursor` and the visible symbols extending it, sorted.
+    /// Split from the editor callback so it is testable without a TTY. An empty
+    /// word matches nothing rather than dumping the whole environment.
+    let completionCandidates env (text: string) (cursor: int) =
+        let cursor = max 0 (min cursor text.Length)
+        let mutable start = cursor
+        while start > 0 && isSymbolChar text.[start - 1] do
+            start <- start - 1
+        let prefix = text.Substring(start, cursor - start)
+        let matches =
+            if prefix = "" then []
+            else
+                IronKernel.SymbolTable.reachableFrames env
+                |> Seq.collect (fun record -> record.bindings.Keys)
+                |> Seq.distinct
+                |> Seq.filter (fun name -> name.StartsWith(prefix, StringComparison.Ordinal))
+                |> Seq.sort
+                |> List.ofSeq
+        prefix, matches
+
+    /// Tab completion over the session environment. The editor inserts the
+    /// returned strings at the cursor, so they are remainders, not full names.
+    let private installCompletion env =
+        lineEditor.AutoCompleteEvent <-
+            LineEditor.AutoCompleteHandler(fun text cursor ->
+                let prefix, matches = completionCandidates env text cursor
+                let remainders =
+                    matches
+                    |> List.map (fun name -> name.Substring prefix.Length)
+                    |> Array.ofList
+                LineEditor.Completion(prefix, remainders))
+
+    let evalString env cont expr =
         let evaled = 
             match (readExpr expr) with
             |Choice1Of2(error) -> throwError error
@@ -110,6 +147,7 @@ module Repl =
             eprintfn "Startup error: %s" (showError error)
             1
         | Choice2Of2 env ->
+            installCompletion env
             let run = evalAndPrint env (newContinuation env)
             until (fun x -> x.ToLowerInvariant().Equals("quit"))
                 (readPrompt "IronKernel> ") run

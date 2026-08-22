@@ -853,6 +853,45 @@
                 bounceEval env (makeCPS env cont decide) environmentExpression
             | [] -> signal cont (NumArgs(1, args))
 
+        /// Extensions in the sense of R-1RK 1.3.2, like `clr-opens`. They reveal
+        /// names and capabilities -- information -- and never parent environments
+        /// as values: the environment type stays encapsulated, so visibility does
+        /// not carry mutation authority over ancestor frames (ADR 0009).
+        let environmentSymbols env cont = function
+            | [Environment _ as target] ->
+                let names =
+                    SymbolTable.reachableFrames target
+                    |> Seq.collect (fun record -> record.bindings.Keys)
+                    |> Seq.distinct
+                    |> Seq.sort
+                    |> Seq.map Atom
+                    |> List.ofSeq
+                bounceContinue env cont (ofList names)
+            | [found] -> signal cont (TypeMismatch("environment", found))
+            | bad -> signal cont (NumArgs(1, bad))
+
+        let environmentLocalSymbols env cont = function
+            | [Environment record] ->
+                let names =
+                    record.bindings.Keys |> Seq.sort |> Seq.map Atom |> List.ofSeq
+                bounceContinue env cont (ofList names)
+            | [found] -> signal cont (TypeMismatch("environment", found))
+            | bad -> signal cont (NumArgs(1, bad))
+
+        let environmentCapabilities env cont = function
+            | [Environment record] ->
+                let render = function
+                    | RawClrInterop -> Atom "raw-clr-interop"
+                    | HostIO -> Atom "host-io"
+                    | SourceLoading -> Atom "source-loading"
+                    | HostAsync -> Atom "host-async"
+                    | GeneratedClr name -> ofList [Atom "generated-clr"; Obj(name :> obj)]
+                let capabilities =
+                    record.capabilities |> Set.toList |> List.map render
+                bounceContinue env cont (ofList capabilities)
+            | [found] -> signal cont (TypeMismatch("environment", found))
+            | bad -> signal cont (NumArgs(1, bad))
+
         let primitiveOperatives : (string * (LispVal -> LispVal -> LispVal list -> Step)) list =
             [
                   ("vau"    , vau);
@@ -2621,6 +2660,9 @@
                   ("finite?", isFinite);
                   ("environment?", isEnvironment)
                   ("make-environment", makeEnvironment);
+                  ("environment-symbols", environmentSymbols);
+                  ("environment-local-symbols", environmentLocalSymbols);
+                  ("environment-capabilities", environmentCapabilities);
                   ("print", print);
                   ("printf", printf');
                   ("show", show);
@@ -2683,23 +2725,27 @@
                               invoke = func })
                 let contract =
                     match name with
-                    // `+` also accepts DateTime + TimeSpan and `-` DateTime - DateTime.
-                    // Results stay AnyShape: a non-any result wraps every dynamic call
-                    // in a validation continuation, which these hot paths avoid.
+                    // `+` also accepts DateTime + TimeSpan (either order) and
+                    // TimeSpan + TimeSpan; `-` accepts DateTime - DateTime,
+                    // DateTime - TimeSpan, and TimeSpan - TimeSpan. The shapes
+                    // over-approximate -- opAdd/opMinus reject the combinations the
+                    // CLR does not define. Results stay AnyShape: a non-any result
+                    // wraps every dynamic call in a validation continuation, which
+                    // these hot paths avoid.
                     | "+" ->
                         Some(
                             certifiedVariadicApplicative
                                 name
-                                [ OneOfShape [NumberShape; DateTimeShape]
-                                  OneOfShape [NumberShape; TimeSpanShape] ]
+                                [ OneOfShape [NumberShape; DateTimeShape; TimeSpanShape]
+                                  OneOfShape [NumberShape; TimeSpanShape; DateTimeShape] ]
                                 0
                                 AnyShape)
                     | "-" ->
                         Some(
                             certifiedVariadicApplicative
                                 name
-                                [ OneOfShape [NumberShape; DateTimeShape]
-                                  OneOfShape [NumberShape; DateTimeShape] ]
+                                [ OneOfShape [NumberShape; DateTimeShape; TimeSpanShape]
+                                  OneOfShape [NumberShape; DateTimeShape; TimeSpanShape] ]
                                 2
                                 AnyShape)
                     | "*" ->
