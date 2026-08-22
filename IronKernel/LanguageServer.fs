@@ -421,6 +421,67 @@ module LanguageServer =
             previousColumn <- column
             yield! [ deltaLine; deltaColumn; length; int64 tokenType; 0L ] ]
 
+    /// `ironkernel/environment`: the inspector's data. Frame structure is
+    /// host-side by design -- phase 2 deliberately exposes no parent
+    /// environments to Kernel code, and the server holds the records
+    /// in-process (ADR 0009 phases 2 and 5).
+    let private renderCapability = function
+        | RawClrInterop -> "raw-clr-interop"
+        | HostIO -> "host-io"
+        | SourceLoading -> "source-loading"
+        | HostAsync -> "host-async"
+        | GeneratedClr name -> sprintf "(generated-clr \"%s\")" name
+
+    let private handleEnvironment output session (id: JsonElement) (uri: string option) =
+        respond output id (fun writer ->
+            writer.WriteStartObject()
+            writer.WritePropertyName "capabilities"
+            writer.WriteStartArray()
+            for capability in Capabilities.ofEnvironment session.env |> Set.toList do
+                writer.WriteStringValue(renderCapability capability)
+            writer.WriteEndArray()
+            writer.WritePropertyName "frames"
+            writer.WriteStartArray()
+            let writeSymbol (name: string) symbolClass (value: LispVal option) =
+                writer.WriteStartObject()
+                writer.WriteString("name", name)
+                writer.WriteString("class", renderClass symbolClass)
+                match value |> Option.bind Contracts.tryGetContract with
+                | Some contract -> writer.WriteString("detail", renderContract contract)
+                | None -> ()
+                writer.WriteEndObject()
+            // The buffer's defines are the innermost frame the reader sees.
+            match uri with
+            | Some uri ->
+                let text =
+                    match session.documents.TryGetValue uri with
+                    | true, value -> value
+                    | _ -> ""
+                writer.WriteStartObject()
+                writer.WriteString("label", "buffer")
+                writer.WritePropertyName "symbols"
+                writer.WriteStartArray()
+                for name, symbolClass in Map.toList (definesIn uri text) do
+                    writeSymbol name symbolClass None
+                writer.WriteEndArray()
+                writer.WriteEndObject()
+            | None -> ()
+            SymbolTable.reachableFrames session.env
+            |> List.iteri (fun index record ->
+                writer.WriteStartObject()
+                writer.WriteString(
+                    "label",
+                    sprintf "frame %d (%d bindings)" (index + 1) record.bindings.Count)
+                writer.WritePropertyName "symbols"
+                writer.WriteStartArray()
+                for name in record.bindings.Keys |> Seq.sort do
+                    let value = record.bindings.[name].state.value
+                    writeSymbol name (classifyValue value) (Some value)
+                writer.WriteEndArray()
+                writer.WriteEndObject())
+            writer.WriteEndArray()
+            writer.WriteEndObject())
+
     let private handleSemanticTokens output session (id: JsonElement) uri =
         let text =
             match session.documents.TryGetValue (uri: string) with
@@ -547,6 +608,18 @@ module LanguageServer =
                         handleHover output session id (textDocumentUri parameters) line character
                     | "textDocument/semanticTokens/full" ->
                         handleSemanticTokens output session id (textDocumentUri parameters)
+                    | "ironkernel/environment" ->
+                        let uri =
+                            match parameters.ValueKind with
+                            | JsonValueKind.Object ->
+                                match parameters.TryGetProperty "textDocument" with
+                                | true, textDocument ->
+                                    match textDocument.TryGetProperty "uri" with
+                                    | true, value -> Some(value.GetString())
+                                    | _ -> None
+                                | _ -> None
+                            | _ -> None
+                        handleEnvironment output session id uri
                     | other when hasId ->
                         respondError output id -32601 (sprintf "method not found: %s" other)
                     | _ -> ()

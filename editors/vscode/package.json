@@ -36,7 +36,10 @@
     "onCommand:ironkernel.compileFile",
     "onCommand:ironkernel.runProject",
     "onCommand:ironkernel.buildProject",
-    "onCommand:ironkernel.openPlayground"
+    "onCommand:ironkernel.openPlayground",
+    "onCommand:ironkernel.refreshEnvironment",
+    "onCommand:ironkernel.selectProfile",
+    "onView:ironkernelEnvironment"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -122,6 +125,17 @@
         "command": "ironkernel.showOutput",
         "title": "IronKernel: Show Output",
         "category": "IronKernel"
+      },
+      {
+        "command": "ironkernel.refreshEnvironment",
+        "title": "IronKernel: Refresh Environment View",
+        "category": "IronKernel",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ironkernel.selectProfile",
+        "title": "IronKernel: Select Capability Profile",
+        "category": "IronKernel"
       }
     ],
     "menus": {
@@ -154,6 +168,13 @@
           "command": "ironkernel.buildProject",
           "when": "resourceExtname == .ikproj && isWorkspaceTrusted",
           "group": "ironkernel@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "ironkernel.refreshEnvironment",
+          "when": "view == ironkernelEnvironment",
+          "group": "navigation"
         }
       ]
     },
@@ -282,6 +303,23 @@
           "absolute"
         ],
         "pattern": "$ironkernel"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "ironkernelEnvironment",
+          "name": "IronKernel Environment",
+          "when": "ironkernel.environmentAvailable",
+          "icon": "$(symbol-namespace)",
+          "contextualTitle": "IronKernel Environment"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "ironkernelEnvironment",
+        "contents": "The IronKernel language server supplies this view. Open an .ikr file in a trusted workspace to populate it."
       }
     ]
   },

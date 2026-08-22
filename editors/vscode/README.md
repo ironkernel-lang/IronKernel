@@ -15,6 +15,12 @@ The extension never implements a second evaluator in JavaScript.
   classifies operatives/applicatives by *resolution* — your own `vau`
   definitions get the operative color (disable with
   `ironkernel.languageServer.enabled`)
+- **Environment view** (explorer sidebar): the session's capability set and
+  every frame's bindings — your buffer's defines first — with contracts as
+  tooltips, live from the language server
+- **Profile status bar**: the effective capability profile at a glance,
+  flagging when it overrides the project's own `<IronKernelProfile>`; click
+  to switch (the language server restarts to match)
 - **Run Current File** and **Compile Current File to IKC** commands
 - **Run Project** and **Build Project** for `.ikproj` (nearest project, picker, or explorer context menu)
 - Check on save: `ik check --json` runs on saved `.ikr` files and publishes
@@ -67,6 +73,8 @@ host authority available to editor commands and playground runs.
 - `IronKernel: Compile Current File to IKC`
 - `IronKernel: Run Project` — `run <project.ikproj>` (plus `ironkernel.runArgs`)
 - `IronKernel: Build Project` — `build <project.ikproj>` → `bin/*.ikc`
+- `IronKernel: Refresh Environment View`
+- `IronKernel: Select Capability Profile`
 - `IronKernel: Open Playground`
 - `IronKernel: Show Output`
 
