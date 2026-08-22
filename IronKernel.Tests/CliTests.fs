@@ -669,3 +669,19 @@ let ``repl completion extends the symbol at the cursor`` () =
         // Control: a bare tab must not dump the whole environment.
         let _, none = completionCandidates env "(" 1
         Assert.Empty none
+
+[<Fact>]
+let ``print of show renders and writes -- the print-show regression`` () =
+    match bootstrapEnv () with
+    | Choice1Of2 error -> failwith (showError error)
+    | Choice2Of2 env ->
+        let original = Console.Out
+        use writer = new StringWriter()
+        Console.SetOut writer
+        try
+            match runSource env "print-show.ikr" "(print (show (list 1 2)))\n(print (show (list 3 4)))\n" with
+            | Choice1Of2 error -> failwith (showError error)
+            | Choice2Of2 _ -> ()
+        finally
+            Console.SetOut original
+        Assert.Equal("(1 2)(3 4)", writer.ToString())

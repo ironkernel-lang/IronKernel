@@ -328,11 +328,12 @@
                         bounceContinue env cont Inert
           | _ -> signal cont (NumArgs(2,prms))
 
+        /// Render a value's printed representation as a string. Pure --
+        /// rendering grants no host authority, so `show` exists under every
+        /// profile; writing is `print`, `write`, and the ports' job. It used
+        /// to write to the console itself and return inert, which made the
+        /// natural `(print (show x))` an arity error on print.
         let show env cont (prms : LispVal list) =
           match prms with
-          | _ when not (has HostIO env) ->
-              signal cont (CapabilityDenied "host output requires HostIO")
-          | h :: _ ->
-              System.Console.Write(showVal h)
-              bounceContinue env cont Inert
-          | [] -> signal cont (NumArgs(1, []))
+          | [value] -> bounceContinue env cont (Obj(showVal value :> obj))
+          | _ -> signal cont (NumArgs(1, prms))

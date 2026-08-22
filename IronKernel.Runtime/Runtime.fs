@@ -2754,6 +2754,8 @@
                         Some(certifiedVariadicApplicative name [NumberShape; NumberShape] 2 NumberShape)
                     | "<" | "<=" | ">" ->
                         Some(certifiedApplicative name [NumberShape; NumberShape] BooleanShape)
+                    | "show" ->
+                        Some(certifiedApplicative name [AnyShape] StringShape)
                     | _ -> None
                 let value =
                     match contract with
@@ -2785,7 +2787,7 @@
                     (name <> "load" || Set.contains SourceLoading capabilities)
                     && (not (Set.contains name
                                 (Set.ofList
-                                    [ "print"; "printf"; "show"; "read"; "write"
+                                    [ "print"; "printf"; "read"; "write"
                                       "close-input-file"; "close-output-file"
                                       "get-current-input-port"; "get-current-output-port"
                                       "with-input-from-file"; "with-output-to-file"

@@ -30,7 +30,7 @@
   (vau (exp) env
     (begin
       (write "  >> ")
-      (show exp)
+      (print (show exp))
       (writeln "")
       (eval exp env))))
 

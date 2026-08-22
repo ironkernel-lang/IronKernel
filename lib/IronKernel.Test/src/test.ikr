@@ -76,7 +76,7 @@
   (define show-line
     (lambda (label value)
       (printf "        {0} " label)
-      (show value)
+      (print (show value))
       (printf "\n")))
 
   ; --- checks -------------------------------------------------------------

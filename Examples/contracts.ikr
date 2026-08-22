@@ -7,4 +7,4 @@
 (contract raw operative (any) any pure #t)
 
 (printf "double={0}\n" (double 21))
-(show (raw (+ 1 2)))
+(print (show (raw (+ 1 2))))

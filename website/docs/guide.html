@@ -314,7 +314,7 @@ ik pack</code></pre>
           <pre><code>(define trace
   (vau (exp) env
     (begin
-      (show exp)
+      (print (show exp))
       (. System.Console WriteLine "")
       (eval exp env))))
 
