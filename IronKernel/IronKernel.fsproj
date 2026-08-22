@@ -43,6 +43,7 @@
     <Compile Include="Emit.fs" />
     <Compile Include="Repl.fs" />
     <Compile Include="Project.fs" />
+    <Compile Include="Check.fs" />
     <Compile Include="Program.fs" />
     <!-- Pack=false: keep stdlib in the tool output (tools/net*/any) only, not as package contentFiles. -->
     <Content Include="kernel.ikr" CopyToOutputDirectory="PreserveNewest" Pack="false" />

@@ -157,6 +157,7 @@ ik new app hello
 cd hello
 ik run
 ik test
+ik check
 ik restore
 ik add Acme.IronKernel.Http 1.2.0
 ik add Npgsql 9.0.0 --clr
@@ -370,8 +371,9 @@ See [`Examples/contracts.ikr`](Examples/contracts.ikr).
 ## VS Code extension and playground
 
 The extension in [`editors/vscode/`](editors/vscode/) provides IronKernel syntax
-highlighting, snippets, run/compile commands, Problems diagnostics, and a
-playground backed by the real CLI. Build a local VSIX with:
+highlighting, snippets, run/compile commands, check-on-save diagnostics fed by
+`ik check --json`, and a playground backed by the real CLI. Build a local VSIX
+with:
 
 ```bash
 cd editors/vscode

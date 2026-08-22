@@ -7,12 +7,14 @@ open IronKernel.Ast
 open IronKernel.Errors
 
 module ProjectTool = IronKernel.Project
+module CheckTool = IronKernel.Check
 
 let private usage =
     """Usage:
   ironkernel [--profile <profile>]                         Start the REPL
   ironkernel [--profile <profile>] <file.ikr> [args...]    Run a source script
   ironkernel [--profile <profile>] run <file> [args...]    Run a .ikr script or .ikc package
+  ironkernel [--profile <profile>] check [--json] [<file.ikr> | project.ikproj]
     ironkernel [--profile <profile>] compile <file.ikr> [-o <file.ikc>]
     ironkernel [--profile <profile>] compile <file.ikr> --managed [-o <directory>]
     ironkernel --profile <minimal|safe> compile <file.ikr> --native <rid> [-o <directory>]
@@ -26,6 +28,7 @@ Project commands:
   ik restore [--locked] [project.ikproj]
   ik run [project.ikproj] [args...]
   ik build|test|tree|pack [project.ikproj]
+  ik check [--json] [project.ikproj]
   ik add <package> <version> [--clr] [--test]
   ik remove <package>
   ik publish <source> [api-key]
@@ -157,6 +160,19 @@ let private dispatch (profileOverride: CapabilityProfile option) args =
     | "run" :: scriptArgs ->
         // Non-source tokens (including flags) are project program args, not scripts.
         withProject profileOverride None (fun project -> ProjectTool.run project scriptArgs)
+    | "check" :: rest ->
+        let json = List.contains "--json" rest
+        let arguments = rest |> List.filter (fun argument -> argument <> "--json")
+        match arguments with
+        | [] ->
+            withProject profileOverride None (fun project ->
+                CheckTool.report json (CheckTool.checkProject project))
+        | [path] when isProjectPath path ->
+            withProject profileOverride (Some path) (fun project ->
+                CheckTool.report json (CheckTool.checkProject project))
+        | [path] when Path.GetExtension(path).Equals(".ikr", StringComparison.OrdinalIgnoreCase) ->
+            CheckTool.report json (CheckTool.checkFile profile path)
+        | _ -> usageError "Expected 'ik check [--json] [<file.ikr> | project.ikproj]'."
     | ["compile"] -> usageError "Missing source file for 'compile'."
     | "compile" :: input :: "--native" :: rid :: rest ->
         let outputResult =

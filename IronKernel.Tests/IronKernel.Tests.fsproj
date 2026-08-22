@@ -26,6 +26,7 @@
     <Compile Include="ContractTests.fs" />
     <Compile Include="ConformanceTests.fs" />
     <Compile Include="CliTests.fs" />
+    <Compile Include="CheckTests.fs" />
     <Compile Include="ProjectTests.fs" />
     <Compile Include="ContinuationTests.fs" />
     <Compile Include="EffectTests.fs" />

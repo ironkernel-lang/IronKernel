@@ -32,6 +32,7 @@
   "activationEvents": [
     "onLanguage:ironkernel",
     "onCommand:ironkernel.runFile",
+    "onCommand:ironkernel.checkFile",
     "onCommand:ironkernel.compileFile",
     "onCommand:ironkernel.runProject",
     "onCommand:ironkernel.buildProject",
@@ -90,6 +91,11 @@
       {
         "command": "ironkernel.runFile",
         "title": "IronKernel: Run Current File",
+        "category": "IronKernel"
+      },
+      {
+        "command": "ironkernel.checkFile",
+        "title": "IronKernel: Check Current File",
         "category": "IronKernel"
       },
       {
@@ -210,6 +216,11 @@
           "default": "unrestricted",
           "description": "Capability profile used for scripts, packages, and playground execution."
         },
+        "ironkernel.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run 'ik check' on saved IronKernel files and show its diagnostics inline. Requires a trusted workspace."
+        },
         "ironkernel.playground.timeoutMs": {
           "type": "number",
           "default": 10000,
@@ -229,7 +240,7 @@
     "problemPatterns": [
       {
         "name": "ironkernel",
-        "regexp": "^(?:Script error|Compile error|Package error|Project error|Startup error):\\s+(.+):(\\d+):(\\d+):\\s+(.*)$",
+        "regexp": "^(?:Script error|Compile error|Package error|Project error|Startup error|Test startup error|Build error|Check error):\\s+(.+):(\\d+):(\\d+):\\s+(.*)$",
         "file": 1,
         "line": 2,
         "column": 3,
