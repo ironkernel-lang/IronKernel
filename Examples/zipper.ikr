@@ -21,7 +21,7 @@
 (define tree1 '(a (b) (c (d 1 2)) e))
 (define tree2 '(z (u) (v (w 10 12)) y))
 
-(depth-first (lambda (node) (begin (show node) (print "\n") #f)) tree1)
+(depth-first (lambda (node) (begin (print (show node)) (print "\n") #f)) tree1)
 
 (provide! (zipper zipper? z-curr-node z-k)
 
@@ -50,7 +50,7 @@
 				(if 
 					(zipper? x) 
 					(begin 
-						(show (z-curr-node x)) 
+						(print (show (z-curr-node x))) 
 						(print "\n") 
 						(loop ((z-k x) #f)))
 					#f))))

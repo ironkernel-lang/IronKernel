@@ -470,7 +470,7 @@
         <section class="op" id="op-print">
           <div class="op-head"><h3 class="op-name">print / printf / show</h3><span class="op-kind">applicative</span></div>
           <p class="op-sig">(print obj) (printf format arg…) (show value)</p>
-          <p><code>printf</code> uses .NET <code>String.Format</code> placeholders (<code>{0}</code>, <code>{1}</code>, …). <code>show</code> writes the Kernel printed representation.</p>
+          <p><code>printf</code> uses .NET <code>String.Format</code> placeholders (<code>{0}</code>, <code>{1}</code>, …). <code>show</code> renders the Kernel printed representation as a string — pure, available under every profile; write it with <code>(print (show value))</code>.</p>
         </section>
         <section class="op" id="op-ports">
           <div class="op-head"><h3 class="op-name">open-*-file / read / write / …</h3><span class="op-kind">applicative</span></div>

@@ -228,3 +228,26 @@ let ``CLR boolean results are Kernel booleans`` () =
         """(. System.Char IsDigit (. "x" get_Chars 0))""", Bool false
         """(.get System.Environment Is64BitProcess)""", Bool System.Environment.Is64BitProcess
     ]
+
+[<Fact>]
+let ``show renders a value to a string`` () =
+    evalSessionKernel [
+        "(show 5)", Obj "5"
+        "(show (list 1 2))", Obj "(1 2)"
+        // The idiom that used to fail: show wrote to the console itself and
+        // returned inert, so print then rejected #inert with an arity error.
+        "(print (show (list 1 2)))", Inert
+    ]
+
+[<Fact>]
+let ``show requires no authority`` () =
+    IronKernel.RuntimeSourceServices.configure ()
+    IronKernel.Compiler.installBodyCompiler ()
+    let env = makePrimitiveBindingsForProfile Minimal
+    match evalIn env "(show 42)" with
+    | Obj value -> Assert.Equal("42", string value)
+    | other -> failwithf "unexpected show result: %s" (showVal other)
+    // Control: writing is still authority the minimal profile lacks.
+    match evalIn env "(print \"x\")" with
+    | Status message -> Assert.Contains("print", message)
+    | other -> failwithf "print unexpectedly available: %s" (showVal other)
