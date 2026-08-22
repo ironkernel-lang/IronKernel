@@ -114,12 +114,9 @@ let ``completion merges buffer defines with environment symbols`` () =
     let frames =
         session
             [ request 1 "initialize" "{}"
-              didOpen "(define completion-probe 1)\n"
-              // Mid-edit the buffer no longer parses; defines from the last
-              // good parse must still complete.
-              notification
-                  "textDocument/didChange"
-                  """{"textDocument":{"uri":"file:///probe.ikr"},"contentChanges":[{"text":"(define completion-probe 1)\n(completion-pr"}]}"""
+              // The buffer does not parse mid-edit; the recovering reader
+              // still serves its defines -- no didChange, no cache.
+              didOpen "(define completion-probe 1)\n(completion-pr"
               request 2 "textDocument/completion"
                   """{"textDocument":{"uri":"file:///probe.ikr"},"position":{"line":1,"character":14}}"""
               notification
@@ -209,3 +206,28 @@ let ``unknown requests get a method-not-found error`` () =
             | true, value -> Some value
             | _ -> None)
     Assert.Equal(-32601, error.GetProperty("code").GetInt32())
+
+[<Fact>]
+let ``a broken buffer still gets tokens defines and every error`` () =
+    let frames =
+        session
+            [ request 1 "initialize" "{}"
+              didOpen "(define twice (vau (x) e x))\n)\n(twice"
+              request 2 "textDocument/semanticTokens/full"
+                  """{"textDocument":{"uri":"file:///probe.ikr"}}""" ]
+    // Every broken region publishes its own diagnostic.
+    match diagnosticsOf frames with
+    | [ published ] -> Assert.Equal(2, published.GetArrayLength())
+    | published -> failwithf "expected one publication, got %d" published.Length
+    // The recovered tree still classifies the trailing `(twice` use as an
+    // operative -- the buffer's own vau define survives the breakage.
+    let data =
+        (resultOf 2 frames).GetProperty("data").EnumerateArray()
+        |> Seq.map (fun value -> value.GetInt32())
+        |> List.ofSeq
+    Assert.Equal<int list>(
+        [ 0; 1; 6; 0; 0      // define
+          0; 7; 5; 0; 0      // twice (definition)
+          0; 7; 3; 0; 0      // vau
+          2; 1; 5; 0; 0 ],   // twice (use, on the completed trailing form)
+        data)
