@@ -649,3 +649,23 @@ let ``check emits JSON diagnostics and distinguishes exit codes`` () =
         Assert.Equal(0, report.RootElement.GetProperty("diagnostics").GetArrayLength())
     finally
         File.Delete script
+
+[<Fact>]
+let ``repl completion extends the symbol at the cursor`` () =
+    match bootstrapEnv () with
+    | Choice1Of2 error -> failwith (showError error)
+    | Choice2Of2 env ->
+        let prefix, matches = completionCandidates env "(vector-r" 9
+        Assert.Equal("vector-r", prefix)
+        Assert.Contains("vector-ref", matches)
+        match runSource env "completion.ikr" "(define completion-probe 1)" with
+        | Choice1Of2 error -> failwith (showError error)
+        | Choice2Of2 _ -> ()
+        let _, defined = completionCandidates env "completion-pr" 13
+        Assert.Contains("completion-probe", defined)
+        // The word stops at the delimiter before it.
+        let nested, _ = completionCandidates env "(foo (defi" 10
+        Assert.Equal("defi", nested)
+        // Control: a bare tab must not dump the whole environment.
+        let _, none = completionCandidates env "(" 1
+        Assert.Empty none

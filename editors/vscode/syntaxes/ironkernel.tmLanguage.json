@@ -73,7 +73,7 @@
       "patterns": [
         {
           "name": "support.function.applicative.ironkernel",
-          "match": "(?<![:!#$%|*+\\-./<=>?@^_~\\p{L}\\p{N}])(?:make-encapsulation-type|close-output-port|close-input-port|open-output-file|open-input-file|make-prompt-tag|make-environment|read-contents|contract-of|environment\\?|make-vector|vector-set!|vector-ref|await-task|task-delay|clr-opens|call/cc|memoize|promise\\?|for-each|compose|let/cc|printf|vector\\?|zero\\?|null\\?|pair\\?|list\\*|length|apply|begin|force|print|shift|show|load|wrap|eval|unwrap|read-all|write|read|car|cdr|cons|eq\\?|eqv\\?|vector|list|map|any\\?|zip|not\\?|caar|cadr|cdar|cddr|perform|resume|<=|\\+|\\-|\\*|\\/|<|>)(?![:!#$%|*+\\-./<=>?@^_~\\p{L}\\p{N}])"
+          "match": "(?<![:!#$%|*+\\-./<=>?@^_~\\p{L}\\p{N}])(?:make-encapsulation-type|close-output-port|close-input-port|open-output-file|open-input-file|make-prompt-tag|environment-local-symbols|environment-symbols|environment-capabilities|make-environment|read-contents|contract-of|environment\\?|make-vector|vector-set!|vector-ref|await-task|task-delay|clr-opens|call/cc|memoize|promise\\?|for-each|compose|let/cc|printf|vector\\?|zero\\?|null\\?|pair\\?|list\\*|length|apply|begin|force|print|shift|show|load|wrap|eval|unwrap|read-all|write|read|car|cdr|cons|eq\\?|eqv\\?|vector|list|map|any\\?|zip|not\\?|caar|cadr|cdar|cddr|perform|resume|<=|\\+|\\-|\\*|\\/|<|>)(?![:!#$%|*+\\-./<=>?@^_~\\p{L}\\p{N}])"
         }
       ]
     },
