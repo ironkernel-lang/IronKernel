@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IronKernel 0.6.0 — the editor release</title>
+    <meta
+      name="description"
+      content="IronKernel 0.6.0: a language server that resolves instead of guessing, structured diagnostics with reader recovery, environment introspection, and a persistent evaluation session."
+    />
+    <link rel="icon" href="../assets/ironkernel-mark.png" type="image/png" />
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="../index.html">
+          <img src="../assets/ironkernel-mark.png" alt="" width="32" height="32" />
+          IronKernel
+        </a>
+        <ul class="nav-links">
+          <li><a href="../docs/getting-started.html">Start</a></li>
+          <li><a href="../docs/intro.html">Intro</a></li>
+          <li><a href="../docs/guide.html">Guide</a></li>
+          <li><a href="../docs/operators.html">Operators</a></li>
+          <li><a href="https://github.com/ironkernel-lang/IronKernel">GitHub</a></li>
+        </ul>
+      </div>
+    </header>
+
+    <div class="wrap docs-shell">
+      <aside class="docs-side">
+        <h2>News</h2>
+        <ol>
+          <li><a href="ironkernel-0.6.0.html" aria-current="page">0.6.0 — the editor release</a></li>
+        </ol>
+        <h2 style="margin-top: 1.5rem">On this page</h2>
+        <ul>
+          <li><a href="#lsp">A language server in the runtime</a></li>
+          <li><a href="#diagnostics">Diagnostics that recover</a></li>
+          <li><a href="#environments">The environment, visible</a></li>
+          <li><a href="#sessions">Sessions</a></li>
+          <li><a href="#packages">Two new packages</a></li>
+          <li><a href="#breaking">One breaking change</a></li>
+          <li><a href="#get">Get it</a></li>
+        </ul>
+      </aside>
+
+      <article class="docs-main">
+        <h1>IronKernel 0.6.0 — the editor release</h1>
+        <p class="lede">
+          <em>2026-08-23.</em> This release turns the runtime’s own machinery outward into tooling:
+          a language server that <strong>resolves</strong> instead of guessing, diagnostics that survive
+          a half-typed buffer, environments you can finally see, and a persistent evaluation session.
+          The design is recorded in
+          <a href="https://github.com/ironkernel-lang/IronKernel/blob/master/docs/adr/0009-editor-tooling-from-the-runtime-outward.md">ADR 0009 — editor tooling grows from the runtime outward</a>,
+          and every piece below is a phase of it.
+        </p>
+
+        <h2 id="lsp">A language server in the runtime</h2>
+        <p>
+          <code>ik lsp</code> starts a Language Server Protocol server <em>inside</em> the IronKernel
+          binary — the same parser, analyzer, and bootstrapped environment your programs use. The
+          distinction that defines Kernel finally shows up correctly in your editor: operatives and
+          applicatives are colored by <strong>resolving the binding</strong>, not by matching a name
+          list. Define your own operative and it gets the operative color at every use site:
+        </p>
+        <div class="example">
+          <p class="example-caption">semantic tokens know what twice is</p>
+          <pre><code>(define twice (vau (x) e (eval x e) (eval x e)))
+(twice (print "again"))  ; twice colors as an operative — it is one</code></pre>
+        </div>
+        <p>
+          Hover shows a combiner’s contract — <code>(+ number number …) → number — pure, certified</code> —
+          completion offers what is actually in scope (your buffer’s defines included), and diagnostics
+          arrive on every keystroke. The VS Code extension starts the server automatically in trusted
+          workspaces; any editor that speaks LSP can do the same.
+        </p>
+
+        <h2 id="diagnostics">Diagnostics that recover</h2>
+        <p>
+          <code>ik check --json</code> emits machine-readable diagnostics with exact source spans — a
+          versioned contract shared by the language server and anything else you build. And the reader
+          now <strong>recovers</strong>: a broken form no longer swallows the rest of the file. Every
+          broken region reports its own error, the forms that parse still produce trees, and the form
+          you are actively typing is completed with its unclosed brackets so completion and highlighting
+          keep working mid-edit.
+        </p>
+        <div class="example">
+          <p class="example-caption">every region, not just the first</p>
+          <pre><code class="language-bash">$ ik check broken.ikr
+Check error: broken.ikr:1:1: Parse error: …
+Check error: broken.ikr:3:1: Parse error: …</code></pre>
+        </div>
+
+        <h2 id="environments">The environment, visible</h2>
+        <p>
+          Three new applicatives — extensions alongside <code>clr-opens</code>, available under every
+          profile — make environments inspectable from Kernel:
+        </p>
+        <div class="example">
+          <p class="example-caption">enumeration, not authority</p>
+          <pre><code>(environment-local-symbols e)          ; the frame's own bindings, sorted
+(environment-symbols e)                ; everything visible from e
+(environment-capabilities e)           ; e.g. (host-io (generated-clr "safe"))</code></pre>
+        </div>
+        <p>
+          They return <em>names and information, never parent environments as values</em> — the
+          environment type stays encapsulated, so visibility does not become mutation authority.
+          On top of them: <strong>tab completion in the REPL</strong>, an <strong>environment view</strong>
+          in VS Code (capabilities, your buffer’s frame, and every frame beneath it, contracts as
+          tooltips), and a <strong>profile status bar</strong> that shows the active capability profile —
+          and flags when it overrides the project’s own <code>&lt;IronKernelProfile&gt;</code>.
+        </p>
+
+        <h2 id="sessions">Sessions</h2>
+        <p>
+          <code>ik session</code> is a persistent evaluation session over framed JSON-RPC: definitions
+          persist between evals, everything the program prints travels in the response, and errors are
+          structured data — message, rendered diagnostic, and spans — instead of text folded into
+          stdout. In VS Code, <strong>Eval Selection in Session</strong> gives you a REPL that lives
+          inside your editing session. The debug adapter will ride this protocol; the ADR records
+          exactly what it still needs.
+        </p>
+
+        <h2 id="packages">Two new packages</h2>
+        <p>
+          <a href="https://github.com/ironkernel-lang/IronKernel/tree/master/lib/IronKernel.Math">IronKernel.Math</a>
+          brings statistics, combinatorics, and number theory — exact wherever the mathematics allows:
+          means as ratios, <code>isqrt</code> and <code>factorial</code> at any size, primes and
+          factorizations.
+          <a href="https://github.com/ironkernel-lang/IronKernel/tree/master/lib/IronKernel.Time">IronKernel.Time</a>
+          brings dates and durations over <code>System.DateTime</code>/<code>System.TimeSpan</code>,
+          with UTC-disciplined instants the arithmetic tower adds and subtracts directly.
+        </p>
+
+        <h2 id="breaking">One breaking change</h2>
+        <p>
+          <code>show</code> now <strong>renders a value to a string</strong> instead of printing it —
+          what its name always promised. It is pure, needs no host authority, and works under every
+          profile. Code that used bare <code>(show x)</code> to print should say what it means:
+        </p>
+        <div class="example">
+          <p class="example-caption">rendering and printing are two jobs</p>
+          <pre><code>(show (list 1 2))          ; ⇒ "(1 2)" — a string, nothing printed
+(print (show (list 1 2))) ; prints (1 2) — the idiom that used to be an arity error</code></pre>
+        </div>
+
+        <h2 id="get">Get it</h2>
+        <p>
+          Self-contained binaries for Linux, Windows, and macOS (arm64 and x64) — plus the
+          <code>ik</code> tool and SDK packages — are attached to the
+          <a href="https://github.com/ironkernel-lang/IronKernel/releases/tag/v0.6.0">v0.6.0 release</a>.
+          The VS Code extension builds on every push; grab the VSIX from CI and install it with
+          <em>Extensions: Install from VSIX…</em> — see the
+          <a href="../docs/getting-started.html">getting-started guide</a> for runtime discovery.
+        </p>
+
+        <p>
+          <a href="../index.html">← Back to ironkernel.org</a>
+        </p>
+      </article>
+    </div>
+
+    <footer class="footer">
+      <div class="wrap">
+        <span>IronKernel — Apache 2.0</span>
+        <span><a href="../docs/intro.html">Docs</a> · <a href="https://github.com/ironkernel-lang/IronKernel">GitHub</a></span>
+      </div>
+    </footer>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

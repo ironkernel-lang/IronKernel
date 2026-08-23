@@ -155,6 +155,29 @@ img {
   color: var(--copper);
 }
 
+.hero-news {
+  margin: 0 0 1.4rem;
+  font-size: 0.95rem;
+}
+.hero-news a {
+  display: inline-block;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--mute);
+  text-decoration: none;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.hero-news a:hover {
+  border-color: var(--copper);
+  color: var(--ink);
+}
+.hero-news strong {
+  color: var(--copper-hot);
+  font-weight: 600;
+}
+
 .hero-lead {
   max-width: 34rem;
   margin: 0 0 2rem;
