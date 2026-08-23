@@ -101,7 +101,7 @@ results from the same machine and runtime.
 ### CI & releases
 
 - **CI** (`.github/workflows/ci.yml`) runs `dotnet test` on Ubuntu for pushes/PRs to `main`/`master`.
-- **Release** (`.github/workflows/release.yml`) triggers on tags `v*` (e.g. `v0.4.0`): verifies the tag matches the root [`version`](version) file, tests on Linux, then publishes self-contained single-file binaries for `linux-x64`, `win-x64`, `osx-arm64`, and `osx-x64`, plus NuGet packages for `IronKernel.Tool` and `IronKernel.Sdk`. Binaries are attached as `ironkernel-<rid>.tar.gz` (binary + `kernel.ikr` / `promises.ikr`).
+- **Release** (`.github/workflows/release.yml`) triggers on tags `v*` (e.g. `v0.4.0`): verifies the tag matches the root [`version`](version) file, tests on Linux, then publishes self-contained single-file binaries for `linux-x64`, `win-x64`, `osx-arm64`, and `osx-x64`, plus NuGet packages for `IronKernel.Tool` and `IronKernel.Sdk`. The **Publish to NuGet.org** workflow (`nuget-publish.yml`) pushes them via [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) — a nuget.org policy pinned to that workflow file exchanges a GitHub OIDC token for a one-hour key, no stored API key — automatically after each successful Release run, or manually by tag for retries. Binaries are attached as `ironkernel-<rid>.tar.gz` (binary + `kernel.ikr` / `promises.ikr`).
 - **Versioning:** edit the root `version` file (single source of truth via `Directory.Build.props`). Commit, then tag and push `v$(tr -d '[:space:]' < version)`. The release job fails if the tag and file disagree. `ik --version` and the REPL banner read the assembly informational version produced from that file.
 
 ### Website

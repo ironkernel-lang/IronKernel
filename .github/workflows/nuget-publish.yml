@@ -1,0 +1,85 @@
+name: Publish to NuGet.org
+
+# The single publishing workflow: nuget.org's Trusted Publishing policy pins
+# one workflow file, so every path to a publish goes through this one.
+#
+# - Runs automatically when a Release workflow run completes successfully
+#   (a tag-triggered run's head branch is the tag).
+# - Runs manually for an existing release tag -- one cut before the policy
+#   existed, or a retry.
+#
+# No long-lived API key anywhere: the job exchanges a GitHub OIDC token for
+# a one-hour key via NuGet/login, and --skip-duplicate keeps re-runs
+# idempotent.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose packages to publish (e.g. v0.6.0)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  push:
+    name: Push release packages
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.4xx"
+
+      - name: Resolve the release tag
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          TAG="${DISPATCH_TAG:-$RUN_TAG}"
+          case "$TAG" in
+            v*) echo "tag=$TAG" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::'$TAG' is not a release tag."
+              exit 1
+              ;;
+          esac
+
+      - name: Download packages from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.tag.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern '*.nupkg' \
+            --dir packages
+          ls -la packages
+
+      - name: Exchange the OIDC token for a one-hour API key
+        id: login
+        uses: NuGet/login@v1
+        with:
+          # The nuget.org profile that owns the packages. Public on the
+          # package pages, so not a secret; the trusted-publishing policy is
+          # what gates publishing, not this name.
+          user: ademar
+
+      - name: Push to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for pkg in packages/*.nupkg; do
+            dotnet nuget push "$pkg" \
+              --source https://api.nuget.org/v3/index.json \
+              --api-key "$NUGET_API_KEY" \
+              --skip-duplicate
+          done
