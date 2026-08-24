@@ -11,10 +11,6 @@
       (car xs)
       (String/Concat (car xs) (apply str (cdr xs))))))
 
-; CLR methods return boxed System.Boolean (Obj), not Kernel #t/#f.
-(defn (clr-true? x)
-  (eqv? (.ToString x) "True"))
-
 (defn (str=? a b)
   (eqv? a b))
 

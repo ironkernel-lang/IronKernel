@@ -15,9 +15,9 @@
   (define fields (vector "" ""))
   (letrec ((take
             (lambda (chunk)
-              (if (clr-true? (.StartsWith chunk "name="))
+              (if (.StartsWith chunk "name=")
                 (vector-set! fields 0 (.Substring chunk 5))
-                (if (clr-true? (.StartsWith chunk "message="))
+                (if (.StartsWith chunk "message=")
                   (vector-set! fields 1 (.Substring chunk 8))
                   #inert))))
            (walk
