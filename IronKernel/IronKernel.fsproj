@@ -29,6 +29,23 @@
          opt out of. -->
     <UseDefaultPublishRuntimeIdentifier>false</UseDefaultPublishRuntimeIdentifier>
   </PropertyGroup>
+  <!-- The same project packs twice. By default it is the `ik` tool
+       (IronKernel.Tool). With -p:IronKernelPackage=library it is the
+       IronKernel library package: this assembly under lib/, so a host such
+       as jern can reference the parser, compiler, REPL, and session protocol
+       through NuGet instead of a sibling checkout; kernel.ikr and
+       promises.ikr as content copied to the host's output, where
+       Emit/Session find them beside the application; Mono.Terminal bundled
+       rather than declared, because the nuget.org id Mono.Terminal belongs
+       to an unrelated package; IronKernel.Runtime and FParsec as
+       dependencies. -->
+  <PropertyGroup Condition="'$(IronKernelPackage)' == 'library'">
+    <PackAsTool>false</PackAsTool>
+    <PackageId>IronKernel</PackageId>
+    <Description>The IronKernel parser, analyzer, compiler, REPL, and session protocol as a library, with the standard library (kernel.ikr, promises.ikr) copied beside the host. Depends on IronKernel.Runtime. Install IronKernel.Tool for the `ik` command.</Description>
+    <PackageTags>ironkernel;kernel;lisp;scheme;compiler;repl</PackageTags>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IronKernelBundleMonoTerminal</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="Source.fs" />
     <Compile Include="Parser.fs" />
@@ -52,12 +69,33 @@
     <Content Include="kernel.ikr" CopyToOutputDirectory="PreserveNewest" Pack="false" />
     <Content Include="promises.ikr" CopyToOutputDirectory="PreserveNewest" Pack="false" />
   </ItemGroup>
+  <ItemGroup Condition="'$(IronKernelPackage)' == 'library'">
+    <!-- contentFiles/any/net10.0 with copyToOutput: a PackageReference
+         consumer gets both files in its output directory. -->
+    <Content Update="kernel.ikr;promises.ikr" Pack="true" PackageCopyToOutput="true" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FParsec" Version="1.1.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\IronKernel.Runtime\IronKernel.Runtime.fsproj" />
-    <ProjectReference Include="..\Mono.Terminal\Mono.Terminal.csproj" />
+    <ProjectReference Include="..\Mono.Terminal\Mono.Terminal.csproj">
+      <PrivateAssets Condition="'$(IronKernelPackage)' == 'library'">all</PrivateAssets>
+    </ProjectReference>
     <None Include="..\README.md" Pack="true" PackagePath="" />
   </ItemGroup>
+  <!-- Pack collects build output in a project instance that has not built,
+       and resolving references from here would build Mono.Terminal, which a
+       pack with no-build forbids; asking the project for its output path
+       builds nothing. -->
+  <Target Name="IronKernelBundleMonoTerminal" Condition="'$(IronKernelPackage)' == 'library'">
+    <MSBuild Projects="..\Mono.Terminal\Mono.Terminal.csproj" Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_IronKernelMonoTerminalAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(_IronKernelMonoTerminalAssembly)" />
+      <!-- An exe's runtimeconfig.json is packed by default; a library has no use for it. -->
+      <BuiltProjectOutputGroupOutput Remove="$(ProjectRuntimeConfigFilePath)" />
+    </ItemGroup>
+  </Target>
 </Project>

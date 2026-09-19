@@ -33,6 +33,17 @@ jobs:
       - name: Test
         run: dotnet test IronKernel.sln -c Release --no-build --verbosity normal
 
+      # The library pair a host references (see the release workflow). The
+      # exe project packs as a library only with this property, and the
+      # bundled line editor is what a release without it would silently lose.
+      - name: Pack the library packages
+        run: |
+          set -euo pipefail
+          dotnet pack IronKernel.Runtime/IronKernel.Runtime.fsproj -c Release --no-build -o /tmp/packages
+          dotnet pack IronKernel/IronKernel.fsproj -c Release --no-build -o /tmp/packages -p:IronKernelPackage=library
+          version="$(tr -d '[:space:]' < version)"
+          test "$(unzip -l "/tmp/packages/IronKernel.$version.nupkg" | grep -cE 'lib/net10.0/Mono.Terminal.dll|contentFiles/any/net10.0/kernel.ikr|contentFiles/any/net10.0/promises.ikr')" -eq 3
+
       - name: Test first-party packages (lib/)
         run: |
           bin="$PWD/IronKernel/bin/Release/net10.0/IronKernel"

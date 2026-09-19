@@ -6,7 +6,13 @@
     <Tailcalls>true</Tailcalls>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <PackageId>IronKernel.Runtime</PackageId>
+    <Description>The IronKernel core: the Kernel AST, evaluator, symbol table, primitives, and CLR interop. Hosts that embed IronKernel reference this and the IronKernel package.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>ironkernel;kernel;lisp;scheme;interpreter</PackageTags>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="Monads.fs" />
     <Compile Include="Ast.fs" />

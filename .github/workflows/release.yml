@@ -118,6 +118,19 @@ jobs:
           -c Release
           -o packages
           -p:Version=${{ needs.version.outputs.version }}
+      # The library pair a host references: the core, and the exe project
+      # packed as a library (see IronKernel.fsproj).
+      - run: >
+          dotnet pack IronKernel.Runtime/IronKernel.Runtime.fsproj
+          -c Release
+          -o packages
+          -p:Version=${{ needs.version.outputs.version }}
+      - run: >
+          dotnet pack IronKernel/IronKernel.fsproj
+          -c Release
+          -o packages
+          -p:Version=${{ needs.version.outputs.version }}
+          -p:IronKernelPackage=library
       - uses: actions/upload-artifact@v4
         with:
           name: ironkernel-nuget-packages
